@@ -94,7 +94,7 @@ class SeriesService:
             )
         return output.getvalue()
 
-    def import_csv(self, content: str, *, replace: bool = False) -> dict[str, int]:
+    def import_csv(self, content: str, *, replace: bool = False, batch_size: int = 1000) -> dict[str, int]:
         reader = csv.DictReader(io.StringIO(content))
         required = {"series_tag", "display_name", "post_count", "priority", "status", "note"}
         if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
@@ -106,12 +106,14 @@ class SeriesService:
 
         created = 0
         updated = 0
-        for row in reader:
+        merged_duplicates = 0
+        pending: dict[str, Series] = {}
+
+        for row_index, row in enumerate(reader, start=1):
             series_tag = (row.get("series_tag") or "").strip()
             if not series_tag:
                 continue
 
-            existing = self.get_by_tag(series_tag)
             payload = {
                 "display_name": (row.get("display_name") or "").strip(),
                 "post_count": int(row.get("post_count") or 0),
@@ -120,16 +122,33 @@ class SeriesService:
                 "note": (row.get("note") or "").strip() or None,
             }
 
+            existing = pending.get(series_tag)
+            if existing is None:
+                existing = self.get_by_tag(series_tag)
+
             if existing:
                 for field, value in payload.items():
                     setattr(existing, field, value)
-                updated += 1
+                if series_tag in pending:
+                    merged_duplicates += 1
+                else:
+                    updated += 1
             else:
-                self.db.add(Series(series_tag=series_tag, **payload))
+                series = Series(series_tag=series_tag, **payload)
+                self.db.add(series)
+                pending[series_tag] = series
                 created += 1
 
+            if batch_size > 0 and row_index % batch_size == 0:
+                self.db.commit()
+                pending.clear()
+
         self.db.commit()
-        return {"created": created, "updated": updated}
+        return {
+            "created": created,
+            "updated": updated,
+            "merged_duplicates": merged_duplicates,
+        }
 
     def import_from_file(self, file_path: Path, *, replace: bool = False) -> dict[str, int]:
         content = file_path.read_text(encoding="utf-8-sig")

@@ -142,7 +142,10 @@ export function SeriesPage() {
     if (!file) return;
     try {
       const result = await api.importSeriesCsv(file, importReplace);
-      alert(`Import complete: created ${result.created}, updated ${result.updated}`);
+      alert(
+        `Import complete: created ${result.created}, updated ${result.updated}` +
+          (result.merged_duplicates ? `, merged duplicates ${result.merged_duplicates}` : ""),
+      );
       await loadSeries();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to import CSV");

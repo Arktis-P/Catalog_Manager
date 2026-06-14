@@ -99,6 +99,6 @@ export const api = {
       const detail = await response.text();
       throw new Error(detail || "CSV import failed");
     }
-    return response.json() as Promise<{ created: number; updated: number }>;
+    return response.json() as Promise<{ created: number; updated: number; merged_duplicates?: number }>;
   },
 };

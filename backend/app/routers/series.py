@@ -60,6 +60,8 @@ async def import_series_csv(
         result = service.import_csv(content, replace=replace)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Import failed: {exc}") from exc
     return result
 
 
