@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import settings
@@ -51,3 +51,20 @@ def init_db() -> None:
         (settings.output_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     Base.metadata.create_all(bind=engine)
+    _migrate_series_columns()
+
+
+def _migrate_series_columns() -> None:
+    inspector = inspect(engine)
+    if "series" not in inspector.get_table_names():
+        return
+
+    existing = {column["name"] for column in inspector.get_columns("series")}
+    migrations = {
+        "last_collect_created": "ALTER TABLE series ADD COLUMN last_collect_created INTEGER NOT NULL DEFAULT 0",
+        "last_collect_skipped": "ALTER TABLE series ADD COLUMN last_collect_skipped INTEGER NOT NULL DEFAULT 0",
+    }
+    with engine.begin() as connection:
+        for column_name, statement in migrations.items():
+            if column_name not in existing:
+                connection.execute(text(statement))

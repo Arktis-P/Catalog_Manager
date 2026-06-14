@@ -2,14 +2,14 @@ import csv
 import io
 from pathlib import Path
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.character import Character
 from app.models.image import Image
 from app.models.review import Review
 from app.models.series import Series
-from app.schemas.series import SeriesCreate, SeriesUpdate
+from app.schemas.series import SeriesCreate, SeriesUpdate, SeriesResponse
 
 
 class SeriesService:
@@ -51,6 +51,37 @@ class SeriesService:
         total = query.count()
         items = query.offset(skip).limit(limit).all()
         return items, total
+
+    def get_character_counts(self, series_ids: list[int]) -> dict[int, int]:
+        if not series_ids:
+            return {}
+        rows = (
+            self.db.query(Character.series_id, func.count(Character.id))
+            .filter(Character.series_id.in_(series_ids))
+            .group_by(Character.series_id)
+            .all()
+        )
+        return {series_id: count for series_id, count in rows}
+
+    def to_response(self, series: Series, *, character_count: int | None = None) -> SeriesResponse:
+        return SeriesResponse(
+            id=series.id,
+            series_tag=series.series_tag,
+            display_name=series.display_name,
+            post_count=series.post_count,
+            priority=series.priority,
+            status=series.status,
+            note=series.note,
+            character_count=character_count if character_count is not None else 0,
+            last_collect_created=series.last_collect_created,
+            last_collect_skipped=series.last_collect_skipped,
+            created_at=series.created_at,
+            updated_at=series.updated_at,
+        )
+
+    def to_response_list(self, items: list[Series]) -> list[SeriesResponse]:
+        counts = self.get_character_counts([series.id for series in items])
+        return [self.to_response(series, character_count=counts.get(series.id, 0)) for series in items]
 
     def get_series(self, series_id: int) -> Series | None:
         return self.db.query(Series).filter(Series.id == series_id).first()

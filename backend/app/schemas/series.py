@@ -40,6 +40,9 @@ class SeriesResponse(SeriesBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    character_count: int = 0
+    last_collect_created: int = 0
+    last_collect_skipped: int = 0
     created_at: datetime
     updated_at: datetime
 

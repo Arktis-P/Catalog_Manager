@@ -15,7 +15,7 @@ const emptyForm: SeriesCreatePayload = {
 };
 
 export function SeriesPage() {
-  const { startCollect, isCollectingSeries } = useCollectJobs();
+  const { startCollect, isCollectingSeries, lastCompletedJob, clearLastCompletedJob } = useCollectJobs();
   const [items, setItems] = useState<Series[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [search, setSearch] = useState("");
@@ -62,6 +62,15 @@ export function SeriesPage() {
       .then(setDanbooruStatus)
       .catch(() => setDanbooruStatus(null));
   }, []);
+
+  useEffect(() => {
+    if (!lastCompletedJob) {
+      return;
+    }
+    void loadSeries().finally(() => {
+      clearLastCompletedJob();
+    });
+  }, [lastCompletedJob?.job_id]);
 
   const openCreateModal = () => {
     setModalMode("create");
@@ -238,29 +247,61 @@ export function SeriesPage() {
             </div>
             <div style={{ overflowX: "auto" }}>
               <table className="data-table">
+                <colgroup>
+                  <col className="col-series-tag" />
+                  <col className="col-display-name" />
+                  <col className="col-count" />
+                  <col className="col-count" />
+                  <col className="col-last-collect" />
+                  <col className="col-priority" />
+                  <col className="col-status" />
+                  <col className="col-note" />
+                  <col className="col-actions" />
+                </colgroup>
                 <thead>
                   <tr>
-                    <th>series_tag</th>
-                    <th>display_name</th>
-                    <th>post_count</th>
-                    <th>priority</th>
-                    <th>status</th>
-                    <th>note</th>
-                    <th>Actions</th>
+                    <th className="col-series-tag">series_tag</th>
+                    <th className="col-display-name">display_name</th>
+                    <th className="col-count">post_count</th>
+                    <th className="col-count">characters</th>
+                    <th className="col-last-collect">last collect</th>
+                    <th className="col-priority">priority</th>
+                    <th className="col-status">status</th>
+                    <th className="col-note">note</th>
+                    <th className="col-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((series) => (
                     <tr key={series.id}>
-                      <td>{series.series_tag}</td>
-                      <td>{series.display_name}</td>
-                      <td>{series.post_count.toLocaleString()}</td>
-                      <td>{series.priority}</td>
-                      <td>
+                      <td className="col-series-tag cell-ellipsis" title={series.series_tag}>
+                        {series.series_tag}
+                      </td>
+                      <td className="col-display-name cell-ellipsis" title={series.display_name}>
+                        {series.display_name}
+                      </td>
+                      <td className="col-count">{series.post_count.toLocaleString()}</td>
+                      <td className="col-count">{series.character_count.toLocaleString()}</td>
+                      <td className="col-last-collect">
+                        {series.last_collect_created > 0 ? (
+                          <span className="badge badge-success">+{series.last_collect_created.toLocaleString()}</span>
+                        ) : (
+                          "-"
+                        )}
+                        {series.last_collect_skipped > 0 ? (
+                          <span className="catalog-card-subtitle" style={{ marginLeft: 8 }}>
+                            skip {series.last_collect_skipped.toLocaleString()}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="col-priority">{series.priority}</td>
+                      <td className="col-status">
                         <span className="badge">{series.status}</span>
                       </td>
-                      <td>{series.note || "-"}</td>
-                      <td>
+                      <td className="col-note cell-ellipsis" title={series.note || undefined}>
+                        {series.note || "-"}
+                      </td>
+                      <td className="col-actions">
                         <div className="table-actions">
                           <button
                             className="btn btn-small btn-primary"

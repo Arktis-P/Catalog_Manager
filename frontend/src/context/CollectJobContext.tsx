@@ -4,11 +4,13 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { api } from "../api/client";
 import type { CollectJob } from "../types";
+import { ensureNotificationPermission, showTaskCompleteNotification } from "../utils/notifications";
 
 interface CollectJobContextValue {
   jobs: CollectJob[];
@@ -17,6 +19,8 @@ interface CollectJobContextValue {
   isCollectingSeries: (seriesId: number) => boolean;
   lastError: string | null;
   clearLastError: () => void;
+  lastCompletedJob: CollectJob | null;
+  clearLastCompletedJob: () => void;
 }
 
 const CollectJobContext = createContext<CollectJobContextValue | null>(null);
@@ -31,10 +35,21 @@ function upsertJob(jobs: CollectJob[], nextJob: CollectJob): CollectJob[] {
   return copy;
 }
 
+function notifyCollectComplete(job: CollectJob) {
+  const title = `${job.series_tag} 캐릭터 수집 완료`;
+  const body =
+    job.created > 0
+      ? `추가 ${job.created} · skip ${job.skipped_existing} · 총 discovered ${job.discovered}`
+      : `신규 추가 없음 · skip ${job.skipped_existing}`;
+  showTaskCompleteNotification(title, body);
+}
+
 export function CollectJobProvider({ children }: { children: ReactNode }) {
   const [jobs, setJobs] = useState<CollectJob[]>([]);
   const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(() => new Set());
   const [lastError, setLastError] = useState<string | null>(null);
+  const [lastCompletedJob, setLastCompletedJob] = useState<CollectJob | null>(null);
+  const notifiedJobIdsRef = useRef<Set<string>>(new Set());
 
   const visibleJobs = useMemo(
     () => jobs.filter((job) => !dismissedJobIds.has(job.job_id)),
@@ -49,6 +64,31 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
     [visibleJobs],
   );
 
+  useEffect(() => {
+    void ensureNotificationPermission();
+  }, []);
+
+  const handleJobUpdates = useCallback((updates: CollectJob[], previous: CollectJob[]) => {
+    for (const job of updates) {
+      const prior = previous.find((item) => item.job_id === job.job_id);
+      if (!prior || prior.status === job.status) {
+        continue;
+      }
+      if (job.status === "completed" && !notifiedJobIdsRef.current.has(job.job_id)) {
+        notifiedJobIdsRef.current.add(job.job_id);
+        notifyCollectComplete(job);
+        setLastCompletedJob(job);
+      }
+      if (job.status === "failed" && !notifiedJobIdsRef.current.has(job.job_id)) {
+        notifiedJobIdsRef.current.add(job.job_id);
+        showTaskCompleteNotification(
+          `${job.series_tag} 캐릭터 수집 실패`,
+          job.error || job.message,
+        );
+      }
+    }
+  }, []);
+
   const refreshJobs = useCallback(async () => {
     try {
       const response = await api.listCollectJobs();
@@ -57,12 +97,13 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
         for (const job of response.items) {
           merged = upsertJob(merged, job);
         }
+        handleJobUpdates(response.items, current);
         return merged;
       });
     } catch {
       // Ignore refresh errors during polling; pages can still start jobs.
     }
-  }, []);
+  }, [handleJobUpdates]);
 
   useEffect(() => {
     void refreshJobs();
@@ -77,6 +118,7 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
       try {
         const updates = await Promise.all(runningJobIds.map((jobId) => api.getCollectJob(jobId)));
         setJobs((current) => {
+          handleJobUpdates(updates, current);
           let merged = current;
           for (const job of updates) {
             merged = upsertJob(merged, job);
@@ -93,7 +135,7 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
       void poll();
     }, 800);
     return () => window.clearInterval(timer);
-  }, [runningJobIds.join("|")]);
+  }, [runningJobIds.join("|"), handleJobUpdates]);
 
   const startCollect = useCallback(async (seriesId: number) => {
     setLastError(null);
@@ -131,8 +173,10 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
       isCollectingSeries,
       lastError,
       clearLastError: () => setLastError(null),
+      lastCompletedJob,
+      clearLastCompletedJob: () => setLastCompletedJob(null),
     }),
-    [visibleJobs, startCollect, dismissJob, isCollectingSeries, lastError],
+    [visibleJobs, startCollect, dismissJob, isCollectingSeries, lastError, lastCompletedJob],
   );
 
   return <CollectJobContext.Provider value={value}>{children}</CollectJobContext.Provider>;

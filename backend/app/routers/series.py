@@ -36,7 +36,7 @@ def list_series(
         skip=skip,
         limit=limit,
     )
-    return SeriesListResponse(items=items, total=total)
+    return SeriesListResponse(items=service.to_response_list(items), total=total)
 
 
 @router.get("/export/csv")
@@ -70,14 +70,16 @@ def get_series(series_id: int, service: SeriesService = Depends(get_series_servi
     series = service.get_series(series_id)
     if not series:
         raise HTTPException(status_code=404, detail="Series not found")
-    return series
+    counts = service.get_character_counts([series.id])
+    return service.to_response(series, character_count=counts.get(series.id, 0))
 
 
 @router.post("", response_model=SeriesResponse, status_code=201)
 def create_series(data: SeriesCreate, service: SeriesService = Depends(get_series_service)):
     if service.get_by_tag(data.series_tag):
         raise HTTPException(status_code=409, detail="Series tag already exists")
-    return service.create_series(data)
+    series = service.create_series(data)
+    return service.to_response(series, character_count=0)
 
 
 @router.patch("/{series_id}", response_model=SeriesResponse)
@@ -92,7 +94,9 @@ def update_series(
     if data.series_tag and data.series_tag != series.series_tag:
         if service.get_by_tag(data.series_tag):
             raise HTTPException(status_code=409, detail="Series tag already exists")
-    return service.update_series(series, data)
+    updated = service.update_series(series, data)
+    counts = service.get_character_counts([updated.id])
+    return service.to_response(updated, character_count=counts.get(updated.id, 0))
 
 
 @router.delete("/{series_id}", status_code=204)

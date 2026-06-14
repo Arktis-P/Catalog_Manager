@@ -118,6 +118,9 @@ class CharacterService:
         elif series.status == "collecting":
             series.status = "collecting"
 
+        series.last_collect_created = created
+        series.last_collect_skipped = skipped_existing
+
         self.db.commit()
         return CharacterCollectResult(
             series_tag=series.series_tag,

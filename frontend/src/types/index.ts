@@ -6,6 +6,9 @@ export interface Series {
   priority: number;
   status: string;
   note: string | null;
+  character_count: number;
+  last_collect_created: number;
+  last_collect_skipped: number;
   created_at: string;
   updated_at: string;
 }
