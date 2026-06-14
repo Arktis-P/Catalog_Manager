@@ -1,4 +1,5 @@
 import type {
+  AppSettings,
   CatalogFilters,
   CatalogListResponse,
   CatalogStats,
@@ -79,9 +80,17 @@ export const api = {
   startCollectCharactersJob: (seriesId: number) =>
     request<CollectJob>(`/characters/series/${seriesId}/collect/start`, { method: "POST" }),
 
+  startAppearanceExtractJob: (seriesId: number) =>
+    request<CollectJob>(`/characters/series/${seriesId}/appearance/start`, { method: "POST" }),
+
   getCollectJob: (jobId: string) => request<CollectJob>(`/characters/collect/jobs/${jobId}`),
 
   listCollectJobs: () => request<{ items: CollectJob[] }>("/characters/collect/jobs"),
+
+  getSettings: () => request<AppSettings>("/settings"),
+
+  updateSettings: (payload: Pick<AppSettings, "danbooru_collect_max_concurrent">) =>
+    request<AppSettings>("/settings", { method: "PATCH", body: JSON.stringify(payload) }),
 
   getDanbooruStatus: () => request<DanbooruStatus>("/characters/danbooru/status"),
 

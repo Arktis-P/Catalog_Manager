@@ -15,7 +15,15 @@ const emptyForm: SeriesCreatePayload = {
 };
 
 export function SeriesPage() {
-  const { startCollect, isCollectingSeries, lastCompletedJob, clearLastCompletedJob } = useCollectJobs();
+  const {
+    startCollect,
+    startAppearanceExtract,
+    isProcessingSeries,
+    isCollectingSeries,
+    isExtractingAppearanceSeries,
+    lastCompletedJob,
+    clearLastCompletedJob,
+  } = useCollectJobs();
   const [items, setItems] = useState<Series[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [search, setSearch] = useState("");
@@ -120,6 +128,17 @@ export function SeriesPage() {
       setError(err instanceof Error ? err.message : "Failed to collect characters");
     }
   };
+
+  const handleExtractAppearance = async (series: Series) => {
+    setError(null);
+    try {
+      await startAppearanceExtract(series.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to extract appearance tags");
+    }
+  };
+
+  const canExtractAppearance = (series: Series) => series.character_count > 0;
 
   const handleDelete = async (series: Series) => {
     if (!window.confirm(`Delete series "${series.series_tag}"?`)) return;
@@ -306,10 +325,29 @@ export function SeriesPage() {
                           <button
                             className="btn btn-small btn-primary"
                             type="button"
-                            disabled={isCollectingSeries(series.id) || danbooruStatus?.ready === false}
+                            disabled={
+                              isProcessingSeries(series.id) || danbooruStatus?.ready === false
+                            }
                             onClick={() => void handleCollectCharacters(series)}
                           >
                             {isCollectingSeries(series.id) ? "Collecting..." : "Collect"}
+                          </button>
+                          <button
+                            className="btn btn-small"
+                            type="button"
+                            disabled={
+                              !canExtractAppearance(series) ||
+                              isProcessingSeries(series.id) ||
+                              danbooruStatus?.ready === false
+                            }
+                            title={
+                              canExtractAppearance(series)
+                                ? "Danbooru related tags 기반 외형 태그 추출"
+                                : "캐릭터 수집 완료 후 사용 가능"
+                            }
+                            onClick={() => void handleExtractAppearance(series)}
+                          >
+                            {isExtractingAppearanceSeries(series.id) ? "Extracting..." : "Appearance"}
                           </button>
                           <button className="btn btn-small" type="button" onClick={() => openEditModal(series)}>
                             Edit

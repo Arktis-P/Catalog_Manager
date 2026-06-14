@@ -172,6 +172,15 @@ class DanbooruClient:
             raise RuntimeError(f"Unexpected Danbooru count response: {payload}")
         return int(payload.get("counts", {}).get("posts", 0))
 
+    def get_related_tags(self, query: str, *, category: int | None = 0) -> dict[str, object]:
+        params: dict[str, object] = {"query": query}
+        if category is not None:
+            params["category"] = category
+        payload = self._get_json("related_tag.json", params)
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Unexpected Danbooru related_tag response: {payload}")
+        return payload
+
     @staticmethod
     def build_search_tags(character_tag: str, series_tag: str) -> str:
         return f"{character_tag} {series_tag}"

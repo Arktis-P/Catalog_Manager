@@ -4,6 +4,7 @@ import { CatalogPage } from "./pages/CatalogPage";
 import { GenerationPage } from "./pages/GenerationPage";
 import { ReviewPage } from "./pages/ReviewPage";
 import { SeriesPage } from "./pages/SeriesPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
         <Route path="review" element={<ReviewPage />} />
         <Route path="series" element={<SeriesPage />} />
         <Route path="generation" element={<GenerationPage />} />
+        <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

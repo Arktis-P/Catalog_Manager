@@ -27,6 +27,7 @@ class CollectJobResponse(BaseModel):
     job_id: str
     series_id: int
     series_tag: str
+    job_type: str = "character_collect"
     status: str
     phase: str
     message: str
@@ -35,6 +36,7 @@ class CollectJobResponse(BaseModel):
     discovered: int
     created: int
     skipped_existing: int
+    updated: int = 0
     error: str | None = None
     started_at: str
     finished_at: str | None = None
@@ -45,6 +47,7 @@ class CollectJobResponse(BaseModel):
             job_id=state.job_id,
             series_id=state.series_id,
             series_tag=state.series_tag,
+            job_type=getattr(state, "job_type", "character_collect"),
             status=state.status,
             phase=state.phase,
             message=state.message,
@@ -53,6 +56,7 @@ class CollectJobResponse(BaseModel):
             discovered=state.discovered,
             created=state.created,
             skipped_existing=state.skipped_existing,
+            updated=getattr(state, "updated", 0),
             error=state.error,
             started_at=state.started_at,
             finished_at=state.finished_at,

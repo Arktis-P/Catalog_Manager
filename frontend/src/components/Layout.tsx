@@ -6,6 +6,7 @@ const navItems = [
   { to: "/review", label: "Review" },
   { to: "/series", label: "Series" },
   { to: "/generation", label: "Generation" },
+  { to: "/settings", label: "Settings" },
 ];
 
 export function Layout() {

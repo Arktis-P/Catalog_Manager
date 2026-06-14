@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.integrations.danbooru.client import DanbooruAuthError, DanbooruClient
+from app.models.character import Character
 from app.models.series import Series
 from app.schemas.character import CharacterResponse, CharacterSeriesUpdate
 from app.schemas.character_collect import (
@@ -14,7 +15,7 @@ from app.schemas.character_collect import (
     CollectJobResponse,
 )
 from app.services.character_service import CharacterService
-from app.services.collect_job_manager import collect_job_manager
+from app.services.collect_job_manager import series_job_manager
 
 router = APIRouter(prefix="/characters", tags=["characters"])
 
@@ -120,19 +121,36 @@ def start_collect_characters_for_series(series_id: int, db: Session = Depends(ge
         raise HTTPException(status_code=404, detail="Series not found")
     if not settings.danbooru_configured:
         raise HTTPException(status_code=400, detail="Configure Danbooru credentials in input/danbooru.env first.")
-    job = collect_job_manager.start_series_collect(series_id)
+    job = series_job_manager.start_series_collect(series_id)
+    return CollectJobResponse.from_state(job)
+
+
+@router.post("/series/{series_id}/appearance/start", response_model=CollectJobResponse)
+def start_appearance_extract_for_series(series_id: int, db: Session = Depends(get_db)):
+    series = db.query(Series).filter(Series.id == series_id).first()
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if not settings.danbooru_configured:
+        raise HTTPException(status_code=400, detail="Configure Danbooru credentials in input/danbooru.env first.")
+    character_count = db.query(Character).filter(Character.series_id == series_id).count()
+    if character_count <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Collect characters for this series before extracting appearance tags.",
+        )
+    job = series_job_manager.start_appearance_extract(series_id)
     return CollectJobResponse.from_state(job)
 
 
 @router.get("/collect/jobs", response_model=CollectJobListResponse)
 def list_collect_jobs():
-    jobs = collect_job_manager.list_visible_jobs()
+    jobs = series_job_manager.list_visible_jobs()
     return CollectJobListResponse(items=[CollectJobResponse.from_state(job) for job in jobs])
 
 
 @router.get("/collect/jobs/{job_id}", response_model=CollectJobResponse)
 def get_collect_job(job_id: str):
-    job = collect_job_manager.get_job(job_id)
+    job = series_job_manager.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Collect job not found")
     return CollectJobResponse.from_state(job)
@@ -140,7 +158,7 @@ def get_collect_job(job_id: str):
 
 @router.get("/series/{series_id}/collect/active", response_model=CollectJobResponse)
 def get_active_collect_job_for_series(series_id: int):
-    job = collect_job_manager.get_active_job_for_series(series_id)
+    job = series_job_manager.get_active_job_for_series(series_id)
     if not job:
         raise HTTPException(status_code=404, detail="No active collect job for this series")
     return CollectJobResponse.from_state(job)

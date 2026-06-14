@@ -66,6 +66,7 @@ export interface CollectJob {
   job_id: string;
   series_id: number;
   series_tag: string;
+  job_type: "character_collect" | "appearance_extract";
   status: string;
   phase: string;
   message: string;
@@ -74,9 +75,15 @@ export interface CollectJob {
   discovered: number;
   created: number;
   skipped_existing: number;
+  updated: number;
   error?: string | null;
   started_at: string;
   finished_at?: string | null;
+}
+
+export interface AppSettings {
+  danbooru_collect_max_concurrent: number;
+  danbooru_request_delay: number;
 }
 
 export interface DanbooruStatus {

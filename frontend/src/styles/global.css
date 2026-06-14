@@ -279,6 +279,31 @@ button {
   margin-bottom: 16px;
 }
 
+.success-banner {
+  background: rgba(76, 175, 135, 0.12);
+  border: 1px solid rgba(76, 175, 135, 0.35);
+  color: #9fdcc0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.field-help {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.settings-range-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-range-row input[type="range"] {
+  flex: 1;
+}
+
 .catalog-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -409,8 +434,8 @@ button {
 }
 
 .data-table .col-actions {
-  width: 280px;
-  max-width: 280px;
+  width: 380px;
+  max-width: 380px;
   white-space: nowrap;
 }
 

@@ -15,8 +15,11 @@ import { ensureNotificationPermission, showTaskCompleteNotification } from "../u
 interface CollectJobContextValue {
   jobs: CollectJob[];
   startCollect: (seriesId: number) => Promise<CollectJob>;
+  startAppearanceExtract: (seriesId: number) => Promise<CollectJob>;
   dismissJob: (jobId: string) => void;
+  isProcessingSeries: (seriesId: number) => boolean;
   isCollectingSeries: (seriesId: number) => boolean;
+  isExtractingAppearanceSeries: (seriesId: number) => boolean;
   lastError: string | null;
   clearLastError: () => void;
   lastCompletedJob: CollectJob | null;
@@ -35,7 +38,14 @@ function upsertJob(jobs: CollectJob[], nextJob: CollectJob): CollectJob[] {
   return copy;
 }
 
-function notifyCollectComplete(job: CollectJob) {
+function notifyJobComplete(job: CollectJob) {
+  if (job.job_type === "appearance_extract") {
+    const title = `${job.series_tag} 외형 태그 추출 완료`;
+    const body = `${job.updated}/${job.total}명 갱신`;
+    showTaskCompleteNotification(title, body);
+    return;
+  }
+
   const title = `${job.series_tag} 캐릭터 수집 완료`;
   const body =
     job.created > 0
@@ -76,15 +86,16 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
       }
       if (job.status === "completed" && !notifiedJobIdsRef.current.has(job.job_id)) {
         notifiedJobIdsRef.current.add(job.job_id);
-        notifyCollectComplete(job);
+        notifyJobComplete(job);
         setLastCompletedJob(job);
       }
       if (job.status === "failed" && !notifiedJobIdsRef.current.has(job.job_id)) {
         notifiedJobIdsRef.current.add(job.job_id);
-        showTaskCompleteNotification(
-          `${job.series_tag} 캐릭터 수집 실패`,
-          job.error || job.message,
-        );
+        const title =
+          job.job_type === "appearance_extract"
+            ? `${job.series_tag} 외형 태그 추출 실패`
+            : `${job.series_tag} 캐릭터 수집 실패`;
+        showTaskCompleteNotification(title, job.error || job.message);
       }
     }
   }, []);
@@ -126,7 +137,7 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
           return merged;
         });
       } catch (err) {
-        setLastError(err instanceof Error ? err.message : "Failed to poll collect progress");
+        setLastError(err instanceof Error ? err.message : "Failed to poll background jobs");
       }
     };
 
@@ -137,9 +148,7 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(timer);
   }, [runningJobIds.join("|"), handleJobUpdates]);
 
-  const startCollect = useCallback(async (seriesId: number) => {
-    setLastError(null);
-    const job = await api.startCollectCharactersJob(seriesId);
+  const registerStartedJob = useCallback((job: CollectJob) => {
     setDismissedJobIds((current) => {
       if (!current.has(job.job_id)) {
         return current;
@@ -149,34 +158,77 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
       return next;
     });
     setJobs((current) => upsertJob(current, job));
-    return job;
   }, []);
+
+  const startCollect = useCallback(async (seriesId: number) => {
+    setLastError(null);
+    const job = await api.startCollectCharactersJob(seriesId);
+    registerStartedJob(job);
+    return job;
+  }, [registerStartedJob]);
+
+  const startAppearanceExtract = useCallback(async (seriesId: number) => {
+    setLastError(null);
+    const job = await api.startAppearanceExtractJob(seriesId);
+    registerStartedJob(job);
+    return job;
+  }, [registerStartedJob]);
 
   const dismissJob = useCallback((jobId: string) => {
     setDismissedJobIds((current) => new Set(current).add(jobId));
   }, []);
 
-  const isCollectingSeries = useCallback(
-    (seriesId: number) =>
+  const isActiveJobForSeries = useCallback(
+    (seriesId: number, jobType?: CollectJob["job_type"]) =>
       visibleJobs.some(
         (job) =>
-          job.series_id === seriesId && (job.status === "queued" || job.status === "running"),
+          job.series_id === seriesId &&
+          (jobType ? job.job_type === jobType : true) &&
+          (job.status === "queued" || job.status === "running"),
       ),
     [visibleJobs],
+  );
+
+  const isProcessingSeries = useCallback(
+    (seriesId: number) => isActiveJobForSeries(seriesId),
+    [isActiveJobForSeries],
+  );
+
+  const isCollectingSeries = useCallback(
+    (seriesId: number) => isActiveJobForSeries(seriesId, "character_collect"),
+    [isActiveJobForSeries],
+  );
+
+  const isExtractingAppearanceSeries = useCallback(
+    (seriesId: number) => isActiveJobForSeries(seriesId, "appearance_extract"),
+    [isActiveJobForSeries],
   );
 
   const value = useMemo(
     () => ({
       jobs: visibleJobs,
       startCollect,
+      startAppearanceExtract,
       dismissJob,
+      isProcessingSeries,
       isCollectingSeries,
+      isExtractingAppearanceSeries,
       lastError,
       clearLastError: () => setLastError(null),
       lastCompletedJob,
       clearLastCompletedJob: () => setLastCompletedJob(null),
     }),
-    [visibleJobs, startCollect, dismissJob, isCollectingSeries, lastError, lastCompletedJob],
+    [
+      visibleJobs,
+      startCollect,
+      startAppearanceExtract,
+      dismissJob,
+      isProcessingSeries,
+      isCollectingSeries,
+      isExtractingAppearanceSeries,
+      lastError,
+      lastCompletedJob,
+    ],
   );
 
   return <CollectJobContext.Provider value={value}>{children}</CollectJobContext.Provider>;
