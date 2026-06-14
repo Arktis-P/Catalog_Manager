@@ -9,7 +9,7 @@ function getProgressPercent(job: CollectJob): number | null {
   if (job.status === "completed") {
     return 100;
   }
-  if ((job.phase === "counting" || job.phase === "saving") && job.total > 0) {
+  if (job.total > 0) {
     return Math.min(100, Math.round((job.current / job.total) * 100));
   }
   return null;
@@ -17,24 +17,45 @@ function getProgressPercent(job: CollectJob): number | null {
 
 function phaseLabel(phase: string): string {
   switch (phase) {
+    case "discovering_pattern":
+      return "1/3 패턴 검색";
+    case "discovering_posts_scan":
+      return "2/3 post 스캔";
+    case "discovering_posts_verify":
+      return "2/3 post 보완";
     case "discovering":
       return "캐릭터 tag 발견";
     case "counting":
-      return "post_count 조회";
+      return "3/3 post_count";
     case "saving":
       return "DB 저장";
     case "completed":
       return "완료";
     case "failed":
       return "실패";
+    case "starting":
+      return "시작";
     default:
       return "준비 중";
   }
 }
 
+function formatEta(job: CollectJob): string | null {
+  if (job.phase !== "counting" || job.total <= 0 || job.current <= 0) {
+    return null;
+  }
+  const remaining = job.total - job.current;
+  const seconds = remaining * 0.5;
+  if (seconds < 60) {
+    return `약 ${Math.ceil(seconds)}초 남음`;
+  }
+  return `약 ${Math.ceil(seconds / 60)}분 남음`;
+}
+
 export function CollectProgressPanel({ job, onDismiss }: CollectProgressPanelProps) {
   const percent = getProgressPercent(job);
   const isRunning = job.status === "queued" || job.status === "running";
+  const eta = formatEta(job);
 
   return (
     <div className={`progress-panel ${job.status === "failed" ? "progress-panel-error" : ""}`}>
@@ -62,11 +83,13 @@ export function CollectProgressPanel({ job, onDismiss }: CollectProgressPanelPro
         {job.discovered > 0 ? <span>discovered {job.discovered}</span> : null}
         {job.created > 0 ? <span>added {job.created}</span> : null}
         {job.skipped_existing > 0 ? <span>skipped {job.skipped_existing}</span> : null}
-        {job.phase === "counting" && job.total > 0 ? (
+        {job.total > 0 ? (
           <span>
             {job.current}/{job.total}
+            {percent !== null ? ` (${percent}%)` : ""}
           </span>
         ) : null}
+        {eta ? <span>{eta}</span> : null}
       </div>
       {job.error ? <div className="error-banner">{job.error}</div> : null}
     </div>

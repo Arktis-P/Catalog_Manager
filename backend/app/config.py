@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     danbooru_character_tag_pages: int = 20
     danbooru_character_post_pages: int = 10
     danbooru_character_post_limit: int = 200
+    danbooru_character_post_supplement: bool = True
 
     def model_post_init(self, __context) -> None:
         if not self.database_url:

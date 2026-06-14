@@ -142,6 +142,12 @@ class DanbooruClient:
         )
         return self._ensure_list(payload, context="list_character_tags_by_pattern")
 
+    def get_tags_by_names(self, tag_names: list[str]) -> list[dict[str, Any]]:
+        if not tag_names:
+            return []
+        payload = self._get_json("tags.json", {"search[name]": ",".join(tag_names)})
+        return self._ensure_list(payload, context="get_tags_by_names")
+
     def get_tag(self, tag_name: str) -> dict[str, Any] | None:
         payload = self._get_json("tags.json", {"search[name]": tag_name})
         tags = self._ensure_list(payload, context="get_tag")
