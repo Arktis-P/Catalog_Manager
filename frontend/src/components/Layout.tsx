@@ -11,27 +11,29 @@ const navItems = [
 export function Layout() {
   return (
     <div className="app-shell">
-      <header className="top-nav">
-        <div className="top-nav-inner">
-          <div className="brand">
-            <span className="brand-title">Catalogue Manager</span>
-            <span className="brand-subtitle">Danbooru character catalog desktop app</span>
+      <div className="app-top">
+        <header className="top-nav">
+          <div className="top-nav-inner">
+            <div className="brand">
+              <span className="brand-title">Catalogue Manager</span>
+              <span className="brand-subtitle">Danbooru character catalog desktop app</span>
+            </div>
+            <nav className="nav-links">
+              {navItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </nav>
           </div>
-          <nav className="nav-links">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
-              >
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-        </div>
-      </header>
-      <GlobalTaskBar />
+        </header>
+        <GlobalTaskBar />
+      </div>
       <main className="page-container">
         <Outlet />
       </main>

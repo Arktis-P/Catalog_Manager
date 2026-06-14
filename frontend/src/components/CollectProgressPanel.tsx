@@ -18,17 +18,17 @@ function getProgressPercent(job: CollectJob): number | null {
 function phaseLabel(phase: string): string {
   switch (phase) {
     case "discovering_pattern":
-      return "2/3 패턴 검색";
+      return "패턴";
     case "discovering_posts_scan":
-      return "1/3 character tag";
+      return "tag";
     case "discovering_posts_verify":
-      return "2/3 character 분류";
+      return "분류";
     case "discovering":
-      return "캐릭터 tag 발견";
+      return "발견";
     case "counting":
-      return "3/3 post_count";
+      return "count";
     case "saving":
-      return "DB 저장";
+      return "저장";
     case "completed":
       return "완료";
     case "failed":
@@ -38,7 +38,7 @@ function phaseLabel(phase: string): string {
     case "queued":
       return "대기";
     default:
-      return "준비 중";
+      return "준비";
   }
 }
 
@@ -49,51 +49,67 @@ function formatEta(job: CollectJob): string | null {
   const remaining = job.total - job.current;
   const seconds = remaining * 0.5;
   if (seconds < 60) {
-    return `약 ${Math.ceil(seconds)}초 남음`;
+    return `~${Math.ceil(seconds)}s`;
   }
-  return `약 ${Math.ceil(seconds / 60)}분 남음`;
+  return `~${Math.ceil(seconds / 60)}m`;
+}
+
+function formatMeta(job: CollectJob, percent: number | null): string | null {
+  const parts: string[] = [];
+  if (job.total > 0) {
+    parts.push(`${job.current}/${job.total}${percent !== null ? ` ${percent}%` : ""}`);
+  } else if (job.discovered > 0) {
+    parts.push(`discovered ${job.discovered}`);
+  }
+  const eta = formatEta(job);
+  if (eta) {
+    parts.push(eta);
+  }
+  if (job.status === "completed") {
+    parts.push(`+${job.created}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 export function CollectProgressPanel({ job, onDismiss }: CollectProgressPanelProps) {
   const percent = getProgressPercent(job);
   const isRunning = job.status === "queued" || job.status === "running";
-  const eta = formatEta(job);
+  const meta = formatMeta(job, percent);
 
   return (
-    <div className={`progress-panel ${job.status === "failed" ? "progress-panel-error" : ""}`}>
-      <div className="progress-panel-header">
-        <strong>{job.series_tag || "Series"}</strong>
-        <div className="card-actions">
-          <span className="badge">{phaseLabel(job.phase)}</span>
-          {onDismiss ? (
-            <button className="btn btn-small" type="button" onClick={onDismiss}>
-              Dismiss
-            </button>
-          ) : null}
-        </div>
-      </div>
-      <p className="progress-panel-message">{job.message}</p>
-      {isRunning ? (
-        <div className={`progress-bar ${percent === null ? "progress-bar-indeterminate" : ""}`}>
+    <div
+      className={`progress-panel progress-panel-compact${
+        job.status === "failed" ? " progress-panel-error" : ""
+      }${job.status === "completed" ? " progress-panel-done" : ""}`}
+    >
+      <div className="progress-panel-compact-row">
+        <strong className="progress-panel-series" title={job.series_tag || "Series"}>
+          {job.series_tag || "Series"}
+        </strong>
+        <span className="badge badge-compact">{phaseLabel(job.phase)}</span>
+        <span className="progress-panel-message-compact" title={job.message}>
+          {job.message}
+        </span>
+        {isRunning ? (
           <div
-            className="progress-bar-fill"
-            style={percent === null ? undefined : { width: `${percent}%` }}
-          />
-        </div>
-      ) : null}
-      <div className="progress-panel-stats">
-        {job.discovered > 0 ? <span>discovered {job.discovered}</span> : null}
-        {job.created > 0 ? <span>added {job.created}</span> : null}
-        {job.skipped_existing > 0 ? <span>skipped {job.skipped_existing}</span> : null}
-        {job.total > 0 ? (
-          <span>
-            {job.current}/{job.total}
-            {percent !== null ? ` (${percent}%)` : ""}
-          </span>
+            className={`progress-bar progress-bar-compact${
+              percent === null ? " progress-bar-indeterminate" : ""
+            }`}
+          >
+            <div
+              className="progress-bar-fill"
+              style={percent === null ? undefined : { width: `${percent}%` }}
+            />
+          </div>
         ) : null}
-        {eta ? <span>{eta}</span> : null}
+        {meta ? <span className="progress-panel-meta">{meta}</span> : null}
+        {onDismiss ? (
+          <button className="btn btn-small btn-ghost" type="button" onClick={onDismiss}>
+            ×
+          </button>
+        ) : null}
       </div>
-      {job.error ? <div className="error-banner">{job.error}</div> : null}
+      {job.error ? <div className="progress-panel-error-line">{job.error}</div> : null}
     </div>
   );
 }
