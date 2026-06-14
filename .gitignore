@@ -7,6 +7,8 @@ venv/
 .env
 .env.*
 !.env.example
+input/danbooru.env
+input/danbooru_api_key.txt
 *.egg-info/
 .pytest_cache/
 .mypy_cache/

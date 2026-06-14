@@ -1,0 +1,6 @@
+# One-line mode (username must be set in danbooru.env):
+# your_api_key_here
+#
+# Two-line mode (username + api key only in this file):
+# your_danbooru_username
+# your_api_key_here

@@ -6,3 +6,5 @@ pydantic-settings>=2.6.0
 python-multipart>=0.0.17
 aiosqlite>=0.20.0
 pywebview>=5.0.0
+pybooru>=4.2.0
+requests>=2.32.0
