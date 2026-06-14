@@ -51,7 +51,10 @@ class AppearanceService:
             )
 
         for index, character in enumerate(characters, start=1):
-            appearance = self.extractor.extract_for_character(character.character_tag)
+            try:
+                appearance = self.extractor.extract_for_character(character.character_tag)
+            except Exception as exc:
+                raise RuntimeError(f"{character.character_tag}: {exc}") from exc
             character.multi_color_hair = appearance.multi_color_hair
             character.hair_color = appearance.hair_color
             character.hair_shape = appearance.hair_shape

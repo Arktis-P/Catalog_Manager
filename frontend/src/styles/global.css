@@ -52,6 +52,34 @@ button {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  user-select: text;
+}
+
+button,
+.btn,
+.nav-link {
+  user-select: none;
+}
+
+.error-banner,
+.success-banner,
+.progress-panel,
+.progress-panel-compact,
+.progress-panel-message-compact,
+.progress-panel-error-line,
+.progress-panel-meta,
+.global-task-error,
+.global-task-error span,
+.data-table td,
+.data-table th,
+.catalog-card-subtitle,
+.catalog-card-title,
+.modal,
+.field-help,
+.empty-state,
+.page-description {
+  user-select: text;
+  cursor: text;
 }
 
 .app-top {

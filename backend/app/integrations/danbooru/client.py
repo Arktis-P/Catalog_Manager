@@ -61,14 +61,36 @@ class DanbooruClient:
                 "Danbooru authentication failed (401 Unauthorized). "
                 "Verify username and api_key in input/danbooru.env."
             ) from exc
+        if status_code in {429, 500, 502, 503}:
+            raise RuntimeError(
+                f"Danbooru API temporary error ({status_code}). "
+                "This often happens during bulk appearance extraction due to rate limits. "
+                "Wait a few minutes, reduce concurrent jobs in Settings, or retry the series."
+            ) from exc
         raise exc
 
     def _get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        self._sleep()
-        try:
-            return self.client._get(path, params or {})
-        except PybooruHTTPError as exc:
-            self._handle_http_error(exc)
+        last_exc: PybooruHTTPError | None = None
+        max_retries = max(1, settings.danbooru_request_retries)
+
+        for attempt in range(max_retries):
+            if attempt > 0:
+                time.sleep(min(45.0, 2 ** attempt * 3))
+            else:
+                self._sleep()
+
+            try:
+                return self.client._get(path, params or {})
+            except PybooruHTTPError as exc:
+                status_code = exc.args[1] if len(exc.args) > 1 else None
+                if status_code in {429, 500, 502, 503} and attempt < max_retries - 1:
+                    last_exc = exc
+                    continue
+                self._handle_http_error(exc)
+
+        if last_exc:
+            self._handle_http_error(last_exc)
+        raise RuntimeError("Danbooru request failed after retries")
 
     @staticmethod
     def _ensure_list(payload: Any, *, context: str) -> list[dict[str, Any]]:
@@ -173,13 +195,31 @@ class DanbooruClient:
         return int(payload.get("counts", {}).get("posts", 0))
 
     def get_related_tags(self, query: str, *, category: int | None = 0) -> dict[str, object]:
-        params: dict[str, object] = {"query": query}
-        if category is not None:
-            params["category"] = category
-        payload = self._get_json("related_tag.json", params)
-        if not isinstance(payload, dict):
-            raise RuntimeError(f"Unexpected Danbooru related_tag response: {payload}")
-        return payload
+        last_exc: PybooruHTTPError | None = None
+        max_retries = max(1, settings.danbooru_request_retries)
+
+        for attempt in range(max_retries):
+            if attempt > 0:
+                time.sleep(min(45.0, 2 ** attempt * 3))
+            else:
+                self._sleep()
+
+            try:
+                payload = self.client.tag_related(query, category=category)
+            except PybooruHTTPError as exc:
+                status_code = exc.args[1] if len(exc.args) > 1 else None
+                if status_code in {429, 500, 502, 503} and attempt < max_retries - 1:
+                    last_exc = exc
+                    continue
+                self._handle_http_error(exc)
+            else:
+                if not isinstance(payload, dict):
+                    raise RuntimeError(f"Unexpected Danbooru related_tag response: {payload}")
+                return payload
+
+        if last_exc:
+            self._handle_http_error(last_exc)
+        raise RuntimeError(f"Danbooru related_tag failed for '{query}' after retries")
 
     @staticmethod
     def build_search_tags(character_tag: str, series_tag: str) -> str:
