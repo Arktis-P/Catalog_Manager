@@ -71,7 +71,12 @@ def get_series(series_id: int, service: SeriesService = Depends(get_series_servi
     if not series:
         raise HTTPException(status_code=404, detail="Series not found")
     counts = service.get_character_counts([series.id])
-    return service.to_response(series, character_count=counts.get(series.id, 0))
+    appearance_counts = service.get_appearance_extracted_counts([series.id])
+    return service.to_response(
+        series,
+        character_count=counts.get(series.id, 0),
+        appearance_extracted_count=appearance_counts.get(series.id, 0),
+    )
 
 
 @router.post("", response_model=SeriesResponse, status_code=201)
@@ -96,7 +101,12 @@ def update_series(
             raise HTTPException(status_code=409, detail="Series tag already exists")
     updated = service.update_series(series, data)
     counts = service.get_character_counts([updated.id])
-    return service.to_response(updated, character_count=counts.get(updated.id, 0))
+    appearance_counts = service.get_appearance_extracted_counts([updated.id])
+    return service.to_response(
+        updated,
+        character_count=counts.get(updated.id, 0),
+        appearance_extracted_count=appearance_counts.get(updated.id, 0),
+    )
 
 
 @router.delete("/{series_id}", status_code=204)

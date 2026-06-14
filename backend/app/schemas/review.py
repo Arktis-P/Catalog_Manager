@@ -14,6 +14,7 @@ class AppearanceReviewItemResponse(BaseModel):
     hair_shape: str | None = None
     eye_color: str | None = None
     feature_tags: str | None = None
+    gender: str | None = None
     generation_prompt: str | None = None
     appearance_confirmed: bool = False
 
@@ -29,6 +30,7 @@ class AppearanceReviewUpdateRequest(BaseModel):
     hair_shape: str | None = None
     eye_color: str | None = None
     feature_tags: str | None = None
+    gender: str | None = None
 
 
 class AppearanceReviewConfirmResponse(BaseModel):

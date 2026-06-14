@@ -7,6 +7,7 @@ SERIES_STATUSES = [
     "pending",
     "collecting",
     "collected",
+    "tagged",
     "generating",
     "reviewing",
     "completed",
@@ -43,6 +44,9 @@ class SeriesResponse(SeriesBase):
     character_count: int = 0
     last_collect_created: int = 0
     last_collect_skipped: int = 0
+    last_appearance_updated: int = 0
+    appearance_extracted_count: int = 0
+    all_appearance_collected: bool = False
     created_at: datetime
     updated_at: datetime
 

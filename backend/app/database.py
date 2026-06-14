@@ -63,6 +63,7 @@ def _migrate_character_columns() -> None:
     existing = {column["name"] for column in inspector.get_columns("characters")}
     migrations = {
         "generation_prompt": "ALTER TABLE characters ADD COLUMN generation_prompt TEXT",
+        "gender": "ALTER TABLE characters ADD COLUMN gender VARCHAR(50)",
         "appearance_confirmed": (
             "ALTER TABLE characters ADD COLUMN appearance_confirmed BOOLEAN NOT NULL DEFAULT 0"
         ),
@@ -82,8 +83,14 @@ def _migrate_series_columns() -> None:
     migrations = {
         "last_collect_created": "ALTER TABLE series ADD COLUMN last_collect_created INTEGER NOT NULL DEFAULT 0",
         "last_collect_skipped": "ALTER TABLE series ADD COLUMN last_collect_skipped INTEGER NOT NULL DEFAULT 0",
+        "last_appearance_updated": (
+            "ALTER TABLE series ADD COLUMN last_appearance_updated INTEGER NOT NULL DEFAULT 0"
+        ),
     }
     with engine.begin() as connection:
         for column_name, statement in migrations.items():
             if column_name not in existing:
                 connection.execute(text(statement))
+        connection.execute(
+            text("UPDATE series SET status = 'tagged' WHERE status = 'all_collected'")
+        )

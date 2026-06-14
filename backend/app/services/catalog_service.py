@@ -72,7 +72,10 @@ class CatalogService:
         if rating is not None:
             query = query.filter(Review.rating == rating)
         if gender:
-            query = query.filter(Review.gender == gender)
+            query = query.filter(
+                Character.appearance_confirmed.is_(True),
+                Character.gender.ilike(f"%{gender}%"),
+            )
         if type_:
             query = query.filter(Review.type == type_)
         if hair_color:
@@ -159,7 +162,6 @@ class CatalogService:
                     "post_count": character.post_count,
                     "danbooru_url": character.danbooru_url,
                     "cover_image": cover_image.image_path if cover_image else None,
-                    "gender": review.gender if review else None,
                     "type": review.type if review else None,
                     "rating": review.rating if review else None,
                     **appearance,

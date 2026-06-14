@@ -53,6 +53,7 @@ def reset_catalog(*, reimport_series: bool = True) -> dict[str, int | str]:
                 {
                     Series.last_collect_created: 0,
                     Series.last_collect_skipped: 0,
+                    Series.last_appearance_updated: 0,
                     Series.status: "pending",
                 },
                 synchronize_session=False,

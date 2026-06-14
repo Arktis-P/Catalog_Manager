@@ -57,6 +57,7 @@ class AppearanceService:
             character.hair_shape = appearance.hair_shape
             character.eye_color = appearance.eye_color
             character.feature_tags = appearance.feature_tags
+            character.gender = appearance.gender
             character.from_related = True
             character.appearance_confirmed = False
             character.generation_prompt = build_generation_prompt(character)
@@ -71,6 +72,10 @@ class AppearanceService:
                         "total": total,
                     }
                 )
+
+        series.last_appearance_updated = updated
+        if total > 0 and updated == total and series.status in {"pending", "collecting", "collected"}:
+            series.status = "tagged"
 
         self.db.commit()
         return AppearanceExtractResult(

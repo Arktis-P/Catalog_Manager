@@ -9,6 +9,9 @@ export interface Series {
   character_count: number;
   last_collect_created: number;
   last_collect_skipped: number;
+  last_appearance_updated: number;
+  appearance_extracted_count: number;
+  all_appearance_collected: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -100,6 +103,7 @@ export interface AppearanceReviewItem {
   hair_shape: string | null;
   eye_color: string | null;
   feature_tags: string | null;
+  gender: string | null;
   generation_prompt: string | null;
   appearance_confirmed: boolean;
 }

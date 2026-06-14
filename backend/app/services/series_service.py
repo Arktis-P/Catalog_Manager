@@ -63,7 +63,28 @@ class SeriesService:
         )
         return {series_id: count for series_id, count in rows}
 
-    def to_response(self, series: Series, *, character_count: int | None = None) -> SeriesResponse:
+    def get_appearance_extracted_counts(self, series_ids: list[int]) -> dict[int, int]:
+        if not series_ids:
+            return {}
+        rows = (
+            self.db.query(Character.series_id, func.count(Character.id))
+            .filter(Character.series_id.in_(series_ids), Character.from_related.is_(True))
+            .group_by(Character.series_id)
+            .all()
+        )
+        return {series_id: count for series_id, count in rows}
+
+    def to_response(
+        self,
+        series: Series,
+        *,
+        character_count: int | None = None,
+        appearance_extracted_count: int | None = None,
+    ) -> SeriesResponse:
+        resolved_character_count = character_count if character_count is not None else 0
+        resolved_appearance_count = (
+            appearance_extracted_count if appearance_extracted_count is not None else 0
+        )
         return SeriesResponse(
             id=series.id,
             series_tag=series.series_tag,
@@ -72,16 +93,31 @@ class SeriesService:
             priority=series.priority,
             status=series.status,
             note=series.note,
-            character_count=character_count if character_count is not None else 0,
+            character_count=resolved_character_count,
             last_collect_created=series.last_collect_created,
             last_collect_skipped=series.last_collect_skipped,
+            last_appearance_updated=series.last_appearance_updated,
+            appearance_extracted_count=resolved_appearance_count,
+            all_appearance_collected=(
+                resolved_character_count > 0
+                and resolved_appearance_count >= resolved_character_count
+            ),
             created_at=series.created_at,
             updated_at=series.updated_at,
         )
 
     def to_response_list(self, items: list[Series]) -> list[SeriesResponse]:
-        counts = self.get_character_counts([series.id for series in items])
-        return [self.to_response(series, character_count=counts.get(series.id, 0)) for series in items]
+        series_ids = [series.id for series in items]
+        counts = self.get_character_counts(series_ids)
+        appearance_counts = self.get_appearance_extracted_counts(series_ids)
+        return [
+            self.to_response(
+                series,
+                character_count=counts.get(series.id, 0),
+                appearance_extracted_count=appearance_counts.get(series.id, 0),
+            )
+            for series in items
+        ]
 
     def get_series(self, series_id: int) -> Series | None:
         return self.db.query(Series).filter(Series.id == series_id).first()

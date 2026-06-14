@@ -22,6 +22,7 @@ class Character(Base):
     eye_color: Mapped[str | None] = mapped_column(Text, nullable=True)
     feature_tags: Mapped[str | None] = mapped_column(Text, nullable=True)
     generation_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gender: Mapped[str | None] = mapped_column(String(50), nullable=True)
     appearance_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="needs_check", index=True)
     from_wiki: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

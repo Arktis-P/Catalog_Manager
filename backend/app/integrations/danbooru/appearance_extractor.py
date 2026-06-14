@@ -83,6 +83,28 @@ class AppearanceTags:
     hair_shape: str | None = None
     eye_color: str | None = None
     feature_tags: str | None = None
+    gender: str | None = None
+
+
+GENDER_TAGS = (
+    "1girl",
+    "1boy",
+    "2girls",
+    "2boys",
+    "3girls",
+    "3boys",
+    "multiple_girls",
+    "multiple_boys",
+    "solo",
+)
+
+NO_HUMAN_TAGS = (
+    "no_humans",
+    "animal",
+    "animals",
+    "monster",
+    "creature",
+)
 
 
 def _load_tag_dictionary(filename: str) -> tuple[str, ...]:
@@ -215,6 +237,18 @@ def extract_feature_tags(related: list[RelatedTag]) -> str | None:
     return ", ".join(item.name for item in selected)
 
 
+def extract_gender(related: list[RelatedTag]) -> str | None:
+    by_name = {item.name: item.frequency for item in related}
+    if any(tag in by_name for tag in NO_HUMAN_TAGS):
+        return "no_humans"
+
+    matches = [item for item in related if item.name in GENDER_TAGS]
+    matches.sort(key=lambda item: item.frequency, reverse=True)
+    if not matches:
+        return None
+    return matches[0].name
+
+
 def extract_appearance_tags(related: list[RelatedTag]) -> AppearanceTags:
     return AppearanceTags(
         multi_color_hair=extract_multi_color_hair(related),
@@ -222,6 +256,7 @@ def extract_appearance_tags(related: list[RelatedTag]) -> AppearanceTags:
         hair_shape=extract_hair_shape(related),
         eye_color=extract_eye_color(related),
         feature_tags=extract_feature_tags(related),
+        gender=extract_gender(related),
     )
 
 

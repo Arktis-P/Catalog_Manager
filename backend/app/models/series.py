@@ -18,6 +18,7 @@ class Series(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_collect_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_collect_skipped: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_appearance_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False

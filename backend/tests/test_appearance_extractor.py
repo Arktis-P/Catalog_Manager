@@ -2,6 +2,7 @@ from app.integrations.danbooru.appearance_extractor import (
     RelatedTag,
     extract_appearance_tags,
     extract_eye_color,
+    extract_gender,
     extract_hair_color,
     extract_multi_color_hair,
 )
@@ -51,6 +52,16 @@ def test_eye_color_heterochromia_pair():
 def test_eye_color_single():
     related = [RelatedTag("purple_eyes", 0.4)]
     assert extract_eye_color(related) == "purple_eyes"
+
+
+def test_extract_gender_human():
+    related = [RelatedTag("1girl", 0.8), RelatedTag("1boy", 0.2)]
+    assert extract_gender(related) == "1girl"
+
+
+def test_extract_gender_no_humans():
+    related = [RelatedTag("monster", 0.4), RelatedTag("1girl", 0.3)]
+    assert extract_gender(related) == "no_humans"
 
 
 def test_extract_appearance_tags_combined():

@@ -8,6 +8,7 @@ function formatDraftTags(item: AppearanceReviewItem): string {
     item.hair_color ? `hair: ${item.hair_color}` : null,
     item.hair_shape ? `style: ${item.hair_shape}` : null,
     item.eye_color ? `eyes: ${item.eye_color}` : null,
+    item.gender ? `gender: ${item.gender}` : null,
     item.feature_tags ? `features: ${item.feature_tags}` : null,
   ]
     .filter(Boolean)

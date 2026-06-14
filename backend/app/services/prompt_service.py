@@ -71,6 +71,7 @@ def mask_appearance_for_catalog(character: Character) -> dict[str, str | None]:
             "hair_shape": None,
             "eye_color": None,
             "feature_tags": None,
+            "gender": None,
             "generation_prompt": None,
         }
 
@@ -80,5 +81,6 @@ def mask_appearance_for_catalog(character: Character) -> dict[str, str | None]:
         "hair_shape": character.hair_shape,
         "eye_color": character.eye_color,
         "feature_tags": character.feature_tags,
+        "gender": character.gender,
         "generation_prompt": character.generation_prompt,
     }

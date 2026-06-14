@@ -32,6 +32,7 @@ def _to_review_item(character) -> AppearanceReviewItemResponse:
         hair_shape=character.hair_shape,
         eye_color=character.eye_color,
         feature_tags=character.feature_tags,
+        gender=character.gender,
         generation_prompt=character.generation_prompt,
         appearance_confirmed=character.appearance_confirmed,
     )
@@ -71,6 +72,7 @@ def update_appearance_review(
             hair_shape=payload.hair_shape,
             eye_color=payload.eye_color,
             feature_tags=payload.feature_tags,
+            gender=payload.gender,
         )
         return _to_review_item(character)
     except ValueError as exc:

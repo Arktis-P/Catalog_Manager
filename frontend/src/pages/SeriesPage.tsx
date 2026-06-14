@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { useCollectJobs } from "../context/CollectJobContext";
 import type { DanbooruStatus, Series, SeriesCreatePayload } from "../types";
+import { resolveSeriesStatus, seriesStatusBadgeClass } from "../utils/seriesStatus";
 
 type ModalMode = "create" | "edit";
 
@@ -315,7 +316,14 @@ export function SeriesPage() {
                       </td>
                       <td className="col-priority">{series.priority}</td>
                       <td className="col-status">
-                        <span className="badge">{series.status}</span>
+                        {(() => {
+                          const displayStatus = resolveSeriesStatus(series);
+                          return (
+                            <span className={seriesStatusBadgeClass(displayStatus.tone)}>
+                              {displayStatus.label}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="col-note cell-ellipsis" title={series.note || undefined}>
                         {series.note || "-"}

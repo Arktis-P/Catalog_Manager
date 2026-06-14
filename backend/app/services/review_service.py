@@ -84,6 +84,7 @@ class ReviewService:
         hair_shape: str | None = None,
         eye_color: str | None = None,
         feature_tags: str | None = None,
+        gender: str | None = None,
     ) -> Character:
         character = self.get_character(character_id)
         if not character:
@@ -101,6 +102,8 @@ class ReviewService:
             character.eye_color = eye_color or None
         if feature_tags is not None:
             character.feature_tags = feature_tags or None
+        if gender is not None:
+            character.gender = gender or None
 
         character.generation_prompt = build_generation_prompt(character)
         self.db.commit()
