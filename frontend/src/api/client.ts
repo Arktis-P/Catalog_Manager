@@ -2,6 +2,7 @@ import type {
   CatalogFilters,
   CatalogListResponse,
   CatalogStats,
+  CharacterCollectResult,
   Series,
   SeriesCreatePayload,
   SeriesListResponse,
@@ -69,6 +70,15 @@ export const api = {
     request<Series>(`/series/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
 
   deleteSeries: (id: number) => request<void>(`/series/${id}`, { method: "DELETE" }),
+
+  collectCharactersForSeries: (seriesId: number) =>
+    request<CharacterCollectResult>(`/characters/series/${seriesId}/collect`, { method: "POST" }),
+
+  collectCharactersBatch: (payload: { status?: string; limit?: number }) =>
+    request<{ series_processed: number; total_created: number; total_discovered: number; total_skipped_existing: number }>(
+      "/characters/collect",
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
 
   exportSeriesCsv: async () => {
     const response = await fetch(`${API_BASE}/series/export/csv`);

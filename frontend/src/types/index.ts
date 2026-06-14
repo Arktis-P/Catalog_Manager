@@ -51,6 +51,13 @@ export interface CatalogStats {
   cover_image_count: number;
 }
 
+export interface CharacterCollectResult {
+  series_tag: string;
+  discovered: number;
+  created: number;
+  skipped_existing: number;
+}
+
 export interface CatalogFilters {
   series_tag?: string;
   rating?: number;

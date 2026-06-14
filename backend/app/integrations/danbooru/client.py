@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from urllib.parse import quote
 
 import requests
 from pybooru import Danbooru
@@ -15,6 +16,8 @@ class DanbooruAuthError(Exception):
 
 
 class DanbooruClient:
+    CATEGORY_CHARACTER = 4
+
     def __init__(
         self,
         *,
@@ -44,12 +47,16 @@ class DanbooruClient:
             )
         return self._client
 
+    def _sleep(self) -> None:
+        time.sleep(self.request_delay)
+
     def _request(self, path: str, *, params: dict[str, Any] | None = None) -> requests.Response:
+        self._sleep()
         return requests.get(
             f"{settings.danbooru_base_url}{path}",
             auth=self._auth,
             params=params,
-            timeout=30,
+            timeout=60,
             headers={"User-Agent": "CatalogueManager/0.2 (+local app)"},
         )
 
@@ -96,7 +103,6 @@ class DanbooruClient:
         hide_empty: str = "yes",
         order: str = "count",
     ) -> list[dict[str, Any]]:
-        time.sleep(self.request_delay)
         response = self._request(
             "/tags.json",
             params={
@@ -112,3 +118,64 @@ class DanbooruClient:
         if not isinstance(payload, list):
             raise RuntimeError(f"Danbooru API error: {payload}")
         return payload
+
+    def list_character_tags_by_pattern(
+        self,
+        series_tag: str,
+        *,
+        page: int = 1,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        response = self._request(
+            "/tags.json",
+            params={
+                "search[name_matches]": f"*_({series_tag})",
+                "search[category]": self.CATEGORY_CHARACTER,
+                "search[order]": "count",
+                "limit": limit,
+                "page": page,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise RuntimeError(f"Danbooru API error: {payload}")
+        return payload
+
+    def get_tag(self, tag_name: str) -> dict[str, Any] | None:
+        response = self._request("/tags.json", params={"search[name]": tag_name})
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list) or not payload:
+            return None
+        return payload[0]
+
+    def list_posts(self, *, tags: str, page: int = 1, limit: int | None = None) -> list[dict[str, Any]]:
+        response = self._request(
+            "/posts.json",
+            params={
+                "tags": tags,
+                "limit": limit or settings.danbooru_character_post_limit,
+                "page": page,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise RuntimeError(f"Danbooru API error: {payload}")
+        return payload
+
+    def count_posts(self, tags: str) -> int:
+        response = self._request("/counts/posts.json", params={"tags": tags})
+        response.raise_for_status()
+        payload = response.json()
+        return int(payload.get("counts", {}).get("posts", 0))
+
+    @staticmethod
+    def build_search_tags(character_tag: str, series_tag: str) -> str:
+        return f"{character_tag} {series_tag}"
+
+    @staticmethod
+    def build_danbooru_url(character_tag: str, series_tag: str) -> str:
+        tags = DanbooruClient.build_search_tags(character_tag, series_tag)
+        return f"{settings.danbooru_base_url}/posts?tags={quote(tags)}"

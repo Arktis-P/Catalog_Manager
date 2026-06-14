@@ -28,7 +28,10 @@ class Settings(BaseSettings):
     danbooru_username: str = ""
     danbooru_api_key: str = ""
     danbooru_base_url: str = "https://danbooru.donmai.us"
-    danbooru_request_delay: float = 1.0
+    danbooru_request_delay: float = 0.5
+    danbooru_character_tag_pages: int = 20
+    danbooru_character_post_pages: int = 10
+    danbooru_character_post_limit: int = 200
 
     def model_post_init(self, __context) -> None:
         if not self.database_url:

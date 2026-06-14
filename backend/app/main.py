@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
-from app.routers import catalog, series
+from app.routers import catalog, characters, series
 from app.services.seed_service import seed_demo_data
 
 
@@ -44,6 +44,7 @@ app.add_middleware(
 
 app.include_router(series.router, prefix="/api")
 app.include_router(catalog.router, prefix="/api")
+app.include_router(characters.router, prefix="/api")
 
 
 @app.get("/api/health")

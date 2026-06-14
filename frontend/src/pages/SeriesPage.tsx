@@ -24,6 +24,8 @@ export function SeriesPage() {
   const [editingSeries, setEditingSeries] = useState<Series | null>(null);
   const [form, setForm] = useState<SeriesCreatePayload>(emptyForm);
   const [importReplace, setImportReplace] = useState(false);
+  const [collectingSeriesId, setCollectingSeriesId] = useState<number | null>(null);
+  const [collectMessage, setCollectMessage] = useState<string | null>(null);
 
   const filteredCount = useMemo(() => items.length, [items]);
 
@@ -90,6 +92,23 @@ export function SeriesPage() {
       await loadSeries();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save series");
+    }
+  };
+
+  const handleCollectCharacters = async (series: Series) => {
+    setCollectingSeriesId(series.id);
+    setCollectMessage(null);
+    setError(null);
+    try {
+      const result = await api.collectCharactersForSeries(series.id);
+      setCollectMessage(
+        `${result.series_tag}: discovered ${result.discovered}, added ${result.created}, skipped ${result.skipped_existing}`,
+      );
+      await loadSeries();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to collect characters");
+    } finally {
+      setCollectingSeriesId(null);
     }
   };
 
@@ -195,6 +214,7 @@ export function SeriesPage() {
         </div>
 
         {error ? <div className="error-banner">{error}</div> : null}
+        {collectMessage ? <div className="stat-card" style={{ marginBottom: 16 }}>{collectMessage}</div> : null}
         {loading ? <div className="empty-state">Loading series...</div> : null}
 
         {!loading ? (
@@ -228,6 +248,14 @@ export function SeriesPage() {
                       <td>{series.note || "-"}</td>
                       <td>
                         <div className="table-actions">
+                          <button
+                            className="btn btn-small btn-primary"
+                            type="button"
+                            disabled={collectingSeriesId === series.id}
+                            onClick={() => void handleCollectCharacters(series)}
+                          >
+                            {collectingSeriesId === series.id ? "Collecting..." : "Collect"}
+                          </button>
                           <button className="btn btn-small" type="button" onClick={() => openEditModal(series)}>
                             Edit
                           </button>
