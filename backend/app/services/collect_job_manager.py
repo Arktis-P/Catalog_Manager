@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import threading
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from app.config import settings
 from app.database import SessionLocal
 from app.integrations.danbooru.client import DanbooruAuthError
 from app.models.series import Series
@@ -34,9 +36,12 @@ class CollectJobState:
 
 
 class CollectJobManager:
-    def __init__(self) -> None:
+    def __init__(self, *, max_concurrent: int | None = None) -> None:
+        self._max_concurrent = max(1, max_concurrent or settings.danbooru_collect_max_concurrent)
         self._jobs: dict[str, CollectJobState] = {}
         self._active_by_series: dict[int, str] = {}
+        self._job_queue: deque[str] = deque()
+        self._running_count = 0
         self._lock = threading.Lock()
 
     def get_job(self, job_id: str) -> CollectJobState | None:
@@ -71,15 +76,43 @@ class CollectJobManager:
             )
             self._jobs[job.job_id] = job
             self._active_by_series[series_id] = job.job_id
+            self._job_queue.append(job.job_id)
+            self._refresh_queue_messages()
 
-        thread = threading.Thread(
-            target=self._run_series_collect,
-            args=(job.job_id, series_id),
-            daemon=True,
-            name=f"collect-series-{series_id}",
-        )
-        thread.start()
+        self._dispatch_next()
         return job
+
+    def _refresh_queue_messages(self) -> None:
+        slots_available = self._max_concurrent - self._running_count
+        for index, queued_job_id in enumerate(self._job_queue, start=1):
+            queued_job = self._jobs.get(queued_job_id)
+            if not queued_job or queued_job.status != "queued":
+                continue
+            if index <= slots_available:
+                queued_job.message = "수집 대기 중 · 곧 시작"
+            else:
+                jobs_ahead = self._running_count + (index - slots_available - 1)
+                queued_job.message = f"수집 대기 중 · 앞에 {jobs_ahead}개"
+
+    def _dispatch_next(self) -> None:
+        with self._lock:
+            while self._running_count < self._max_concurrent and self._job_queue:
+                job_id = self._job_queue.popleft()
+                job = self._jobs.get(job_id)
+                if not job or job.status != "queued":
+                    continue
+
+                self._running_count += 1
+                series_id = job.series_id
+                thread = threading.Thread(
+                    target=self._run_series_collect,
+                    args=(job_id, series_id),
+                    daemon=True,
+                    name=f"collect-series-{series_id}",
+                )
+                thread.start()
+
+            self._refresh_queue_messages()
 
     def _update_job(self, job_id: str, **fields: object) -> None:
         with self._lock:
@@ -166,6 +199,9 @@ class CollectJobManager:
                 active_job_id = self._active_by_series.get(series_id)
                 if active_job_id == job_id:
                     self._active_by_series.pop(series_id, None)
+                self._running_count = max(0, self._running_count - 1)
+
+            self._dispatch_next()
 
 
 collect_job_manager = CollectJobManager()

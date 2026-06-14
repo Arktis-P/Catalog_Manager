@@ -35,6 +35,8 @@ function phaseLabel(phase: string): string {
       return "실패";
     case "starting":
       return "시작";
+    case "queued":
+      return "대기";
     default:
       return "준비 중";
   }
