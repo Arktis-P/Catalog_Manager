@@ -1,5 +1,5 @@
-from sqlalchemy import or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, case, exists, func, or_, select
+from sqlalchemy.orm import Session, contains_eager
 
 from app.models.character import Character
 from app.models.image import Image
@@ -7,27 +7,43 @@ from app.models.review import Review
 from app.models.series import Series
 
 
-def compute_catalog_status(character: Character, review: Review | None, cover_image: Image | None) -> str:
-    if character.status == "excluded":
-        return "excluded"
-    if character.status == "tag_needs_check":
-        return "tag_needs_check"
-    if review and review.review_status == "completed" and cover_image:
-        return "completed"
-    if review and review.review_status == "needs_regen":
-        return "needs_regen"
-    if review and review.review_status == "pending":
-        return "needs_review"
-    if not cover_image:
-        return "missing_image"
-    if character.status in {"needs_check", "confirmed"}:
-        return "needs_review"
-    return "needs_review"
+def catalog_status_expression():
+    has_cover = exists(
+        select(1).where(
+            Image.character_id == Character.id,
+            Image.is_cover.is_(True),
+        )
+    )
+    return case(
+        (Character.status == "excluded", "excluded"),
+        (Character.status == "tag_needs_check", "tag_needs_check"),
+        (and_(Review.review_status == "completed", has_cover), "completed"),
+        (Review.review_status == "needs_regen", "needs_regen"),
+        (Review.review_status == "pending", "needs_review"),
+        (~has_cover, "missing_image"),
+        (Character.status.in_(["needs_check", "confirmed"]), "needs_review"),
+        else_="needs_review",
+    )
 
 
 class CatalogService:
     def __init__(self, db: Session):
         self.db = db
+
+    def _base_query(self, status_case):
+        cover_exists = exists(
+            select(1).where(
+                Image.character_id == Character.id,
+                Image.is_cover.is_(True),
+            )
+        )
+        return (
+            self.db.query(Character)
+            .join(Character.series)
+            .outerjoin(Character.review)
+            .options(contains_eager(Character.series), contains_eager(Character.review))
+            .add_columns(status_case.label("catalog_status"), cover_exists.label("has_cover"))
+        )
 
     def list_catalog(
         self,
@@ -47,12 +63,8 @@ class CatalogService:
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[list[dict], int]:
-        query = (
-            self.db.query(Character)
-            .join(Series)
-            .outerjoin(Review)
-            .options(joinedload(Character.series), joinedload(Character.review))
-        )
+        status_case = catalog_status_expression()
+        query = self._base_query(status_case)
 
         if series_tag:
             query = query.filter(Series.series_tag == series_tag)
@@ -78,30 +90,54 @@ class CatalogService:
                     Series.series_tag.ilike(pattern),
                 )
             )
-
-        characters = query.order_by(Series.post_count.desc(), Character.post_count.desc(), Character.id.asc()).all()
-        items: list[dict] = []
-
-        for character in characters:
-            cover_image = (
-                self.db.query(Image)
-                .filter(Image.character_id == character.id, Image.is_cover.is_(True))
-                .first()
+        if status:
+            query = query.filter(status_case == status)
+        if has_cover_image is True:
+            query = query.filter(
+                exists(
+                    select(1).where(
+                        Image.character_id == Character.id,
+                        Image.is_cover.is_(True),
+                    )
+                )
             )
+        elif has_cover_image is False:
+            query = query.filter(
+                ~exists(
+                    select(1).where(
+                        Image.character_id == Character.id,
+                        Image.is_cover.is_(True),
+                    )
+                )
+            )
+        if needs_review is True:
+            query = query.filter(status_case == "needs_review")
+        if needs_regen is True:
+            query = query.filter(status_case == "needs_regen")
+
+        total = query.order_by(None).with_entities(func.count(Character.id)).scalar() or 0
+
+        rows = (
+            query.order_by(Series.post_count.desc(), Character.post_count.desc(), Character.id.asc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+        page_character_ids = [character.id for character, _, _ in rows]
+        cover_image_by_character = {}
+        if page_character_ids:
+            cover_rows = (
+                self.db.query(Image)
+                .filter(Image.character_id.in_(page_character_ids), Image.is_cover.is_(True))
+                .all()
+            )
+            cover_image_by_character = {row.character_id: row for row in cover_rows}
+
+        items: list[dict] = []
+        for character, catalog_status, has_cover in rows:
+            cover_image = cover_image_by_character.get(character.id)
             review = character.review
-            catalog_status = compute_catalog_status(character, review, cover_image)
-
-            if status and catalog_status != status:
-                continue
-            if has_cover_image is True and not cover_image:
-                continue
-            if has_cover_image is False and cover_image:
-                continue
-            if needs_review is True and catalog_status != "needs_review":
-                continue
-            if needs_regen is True and catalog_status != "needs_regen":
-                continue
-
             items.append(
                 {
                     "id": character.id,
@@ -122,14 +158,13 @@ class CatalogService:
                     "final_prompt": review.final_prompt if review else None,
                     "character_status": character.status,
                     "catalog_status": catalog_status,
-                    "has_cover_image": cover_image is not None,
+                    "has_cover_image": bool(has_cover),
                     "needs_review": catalog_status == "needs_review",
                     "needs_regen": catalog_status == "needs_regen",
                 }
             )
 
-        total = len(items)
-        return items[skip : skip + limit], total
+        return items, total
 
     def get_stats(self) -> dict[str, int]:
         series_count = self.db.query(Series).count()

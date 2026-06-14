@@ -1,9 +1,11 @@
 @echo off
-setlocal EnableExtensions
+rem Shared paths for Catalogue Manager scripts.
+rem Do NOT use setlocal here; this file is included via call.
 
-rem Resolve project root (Catalogue_Manager)
 set "SCRIPT_DIR=%~dp0"
-for %%I in ("%SCRIPT_DIR%..") do set "PROJECT_ROOT=%%~fI"
+cd /d "%SCRIPT_DIR%.."
+set "PROJECT_ROOT=%CD%"
+cd /d "%SCRIPT_DIR%"
 
 set "VENV_DIR=%PROJECT_ROOT%\.venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"

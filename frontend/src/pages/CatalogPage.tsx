@@ -3,6 +3,8 @@ import { api } from "../api/client";
 import type { CatalogFilters, CatalogItem, CatalogStats } from "../types";
 import { CatalogCard } from "../components/CatalogCard";
 
+const PAGE_SIZE = 48;
+
 const emptyStats: CatalogStats = {
   series_count: 0,
   character_count: 0,
@@ -12,6 +14,8 @@ const emptyStats: CatalogStats = {
 
 export function CatalogPage() {
   const [items, setItems] = useState<CatalogItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [stats, setStats] = useState<CatalogStats>(emptyStats);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [seriesOptions, setSeriesOptions] = useState<string[]>([]);
@@ -19,22 +23,33 @@ export function CatalogPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
   const activeFilterCount = useMemo(
-    () => Object.values(filters).filter((value) => value !== undefined && value !== "").length,
+    () =>
+      Object.entries(filters).filter(
+        ([key, value]) => !["skip", "limit"].includes(key) && value !== undefined && value !== "",
+      ).length,
     [filters],
   );
 
-  const loadData = async () => {
+  const loadData = async (targetPage = page) => {
     setLoading(true);
     setError(null);
     try {
+      const query: CatalogFilters = {
+        ...filters,
+        skip: (targetPage - 1) * PAGE_SIZE,
+        limit: PAGE_SIZE,
+      };
       const [catalog, catalogStats, catalogStatuses, seriesList] = await Promise.all([
-        api.listCatalog(filters),
+        api.listCatalog(query),
         api.getCatalogStats(),
         api.getCatalogStatuses(),
         api.listSeries({ sort_by: "post_count", sort_order: "desc", limit: 500 }),
       ]);
       setItems(catalog.items);
+      setTotal(catalog.total);
       setStats(catalogStats);
       setStatuses(catalogStatuses);
       setSeriesOptions(seriesList.items.map((series) => series.series_tag));
@@ -46,8 +61,16 @@ export function CatalogPage() {
   };
 
   useEffect(() => {
-    void loadData();
+    setPage(1);
   }, [filters]);
+
+  useEffect(() => {
+    void loadData(page);
+  }, [filters, page]);
+
+  const updateFilters = (updater: (prev: CatalogFilters) => CatalogFilters) => {
+    setFilters(updater);
+  };
 
   return (
     <>
@@ -58,7 +81,7 @@ export function CatalogPage() {
             수집/생성/검수 상태를 확인하고 작업 허브로 이동할 수 있는 메인 화면입니다.
           </p>
         </div>
-        <button className="btn" type="button" onClick={() => void loadData()}>
+        <button className="btn" type="button" onClick={() => void loadData(page)}>
           Refresh
         </button>
       </div>
@@ -70,15 +93,15 @@ export function CatalogPage() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Characters</div>
-          <div className="stat-value">{stats.character_count}</div>
+          <div className="stat-value">{stats.character_count.toLocaleString()}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Completed</div>
-          <div className="stat-value">{stats.completed_count}</div>
+          <div className="stat-value">{stats.completed_count.toLocaleString()}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Cover Images</div>
-          <div className="stat-value">{stats.cover_image_count}</div>
+          <div className="stat-value">{stats.cover_image_count.toLocaleString()}</div>
         </div>
       </div>
 
@@ -89,7 +112,7 @@ export function CatalogPage() {
             <input
               id="search"
               value={filters.search ?? ""}
-              onChange={(event) => setFilters((prev) => ({ ...prev, search: event.target.value }))}
+              onChange={(event) => updateFilters((prev) => ({ ...prev, search: event.target.value }))}
               placeholder="character / series"
             />
           </div>
@@ -99,7 +122,7 @@ export function CatalogPage() {
               id="series"
               value={filters.series_tag ?? ""}
               onChange={(event) =>
-                setFilters((prev) => ({ ...prev, series_tag: event.target.value || undefined }))
+                updateFilters((prev) => ({ ...prev, series_tag: event.target.value || undefined }))
               }
             >
               <option value="">All</option>
@@ -116,7 +139,7 @@ export function CatalogPage() {
               id="status"
               value={filters.status ?? ""}
               onChange={(event) =>
-                setFilters((prev) => ({ ...prev, status: event.target.value || undefined }))
+                updateFilters((prev) => ({ ...prev, status: event.target.value || undefined }))
               }
             >
               <option value="">All</option>
@@ -134,7 +157,7 @@ export function CatalogPage() {
               value={filters.has_cover_image === undefined ? "" : String(filters.has_cover_image)}
               onChange={(event) => {
                 const value = event.target.value;
-                setFilters((prev) => ({
+                updateFilters((prev) => ({
                   ...prev,
                   has_cover_image: value === "" ? undefined : value === "true",
                 }));
@@ -152,7 +175,7 @@ export function CatalogPage() {
               value={filters.needs_review === undefined ? "" : String(filters.needs_review)}
               onChange={(event) => {
                 const value = event.target.value;
-                setFilters((prev) => ({
+                updateFilters((prev) => ({
                   ...prev,
                   needs_review: value === "" ? undefined : value === "true",
                 }));
@@ -164,7 +187,7 @@ export function CatalogPage() {
           </div>
           <div className="field" style={{ justifyContent: "flex-end" }}>
             <label>&nbsp;</label>
-            <button className="btn" type="button" onClick={() => setFilters({})}>
+            <button className="btn" type="button" onClick={() => updateFilters(() => ({}))}>
               Clear filters ({activeFilterCount})
             </button>
           </div>
@@ -176,11 +199,36 @@ export function CatalogPage() {
           <div className="empty-state">표시할 캐릭터가 없습니다. Series를 추가하거나 Character Collector를 실행하세요.</div>
         ) : null}
         {!loading && items.length > 0 ? (
-          <div className="catalog-grid">
-            {items.map((item) => (
-              <CatalogCard key={item.id} item={item} />
-            ))}
-          </div>
+          <>
+            <div className="catalog-grid">
+              {items.map((item) => (
+                <CatalogCard key={item.id} item={item} />
+              ))}
+            </div>
+            <div className="pagination-bar">
+              <span className="catalog-card-subtitle">
+                {total.toLocaleString()} results · page {page} / {totalPages}
+              </span>
+              <div className="card-actions">
+                <button
+                  className="btn btn-small"
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                >
+                  Previous
+                </button>
+                <button
+                  className="btn btn-small"
+                  type="button"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </>
         ) : null}
       </section>
     </>

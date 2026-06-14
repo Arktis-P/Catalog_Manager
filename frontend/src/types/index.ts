@@ -64,6 +64,8 @@ export interface CatalogFilters {
   needs_review?: boolean;
   needs_regen?: boolean;
   search?: string;
+  skip?: number;
+  limit?: number;
 }
 
 export interface SeriesCreatePayload {

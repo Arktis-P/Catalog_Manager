@@ -67,4 +67,6 @@ echo Catalogue Manager is running.
 echo   Backend : http://127.0.0.1:%BACKEND_PORT%
 echo   Frontend: %APP_URL%
 echo Close the Backend/Frontend terminal windows to stop the app.
+echo.
+echo Tip: use scripts\launch_desktop.bat for the desktop app (recommended).
 exit /b 0

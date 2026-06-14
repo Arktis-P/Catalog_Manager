@@ -1,24 +1,45 @@
 # Catalogue Manager project metadata
-# This is a full product project, not a throwaway MVP.
 
 name = "Catalogue Manager"
-version = "0.1.0"
-description = "Danbooru character image catalog manager with GUI desktop workflow"
-gui = "react"
-desktop_target = "browser-app-mode"  # future: electron or tauri
+version = "0.2.0"
+description = "Danbooru character image catalog manager — desktop GUI application"
+scale_target = "500000+ characters per catalog"
+
+[architecture]
+frontend = "react-vite"
+backend = "fastapi-sqlite"
+desktop_shell = "pywebview"
+desktop_renderer = "webview2"
+ui_delivery = "embedded-webview"
+process_model = "single-launcher-with-backend-subprocess"
+
+# Desktop shell choice (pywebview + WebView2):
+# - Keeps existing React UI without rewrite
+# - Much lighter than bundling Chromium (Electron)
+# - Fits Python backend + venv workflow
+# - Window close terminates backend automatically
+# - Suitable for large catalogs when paired with server-side pagination
 
 [paths]
 backend = "backend"
 frontend = "frontend"
+desktop = "desktop"
 venv = ".venv"
 data = "data"
 input = "input"
 output = "output"
+logs = "logs"
 
 [runtime]
 backend_port = 8000
-frontend_port = 5173
-app_url = "http://127.0.0.1:5173"
+frontend_dev_port = 5173
+desktop_url = "http://127.0.0.1:8000"
+catalog_page_size = 48
+
+[launch]
+primary = "scripts/launch_desktop.bat"
+primary_silent = "scripts/Launch Catalogue Manager.vbs"
+dev_with_hot_reload = "scripts/launch_app.bat"
 
 [python]
 requirements = "backend/requirements.txt"
