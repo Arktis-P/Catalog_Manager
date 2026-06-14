@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  AppearanceReviewListResponse,
   CatalogFilters,
   CatalogListResponse,
   CatalogStats,
@@ -91,6 +92,15 @@ export const api = {
 
   updateSettings: (payload: Pick<AppSettings, "danbooru_collect_max_concurrent">) =>
     request<AppSettings>("/settings", { method: "PATCH", body: JSON.stringify(payload) }),
+
+  listAppearanceReviews: (params: { series_tag?: string; search?: string; skip?: number; limit?: number } = {}) =>
+    request<AppearanceReviewListResponse>(`/review/appearance${buildQuery(params)}`),
+
+  confirmAppearanceReview: (characterId: number) =>
+    request<{ id: number; appearance_confirmed: boolean; generation_prompt: string | null }>(
+      `/review/appearance/${characterId}/confirm`,
+      { method: "POST" },
+    ),
 
   getDanbooruStatus: () => request<DanbooruStatus>("/characters/danbooru/status"),
 

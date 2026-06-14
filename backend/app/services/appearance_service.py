@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.integrations.danbooru.appearance_extractor import AppearanceExtractor
 from app.models.character import Character
 from app.models.series import Series
+from app.services.prompt_service import build_generation_prompt
 
 AppearanceProgressCallback = Callable[[dict[str, object]], None]
 
@@ -57,6 +58,8 @@ class AppearanceService:
             character.eye_color = appearance.eye_color
             character.feature_tags = appearance.feature_tags
             character.from_related = True
+            character.appearance_confirmed = False
+            character.generation_prompt = build_generation_prompt(character)
             updated += 1
 
             if progress_callback:

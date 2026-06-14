@@ -21,6 +21,8 @@ class Character(Base):
     hair_shape: Mapped[str | None] = mapped_column(Text, nullable=True)
     eye_color: Mapped[str | None] = mapped_column(Text, nullable=True)
     feature_tags: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generation_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    appearance_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="needs_check", index=True)
     from_wiki: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     from_list_page: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

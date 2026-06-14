@@ -5,6 +5,7 @@ from app.models.character import Character
 from app.models.image import Image
 from app.models.review import Review
 from app.models.series import Series
+from app.services.prompt_service import mask_appearance_for_catalog
 
 
 def catalog_status_expression():
@@ -75,11 +76,20 @@ class CatalogService:
         if type_:
             query = query.filter(Review.type == type_)
         if hair_color:
-            query = query.filter(Character.hair_color.ilike(f"%{hair_color}%"))
+            query = query.filter(
+                Character.appearance_confirmed.is_(True),
+                Character.hair_color.ilike(f"%{hair_color}%"),
+            )
         if eye_color:
-            query = query.filter(Character.eye_color.ilike(f"%{eye_color}%"))
+            query = query.filter(
+                Character.appearance_confirmed.is_(True),
+                Character.eye_color.ilike(f"%{eye_color}%"),
+            )
         if feature_tags:
-            query = query.filter(Character.feature_tags.ilike(f"%{feature_tags}%"))
+            query = query.filter(
+                Character.appearance_confirmed.is_(True),
+                Character.feature_tags.ilike(f"%{feature_tags}%"),
+            )
         if search:
             pattern = f"%{search}%"
             query = query.filter(
@@ -138,6 +148,7 @@ class CatalogService:
         for character, catalog_status, has_cover in rows:
             cover_image = cover_image_by_character.get(character.id)
             review = character.review
+            appearance = mask_appearance_for_catalog(character)
             items.append(
                 {
                     "id": character.id,
@@ -151,11 +162,7 @@ class CatalogService:
                     "gender": review.gender if review else None,
                     "type": review.type if review else None,
                     "rating": review.rating if review else None,
-                    "multi_color_hair": character.multi_color_hair,
-                    "hair_color": character.hair_color,
-                    "hair_shape": character.hair_shape,
-                    "eye_color": character.eye_color,
-                    "feature_tags": character.feature_tags,
+                    **appearance,
                     "final_prompt": review.final_prompt if review else None,
                     "character_status": character.status,
                     "catalog_status": catalog_status,

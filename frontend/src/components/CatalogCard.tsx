@@ -12,7 +12,7 @@ function statusBadgeClass(status: string): string {
 }
 
 function formatAppearance(item: CatalogItem): string {
-  return [item.hair_color, item.hair_shape, item.eye_color, item.feature_tags]
+  return [item.multi_color_hair, item.hair_color, item.hair_shape, item.eye_color, item.feature_tags]
     .filter(Boolean)
     .join(", ");
 }
@@ -22,10 +22,11 @@ export function CatalogCard({ item, onChangeSeries }: CatalogCardProps) {
   const meta = [item.gender, item.type, item.rating !== null ? `rating ${item.rating}` : null]
     .filter(Boolean)
     .join(" / ");
+  const promptToCopy = item.generation_prompt || item.final_prompt;
 
   const copyPrompt = async () => {
-    if (!item.final_prompt) return;
-    await navigator.clipboard.writeText(item.final_prompt);
+    if (!promptToCopy) return;
+    await navigator.clipboard.writeText(promptToCopy);
   };
 
   return (
@@ -49,8 +50,13 @@ export function CatalogCard({ item, onChangeSeries }: CatalogCardProps) {
         </div>
         {meta ? <div className="catalog-card-subtitle">{meta}</div> : null}
         {appearance ? <div className="catalog-card-subtitle">{appearance}</div> : null}
+        {item.generation_prompt ? (
+          <div className="catalog-card-subtitle" title={item.generation_prompt}>
+            prompt: {item.generation_prompt}
+          </div>
+        ) : null}
         <div className="card-actions">
-          <button className="btn btn-small" type="button" onClick={copyPrompt} disabled={!item.final_prompt}>
+          <button className="btn btn-small" type="button" onClick={copyPrompt} disabled={!promptToCopy}>
             Prompt Copy
           </button>
           {onChangeSeries ? (

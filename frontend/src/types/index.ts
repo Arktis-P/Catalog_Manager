@@ -35,6 +35,7 @@ export interface CatalogItem {
   hair_shape: string | null;
   eye_color: string | null;
   feature_tags: string | null;
+  generation_prompt: string | null;
   final_prompt: string | null;
   character_status: string;
   catalog_status: string;
@@ -84,6 +85,28 @@ export interface CollectJob {
 export interface AppSettings {
   danbooru_collect_max_concurrent: number;
   danbooru_request_delay: number;
+}
+
+export interface AppearanceReviewItem {
+  id: number;
+  series_tag: string;
+  series_display_name: string;
+  character_tag: string;
+  display_name: string;
+  post_count: number;
+  danbooru_url: string | null;
+  multi_color_hair: string | null;
+  hair_color: string | null;
+  hair_shape: string | null;
+  eye_color: string | null;
+  feature_tags: string | null;
+  generation_prompt: string | null;
+  appearance_confirmed: boolean;
+}
+
+export interface AppearanceReviewListResponse {
+  items: AppearanceReviewItem[];
+  total: number;
 }
 
 export interface DanbooruStatus {

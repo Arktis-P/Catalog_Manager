@@ -56,6 +56,19 @@ HETEROCHROMIA_TAG = "heterochromia"
 HETEROCHROMIA_MIN_FREQUENCY = 0.12
 FEATURE_TAG_MAX = 8
 
+STREAK_COLOR_TAGS = (
+    "red_streaks",
+    "orange_streaks",
+    "blonde_streaks",
+    "green_streaks",
+    "aqua_streaks",
+    "blue_streaks",
+    "black_streaks",
+    "grey_streaks",
+    "white_streaks",
+    "brown_streaks",
+)
+
 
 @dataclass(frozen=True)
 class RelatedTag:
@@ -129,12 +142,26 @@ def parse_related_tags(payload: object) -> list[RelatedTag]:
 
 def extract_multi_color_hair(related: list[RelatedTag]) -> str | None:
     by_name = {item.name: item.frequency for item in related}
+    base_tag: str | None = None
     for tag in MULTI_COLOR_HAIR_PRIORITY:
         if tag in by_name:
-            return tag
-    if MULTI_COLOR_HAIR_FALLBACK in by_name:
-        return MULTI_COLOR_HAIR_FALLBACK
-    return None
+            base_tag = tag
+            break
+    if base_tag is None and MULTI_COLOR_HAIR_FALLBACK in by_name:
+        base_tag = MULTI_COLOR_HAIR_FALLBACK
+    if base_tag is None:
+        return None
+
+    if base_tag != "streaked_hair":
+        return base_tag
+
+    streak_matches = [item for item in related if item.name in STREAK_COLOR_TAGS]
+    streak_matches.sort(key=lambda item: item.frequency, reverse=True)
+    if not streak_matches:
+        return base_tag
+
+    parts = [base_tag, *(item.name for item in streak_matches)]
+    return ", ".join(parts)
 
 
 def extract_hair_color(related: list[RelatedTag], *, limit: int = 5) -> str | None:

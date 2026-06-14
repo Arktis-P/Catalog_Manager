@@ -82,6 +82,7 @@ class CatalogItemResponse(BaseModel):
     hair_shape: str | None = None
     eye_color: str | None = None
     feature_tags: str | None = None
+    generation_prompt: str | None = None
     final_prompt: str | None = None
     character_status: str
     catalog_status: str
