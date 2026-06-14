@@ -18,11 +18,11 @@ function getProgressPercent(job: CollectJob): number | null {
 function phaseLabel(phase: string): string {
   switch (phase) {
     case "discovering_pattern":
-      return "1/3 패턴 검색";
+      return "2/3 패턴 검색";
     case "discovering_posts_scan":
-      return "2/3 post 스캔";
+      return "1/3 character tag";
     case "discovering_posts_verify":
-      return "2/3 post 보완";
+      return "2/3 character 분류";
     case "discovering":
       return "캐릭터 tag 발견";
     case "counting":
