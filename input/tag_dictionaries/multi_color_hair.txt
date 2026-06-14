@@ -1,0 +1,4 @@
+multicolored_hair
+streaked_hair
+two-tone_hair
+gradient_hair

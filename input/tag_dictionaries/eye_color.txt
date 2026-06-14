@@ -1,0 +1,7 @@
+blue_eyes
+brown_eyes
+green_eyes
+purple_eyes
+red_eyes
+yellow_eyes
+heterochromia

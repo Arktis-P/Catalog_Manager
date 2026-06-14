@@ -1,0 +1,7 @@
+long_hair
+short_hair
+medium_hair
+twintails
+ponytail
+braid
+bob_cut

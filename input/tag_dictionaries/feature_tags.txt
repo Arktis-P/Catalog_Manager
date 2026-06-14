@@ -1,0 +1,8 @@
+glasses
+horns
+animal_ears
+tail
+wings
+sunglasses
+hat
+mask
