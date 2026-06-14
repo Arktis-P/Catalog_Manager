@@ -4,9 +4,8 @@ import time
 from typing import Any
 from urllib.parse import quote
 
-import requests
 from pybooru import Danbooru
-from requests.auth import HTTPBasicAuth
+from pybooru.exceptions import PybooruHTTPError
 
 from app.config import settings
 
@@ -29,7 +28,6 @@ class DanbooruClient:
         self.api_key = (api_key or settings.danbooru_api_key).strip()
         self.request_delay = request_delay if request_delay is not None else settings.danbooru_request_delay
         self._client: Danbooru | None = None
-        self._auth = HTTPBasicAuth(self.username, self.api_key)
 
         if not self.username or not self.api_key:
             raise ValueError(
@@ -50,20 +48,40 @@ class DanbooruClient:
     def _sleep(self) -> None:
         time.sleep(self.request_delay)
 
-    def _request(self, path: str, *, params: dict[str, Any] | None = None) -> requests.Response:
+    def _handle_http_error(self, exc: PybooruHTTPError) -> None:
+        status_code = exc.args[1] if len(exc.args) > 1 else None
+        if status_code == 403:
+            raise DanbooruAuthError(
+                "Danbooru rejected the credentials (403 Forbidden). "
+                "Check username and api_key in input/danbooru.env, then regenerate the API key at "
+                "https://danbooru.donmai.us/profile if needed."
+            ) from exc
+        if status_code == 401:
+            raise DanbooruAuthError(
+                "Danbooru authentication failed (401 Unauthorized). "
+                "Verify username and api_key in input/danbooru.env."
+            ) from exc
+        raise exc
+
+    def _get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
         self._sleep()
-        return requests.get(
-            f"{settings.danbooru_base_url}{path}",
-            auth=self._auth,
-            params=params,
-            timeout=60,
-            headers={"User-Agent": "CatalogueManager/0.2 (+local app)"},
-        )
+        try:
+            return self.client._get(path, params or {})
+        except PybooruHTTPError as exc:
+            self._handle_http_error(exc)
+
+    @staticmethod
+    def _ensure_list(payload: Any, *, context: str) -> list[dict[str, Any]]:
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict) and payload.get("success") is False:
+            raise RuntimeError(f"Danbooru API error ({context}): {payload}")
+        raise RuntimeError(f"Unexpected Danbooru response ({context}): {payload}")
 
     def verify_credentials(self) -> dict[str, Any]:
-        response = self._request(
-            "/tags.json",
-            params={
+        payload = self._get_json(
+            "tags.json",
+            {
                 "search[category]": 3,
                 "search[hide_empty]": "yes",
                 "search[order]": "count",
@@ -71,29 +89,19 @@ class DanbooruClient:
                 "page": 1,
             },
         )
-
-        if response.status_code == 403:
-            raise DanbooruAuthError(
-                "Danbooru rejected the credentials (403 Forbidden). "
-                "Check username and api_key in input/danbooru.env, then regenerate the API key at "
-                "https://danbooru.donmai.us/profile if needed."
-            )
-        if response.status_code == 401:
-            raise DanbooruAuthError(
-                "Danbooru authentication failed (401 Unauthorized). "
-                "Verify username and api_key in input/danbooru.env."
-            )
-
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list):
-            raise DanbooruAuthError(f"Unexpected Danbooru response during verification: {payload}")
-
+        tags = self._ensure_list(payload, context="verify_credentials")
         return {
             "username": self.username,
-            "verified_via": "tags.json",
-            "sample_tag": payload[0]["name"] if payload else None,
+            "verified_via": "pybooru",
+            "pybooru_version": self._pybooru_version(),
+            "sample_tag": tags[0]["name"] if tags else None,
         }
+
+    @staticmethod
+    def _pybooru_version() -> str:
+        import pybooru
+
+        return getattr(pybooru, "__version__", "unknown")
 
     def list_copyright_tags(
         self,
@@ -103,9 +111,9 @@ class DanbooruClient:
         hide_empty: str = "yes",
         order: str = "count",
     ) -> list[dict[str, Any]]:
-        response = self._request(
-            "/tags.json",
-            params={
+        payload = self._get_json(
+            "tags.json",
+            {
                 "search[category]": 3,
                 "search[hide_empty]": hide_empty,
                 "search[order]": order,
@@ -113,11 +121,7 @@ class DanbooruClient:
                 "page": page,
             },
         )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list):
-            raise RuntimeError(f"Danbooru API error: {payload}")
-        return payload
+        return self._ensure_list(payload, context="list_copyright_tags")
 
     def list_character_tags_by_pattern(
         self,
@@ -126,9 +130,9 @@ class DanbooruClient:
         page: int = 1,
         limit: int = 1000,
     ) -> list[dict[str, Any]]:
-        response = self._request(
-            "/tags.json",
-            params={
+        payload = self._get_json(
+            "tags.json",
+            {
                 "search[name_matches]": f"*_({series_tag})",
                 "search[category]": self.CATEGORY_CHARACTER,
                 "search[order]": "count",
@@ -136,39 +140,28 @@ class DanbooruClient:
                 "page": page,
             },
         )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list):
-            raise RuntimeError(f"Danbooru API error: {payload}")
-        return payload
+        return self._ensure_list(payload, context="list_character_tags_by_pattern")
 
     def get_tag(self, tag_name: str) -> dict[str, Any] | None:
-        response = self._request("/tags.json", params={"search[name]": tag_name})
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list) or not payload:
-            return None
-        return payload[0]
+        payload = self._get_json("tags.json", {"search[name]": tag_name})
+        tags = self._ensure_list(payload, context="get_tag")
+        return tags[0] if tags else None
 
     def list_posts(self, *, tags: str, page: int = 1, limit: int | None = None) -> list[dict[str, Any]]:
-        response = self._request(
-            "/posts.json",
-            params={
+        payload = self._get_json(
+            "posts.json",
+            {
                 "tags": tags,
-                "limit": limit or settings.danbooru_character_post_limit,
                 "page": page,
+                "limit": limit or settings.danbooru_character_post_limit,
             },
         )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list):
-            raise RuntimeError(f"Danbooru API error: {payload}")
-        return payload
+        return self._ensure_list(payload, context="list_posts")
 
     def count_posts(self, tags: str) -> int:
-        response = self._request("/counts/posts.json", params={"tags": tags})
-        response.raise_for_status()
-        payload = response.json()
+        payload = self._get_json("counts/posts.json", {"tags": tags})
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Unexpected Danbooru count response: {payload}")
         return int(payload.get("counts", {}).get("posts", 0))
 
     @staticmethod

@@ -21,6 +21,7 @@ export interface CatalogItem {
   series_display_name: string;
   character_tag: string;
   display_name: string;
+  post_count: number;
   danbooru_url: string | null;
   cover_image: string | null;
   gender: string | null;
@@ -56,6 +57,33 @@ export interface CharacterCollectResult {
   discovered: number;
   created: number;
   skipped_existing: number;
+}
+
+export interface CollectJob {
+  job_id: string;
+  series_id: number;
+  series_tag: string;
+  status: string;
+  phase: string;
+  message: string;
+  current: number;
+  total: number;
+  discovered: number;
+  created: number;
+  skipped_existing: number;
+  error?: string | null;
+  started_at: string;
+  finished_at?: string | null;
+}
+
+export interface DanbooruStatus {
+  configured: boolean;
+  ready: boolean;
+  message: string;
+  username?: string;
+  verified_via?: string;
+  pybooru_version?: string;
+  sample_tag?: string | null;
 }
 
 export interface CatalogFilters {

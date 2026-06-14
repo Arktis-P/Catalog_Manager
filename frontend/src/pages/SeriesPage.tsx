@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
-import type { Series, SeriesCreatePayload } from "../types";
+import { useCollectJobs } from "../context/CollectJobContext";
+import type { DanbooruStatus, Series, SeriesCreatePayload } from "../types";
 
 type ModalMode = "create" | "edit";
 
@@ -14,6 +15,7 @@ const emptyForm: SeriesCreatePayload = {
 };
 
 export function SeriesPage() {
+  const { startCollect, isCollectingSeries } = useCollectJobs();
   const [items, setItems] = useState<Series[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [search, setSearch] = useState("");
@@ -24,8 +26,7 @@ export function SeriesPage() {
   const [editingSeries, setEditingSeries] = useState<Series | null>(null);
   const [form, setForm] = useState<SeriesCreatePayload>(emptyForm);
   const [importReplace, setImportReplace] = useState(false);
-  const [collectingSeriesId, setCollectingSeriesId] = useState<number | null>(null);
-  const [collectMessage, setCollectMessage] = useState<string | null>(null);
+  const [danbooruStatus, setDanbooruStatus] = useState<DanbooruStatus | null>(null);
 
   const filteredCount = useMemo(() => items.length, [items]);
 
@@ -54,6 +55,13 @@ export function SeriesPage() {
   useEffect(() => {
     void loadSeries();
   }, [search, statusFilter]);
+
+  useEffect(() => {
+    void api
+      .getDanbooruStatus()
+      .then(setDanbooruStatus)
+      .catch(() => setDanbooruStatus(null));
+  }, []);
 
   const openCreateModal = () => {
     setModalMode("create");
@@ -96,19 +104,11 @@ export function SeriesPage() {
   };
 
   const handleCollectCharacters = async (series: Series) => {
-    setCollectingSeriesId(series.id);
-    setCollectMessage(null);
     setError(null);
     try {
-      const result = await api.collectCharactersForSeries(series.id);
-      setCollectMessage(
-        `${result.series_tag}: discovered ${result.discovered}, added ${result.created}, skipped ${result.skipped_existing}`,
-      );
-      await loadSeries();
+      await startCollect(series.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to collect characters");
-    } finally {
-      setCollectingSeriesId(null);
     }
   };
 
@@ -175,6 +175,18 @@ export function SeriesPage() {
         </div>
       </div>
 
+      {danbooruStatus ? (
+        <div
+          className={`danbooru-status ${
+            danbooruStatus.ready ? "danbooru-status-ready" : "danbooru-status-error"
+          }`}
+        >
+          {danbooruStatus.ready
+            ? `Danbooru / pybooru 준비됨 (${danbooruStatus.username}, v${danbooruStatus.pybooru_version ?? "?"})`
+            : danbooruStatus.message}
+        </div>
+      ) : null}
+
       <section className="panel">
         <div className="toolbar">
           <div className="field">
@@ -217,7 +229,6 @@ export function SeriesPage() {
         </div>
 
         {error ? <div className="error-banner">{error}</div> : null}
-        {collectMessage ? <div className="stat-card" style={{ marginBottom: 16 }}>{collectMessage}</div> : null}
         {loading ? <div className="empty-state">Loading series...</div> : null}
 
         {!loading ? (
@@ -254,10 +265,10 @@ export function SeriesPage() {
                           <button
                             className="btn btn-small btn-primary"
                             type="button"
-                            disabled={collectingSeriesId === series.id}
+                            disabled={isCollectingSeries(series.id) || danbooruStatus?.ready === false}
                             onClick={() => void handleCollectCharacters(series)}
                           >
-                            {collectingSeriesId === series.id ? "Collecting..." : "Collect"}
+                            {isCollectingSeries(series.id) ? "Collecting..." : "Collect"}
                           </button>
                           <button className="btn btn-small" type="button" onClick={() => openEditModal(series)}>
                             Edit

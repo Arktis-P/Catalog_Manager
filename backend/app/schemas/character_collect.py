@@ -21,3 +21,43 @@ class CharacterCollectRequest(BaseModel):
     series_tag: str | None = None
     status: str | None = None
     limit: int | None = Field(default=None, ge=1, le=500)
+
+
+class CollectJobResponse(BaseModel):
+    job_id: str
+    series_id: int
+    series_tag: str
+    status: str
+    phase: str
+    message: str
+    current: int
+    total: int
+    discovered: int
+    created: int
+    skipped_existing: int
+    error: str | None = None
+    started_at: str
+    finished_at: str | None = None
+
+    @classmethod
+    def from_state(cls, state) -> "CollectJobResponse":
+        return cls(
+            job_id=state.job_id,
+            series_id=state.series_id,
+            series_tag=state.series_tag,
+            status=state.status,
+            phase=state.phase,
+            message=state.message,
+            current=state.current,
+            total=state.total,
+            discovered=state.discovered,
+            created=state.created,
+            skipped_existing=state.skipped_existing,
+            error=state.error,
+            started_at=state.started_at,
+            finished_at=state.finished_at,
+        )
+
+
+class CollectJobListResponse(BaseModel):
+    items: list[CollectJobResponse]

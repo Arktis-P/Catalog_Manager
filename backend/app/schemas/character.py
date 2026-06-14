@@ -35,6 +35,10 @@ class CharacterBase(BaseModel):
     status: str = "needs_check"
 
 
+class CharacterSeriesUpdate(BaseModel):
+    series_id: int = Field(ge=1)
+
+
 class CharacterResponse(CharacterBase):
     model_config = ConfigDict(from_attributes=True)
 
@@ -67,6 +71,7 @@ class CatalogItemResponse(BaseModel):
     series_display_name: str
     character_tag: str
     display_name: str
+    post_count: int = 0
     danbooru_url: str | None = None
     cover_image: str | None = None
     gender: str | None = None

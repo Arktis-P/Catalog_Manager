@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { GlobalTaskBar } from "./GlobalTaskBar";
 
 const navItems = [
   { to: "/", label: "Catalog", end: true },
@@ -30,6 +31,7 @@ export function Layout() {
           </nav>
         </div>
       </header>
+      <GlobalTaskBar />
       <main className="page-container">
         <Outlet />
       </main>

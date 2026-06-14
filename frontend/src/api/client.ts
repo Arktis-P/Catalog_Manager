@@ -3,6 +3,8 @@ import type {
   CatalogListResponse,
   CatalogStats,
   CharacterCollectResult,
+  CollectJob,
+  DanbooruStatus,
   Series,
   SeriesCreatePayload,
   SeriesListResponse,
@@ -73,6 +75,21 @@ export const api = {
 
   collectCharactersForSeries: (seriesId: number) =>
     request<CharacterCollectResult>(`/characters/series/${seriesId}/collect`, { method: "POST" }),
+
+  startCollectCharactersJob: (seriesId: number) =>
+    request<CollectJob>(`/characters/series/${seriesId}/collect/start`, { method: "POST" }),
+
+  getCollectJob: (jobId: string) => request<CollectJob>(`/characters/collect/jobs/${jobId}`),
+
+  listCollectJobs: () => request<{ items: CollectJob[] }>("/characters/collect/jobs"),
+
+  getDanbooruStatus: () => request<DanbooruStatus>("/characters/danbooru/status"),
+
+  updateCharacterSeries: (characterId: number, seriesId: number) =>
+    request<{ id: number; series_id: number; series_tag: string; character_tag: string; post_count: number }>(
+      `/characters/${characterId}/series`,
+      { method: "PATCH", body: JSON.stringify({ series_id: seriesId }) },
+    ),
 
   collectCharactersBatch: (payload: { status?: string; limit?: number }) =>
     request<{ series_processed: number; total_created: number; total_discovered: number; total_skipped_existing: number }>(

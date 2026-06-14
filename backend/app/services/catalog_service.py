@@ -145,6 +145,7 @@ class CatalogService:
                     "series_display_name": character.series.display_name,
                     "character_tag": character.character_tag,
                     "display_name": character.display_name or character.character_tag,
+                    "post_count": character.post_count,
                     "danbooru_url": character.danbooru_url,
                     "cover_image": cover_image.image_path if cover_image else None,
                     "gender": review.gender if review else None,

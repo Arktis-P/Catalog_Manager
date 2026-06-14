@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
@@ -8,6 +9,8 @@ from app.integrations.danbooru.character_collector import CharacterCollector, ta
 from app.integrations.danbooru.client import DanbooruClient
 from app.models.character import Character
 from app.models.series import Series
+
+CollectProgressCallback = Callable[[dict[str, object]], None]
 
 
 @dataclass
@@ -32,6 +35,9 @@ class CharacterService:
         self.db = db
         self.collector = collector or CharacterCollector()
 
+    def get_character(self, character_id: int) -> Character | None:
+        return self.db.query(Character).filter(Character.id == character_id).first()
+
     def get_existing_tags(self, series_id: int) -> set[str]:
         rows = (
             self.db.query(Character.character_tag)
@@ -45,7 +51,11 @@ class CharacterService:
         series: Series,
         *,
         max_characters: int | None = None,
+        progress_callback: CollectProgressCallback | None = None,
     ) -> CharacterCollectResult:
+        series.status = "collecting"
+        self.db.commit()
+
         existing_tags = self.get_existing_tags(series.id)
         discover_limit = None
         if max_characters is not None:
@@ -54,6 +64,7 @@ class CharacterService:
         candidates_map = self.collector.discover_character_tags(
             series.series_tag,
             max_candidates=discover_limit,
+            progress_callback=progress_callback,
         )
         new_candidates_map = {
             name: candidate for name, candidate in candidates_map.items() if name not in existing_tags
@@ -66,7 +77,19 @@ class CharacterService:
             series.series_tag,
             new_candidates_map,
             progress_label=series.series_tag,
+            progress_callback=progress_callback,
         )
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "saving",
+                    "message": "DB에 저장 중...",
+                    "current": 0,
+                    "total": len(new_candidates_map),
+                    "discovered": len(candidates_map),
+                }
+            )
 
         created = 0
         skipped_existing = len(candidates_map) - len(new_candidates_map)
@@ -92,7 +115,7 @@ class CharacterService:
 
         if created:
             series.status = "collected" if series.status in {"pending", "collecting"} else series.status
-        elif series.status == "pending":
+        elif series.status == "collecting":
             series.status = "collecting"
 
         self.db.commit()
@@ -108,11 +131,56 @@ class CharacterService:
         series_tag: str,
         *,
         max_characters: int | None = None,
+        progress_callback: CollectProgressCallback | None = None,
     ) -> CharacterCollectResult:
         series = self.db.query(Series).filter(Series.series_tag == series_tag).first()
         if not series:
             raise ValueError(f"Series not found: {series_tag}")
-        return self.collect_for_series(series, max_characters=max_characters)
+        return self.collect_for_series(
+            series,
+            max_characters=max_characters,
+            progress_callback=progress_callback,
+        )
+
+    def update_character_series(self, character_id: int, series_id: int) -> Character:
+        character = self.get_character(character_id)
+        if not character:
+            raise ValueError("Character not found")
+
+        series = self.db.query(Series).filter(Series.id == series_id).first()
+        if not series:
+            raise ValueError("Series not found")
+
+        if character.series_id == series_id:
+            return character
+
+        duplicate = (
+            self.db.query(Character)
+            .filter(
+                Character.series_id == series_id,
+                Character.character_tag == character.character_tag,
+                Character.id != character_id,
+            )
+            .first()
+        )
+        if duplicate:
+            raise ValueError(
+                f"Character tag already exists for series '{series.series_tag}': {character.character_tag}"
+            )
+
+        character.series_id = series_id
+        character.danbooru_url = DanbooruClient.build_danbooru_url(
+            character.character_tag,
+            series.series_tag,
+        )
+        character.post_count = self.collector.client.count_posts(
+            DanbooruClient.build_search_tags(character.character_tag, series.series_tag)
+        )
+        character.status = "needs_check"
+        character.needs_check_reason = f"Moved to series '{series.series_tag}'"
+        self.db.commit()
+        self.db.refresh(character)
+        return character
 
     def collect_batch(
         self,
@@ -120,6 +188,7 @@ class CharacterService:
         series_ids: list[int] | None = None,
         status: str | None = None,
         limit: int | None = None,
+        progress_callback: CollectProgressCallback | None = None,
     ) -> CharacterCollectSummary:
         query = self.db.query(Series).order_by(Series.post_count.desc(), Series.id.asc())
         if series_ids:
@@ -136,9 +205,7 @@ class CharacterService:
         total_skipped = 0
 
         for series in series_list:
-            series.status = "collecting"
-            self.db.commit()
-            result = self.collect_for_series(series)
+            result = self.collect_for_series(series, progress_callback=progress_callback)
             results.append(result)
             total_discovered += result.discovered
             total_created += result.created

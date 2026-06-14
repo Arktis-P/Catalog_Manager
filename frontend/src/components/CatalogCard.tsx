@@ -2,6 +2,7 @@ import type { CatalogItem } from "../types";
 
 interface CatalogCardProps {
   item: CatalogItem;
+  onChangeSeries?: (item: CatalogItem) => void;
 }
 
 function statusBadgeClass(status: string): string {
@@ -16,7 +17,7 @@ function formatAppearance(item: CatalogItem): string {
     .join(", ");
 }
 
-export function CatalogCard({ item }: CatalogCardProps) {
+export function CatalogCard({ item, onChangeSeries }: CatalogCardProps) {
   const appearance = formatAppearance(item);
   const meta = [item.gender, item.type, item.rating !== null ? `rating ${item.rating}` : null]
     .filter(Boolean)
@@ -44,6 +45,7 @@ export function CatalogCard({ item }: CatalogCardProps) {
         <div className="tag-row">
           <span className={statusBadgeClass(item.catalog_status)}>{item.catalog_status}</span>
           <span className="badge">{item.character_status}</span>
+          <span className="badge">{item.post_count.toLocaleString()} posts</span>
         </div>
         {meta ? <div className="catalog-card-subtitle">{meta}</div> : null}
         {appearance ? <div className="catalog-card-subtitle">{appearance}</div> : null}
@@ -51,6 +53,11 @@ export function CatalogCard({ item }: CatalogCardProps) {
           <button className="btn btn-small" type="button" onClick={copyPrompt} disabled={!item.final_prompt}>
             Prompt Copy
           </button>
+          {onChangeSeries ? (
+            <button className="btn btn-small" type="button" onClick={() => onChangeSeries(item)}>
+              Change Series
+            </button>
+          ) : null}
           {item.danbooru_url ? (
             <a className="btn btn-small" href={item.danbooru_url} target="_blank" rel="noreferrer">
               Danbooru

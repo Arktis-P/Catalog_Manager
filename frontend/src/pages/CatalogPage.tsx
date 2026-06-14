@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
-import type { CatalogFilters, CatalogItem, CatalogStats } from "../types";
+import type { CatalogFilters, CatalogItem, CatalogStats, Series } from "../types";
 import { CatalogCard } from "../components/CatalogCard";
 
 const PAGE_SIZE = 48;
@@ -18,10 +18,15 @@ export function CatalogPage() {
   const [page, setPage] = useState(1);
   const [stats, setStats] = useState<CatalogStats>(emptyStats);
   const [statuses, setStatuses] = useState<string[]>([]);
-  const [seriesOptions, setSeriesOptions] = useState<string[]>([]);
+  const [seriesOptions, setSeriesOptions] = useState<Series[]>([]);
   const [filters, setFilters] = useState<CatalogFilters>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [seriesChangeTarget, setSeriesChangeTarget] = useState<CatalogItem | null>(null);
+  const [seriesChangeId, setSeriesChangeId] = useState<number | null>(null);
+  const [seriesChangeSearch, setSeriesChangeSearch] = useState("");
+  const [seriesPickerItems, setSeriesPickerItems] = useState<Series[]>([]);
+  const [seriesChangeSaving, setSeriesChangeSaving] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -52,7 +57,7 @@ export function CatalogPage() {
       setTotal(catalog.total);
       setStats(catalogStats);
       setStatuses(catalogStatuses);
-      setSeriesOptions(seriesList.items.map((series) => series.series_tag));
+      setSeriesOptions(seriesList.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load catalog");
     } finally {
@@ -68,8 +73,56 @@ export function CatalogPage() {
     void loadData(page);
   }, [filters, page]);
 
+  useEffect(() => {
+    if (!seriesChangeTarget) return;
+    const timer = window.setTimeout(() => {
+      void api
+        .listSeries({
+          search: seriesChangeSearch || undefined,
+          sort_by: "post_count",
+          sort_order: "desc",
+          limit: 100,
+        })
+        .then((response) => setSeriesPickerItems(response.items))
+        .catch(() => setSeriesPickerItems([]));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [seriesChangeTarget, seriesChangeSearch]);
+
   const updateFilters = (updater: (prev: CatalogFilters) => CatalogFilters) => {
     setFilters(updater);
+  };
+
+  const openSeriesChangeModal = (item: CatalogItem) => {
+    setSeriesChangeTarget(item);
+    setSeriesChangeId(null);
+    setSeriesChangeSearch("");
+    setError(null);
+  };
+
+  const closeSeriesChangeModal = () => {
+    setSeriesChangeTarget(null);
+    setSeriesChangeId(null);
+    setSeriesChangeSearch("");
+    setSeriesChangeSaving(false);
+  };
+
+  const filteredSeriesOptions = seriesPickerItems;
+
+  const handleSeriesChange = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!seriesChangeTarget || !seriesChangeId) return;
+    setSeriesChangeSaving(true);
+    setError(null);
+    try {
+      await api.updateCharacterSeries(seriesChangeTarget.id, seriesChangeId);
+      closeSeriesChangeModal();
+      await loadData(page);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to change series");
+    } finally {
+      setSeriesChangeSaving(false);
+    }
   };
 
   return (
@@ -126,9 +179,9 @@ export function CatalogPage() {
               }
             >
               <option value="">All</option>
-              {seriesOptions.map((seriesTag) => (
-                <option key={seriesTag} value={seriesTag}>
-                  {seriesTag}
+              {seriesOptions.map((series) => (
+                <option key={series.series_tag} value={series.series_tag}>
+                  {series.series_tag}
                 </option>
               ))}
             </select>
@@ -202,7 +255,7 @@ export function CatalogPage() {
           <>
             <div className="catalog-grid">
               {items.map((item) => (
-                <CatalogCard key={item.id} item={item} />
+                <CatalogCard key={item.id} item={item} onChangeSeries={openSeriesChangeModal} />
               ))}
             </div>
             <div className="pagination-bar">
@@ -231,6 +284,54 @@ export function CatalogPage() {
           </>
         ) : null}
       </section>
+
+      {seriesChangeTarget ? (
+        <div className="modal-backdrop" onClick={closeSeriesChangeModal}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal-title">Change Series</h2>
+            <p className="page-description">
+              {seriesChangeTarget.character_tag} · current: {seriesChangeTarget.series_tag}
+            </p>
+            <form onSubmit={(event) => void handleSeriesChange(event)}>
+              <div className="form-grid">
+                <div className="field full-width">
+                  <label htmlFor="series-change-search">Search series</label>
+                  <input
+                    id="series-change-search"
+                    value={seriesChangeSearch}
+                    onChange={(event) => setSeriesChangeSearch(event.target.value)}
+                    placeholder="series tag"
+                  />
+                </div>
+                <div className="field full-width">
+                  <label htmlFor="series-change-target">Target series</label>
+                  <select
+                    id="series-change-target"
+                    required
+                    value={seriesChangeId ?? ""}
+                    onChange={(event) => setSeriesChangeId(Number(event.target.value))}
+                  >
+                    <option value="">Select series</option>
+                    {filteredSeriesOptions.map((series) => (
+                      <option key={series.id} value={series.id}>
+                        {series.series_tag} · {series.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="modal-actions">
+                <button className="btn" type="button" onClick={closeSeriesChangeModal}>
+                  Cancel
+                </button>
+                <button className="btn btn-primary" type="submit" disabled={!seriesChangeId || seriesChangeSaving}>
+                  {seriesChangeSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

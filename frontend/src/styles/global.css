@@ -424,6 +424,115 @@ button {
   border-top: 1px solid var(--border);
 }
 
+.progress-panel {
+  margin-bottom: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+}
+
+.global-task-bar {
+  border-bottom: 1px solid var(--border);
+  background: rgba(15, 20, 25, 0.92);
+}
+
+.global-task-bar-inner {
+  width: min(1400px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 12px 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.global-task-bar-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.global-task-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progress-panel-error {
+  border-color: rgba(224, 108, 117, 0.45);
+}
+
+.progress-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.progress-panel-message {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+}
+
+.progress-panel-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.progress-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #7aa2ff);
+  transition: width 0.25s ease;
+}
+
+.progress-bar-indeterminate .progress-bar-fill {
+  width: 35% !important;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.danbooru-status {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--accent-soft);
+  color: var(--text-muted);
+}
+
+.danbooru-status-ready {
+  border-color: rgba(76, 175, 135, 0.35);
+  background: rgba(76, 175, 135, 0.08);
+}
+
+.danbooru-status-error {
+  border-color: rgba(224, 108, 117, 0.35);
+  background: rgba(224, 108, 117, 0.08);
+}
+
 @media (max-width: 720px) {
   .form-grid {
     grid-template-columns: 1fr;
