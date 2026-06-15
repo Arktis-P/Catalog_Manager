@@ -173,6 +173,8 @@ export interface GenerationCandidate {
   generation_prompt: string | null;
   appearance_confirmed: boolean;
   gender: string | null;
+  status: string;
+  needs_check_reason: string | null;
 }
 
 export interface GenerationCandidateListResponse {
@@ -182,6 +184,7 @@ export interface GenerationCandidateListResponse {
   with_prompt: number;
   confirmed_with_prompt: number;
   unconfirmed_with_prompt: number;
+  needs_check_with_prompt: number;
 }
 
 export interface NaiaStatus {

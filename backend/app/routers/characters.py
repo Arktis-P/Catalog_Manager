@@ -211,6 +211,7 @@ def export_characters_csv(
 def list_characters_for_series(
     series_id: int,
     search: str | None = None,
+    status: str | None = Query(default=None),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=500, ge=1, le=2000),
     service: CharacterService = Depends(get_character_service),
@@ -218,7 +219,7 @@ def list_characters_for_series(
     series = service.db.query(Series).filter(Series.id == series_id).first()
     if not series:
         raise HTTPException(status_code=404, detail="Series not found")
-    rows, total = service.list_characters(series_id=series_id, search=search, skip=skip, limit=limit)
+    rows, total = service.list_characters(series_id=series_id, search=search, status=status, skip=skip, limit=limit)
     return CharacterListResponse(
         items=[
             _character_response(character, row_series, source_series)

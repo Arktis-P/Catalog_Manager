@@ -28,10 +28,12 @@ export function GenerationPage() {
     with_prompt: 0,
     confirmed_with_prompt: 0,
     unconfirmed_with_prompt: 0,
+    needs_check_with_prompt: 0,
   });
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [promptLevel, setPromptLevel] = useState(1);
   const [requireConfirmed, setRequireConfirmed] = useState(true);
+  const [showNeedsCheckOnly, setShowNeedsCheckOnly] = useState(false);
   const [characterSearch, setCharacterSearch] = useState("");
   const [naiaStatus, setNaiaStatus] = useState<NaiaStatus | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
@@ -94,6 +96,7 @@ export function GenerationPage() {
         with_prompt: 0,
         confirmed_with_prompt: 0,
         unconfirmed_with_prompt: 0,
+        needs_check_with_prompt: 0,
       });
       return;
     }
@@ -104,6 +107,8 @@ export function GenerationPage() {
       try {
         const response = await api.listGenerationCandidates(selectedSeriesId, {
           require_confirmed: requireConfirmed,
+          exclude_needs_check: !showNeedsCheckOnly,
+          needs_check_only: showNeedsCheckOnly,
           search: characterSearch || undefined,
         });
         setCandidates(response.items);
@@ -112,15 +117,18 @@ export function GenerationPage() {
           with_prompt: response.with_prompt,
           confirmed_with_prompt: response.confirmed_with_prompt,
           unconfirmed_with_prompt: response.unconfirmed_with_prompt,
+          needs_check_with_prompt: response.needs_check_with_prompt,
         });
-        setSelectedIds(new Set(response.items.map((item) => item.id)));
+        setSelectedIds(
+          new Set(showNeedsCheckOnly ? [] : response.items.map((item) => item.id)),
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : "캐릭터 목록을 불러오지 못했습니다.");
       } finally {
         setLoadingCandidates(false);
       }
     })();
-  }, [selectedSeriesId, requireConfirmed, characterSearch]);
+  }, [selectedSeriesId, requireConfirmed, showNeedsCheckOnly, characterSearch]);
 
   const toggleCandidate = (id: number) => {
     setSelectedIds((current) => {
@@ -299,8 +307,25 @@ export function GenerationPage() {
               <label className="checkbox-row">
                 <input
                   type="checkbox"
+                  checked={showNeedsCheckOnly}
+                  onChange={(event) => setShowNeedsCheckOnly(event.target.checked)}
+                />
+                needs_check 캐릭터만 보기 (생성 대상에서 기본 제외됨)
+              </label>
+              {selectedSeriesId && candidateStats.needs_check_with_prompt > 0 ? (
+                <p className="field-help">
+                  needs_check {candidateStats.needs_check_with_prompt}명 · 시리즈 소속 검증 등으로 표시된 캐릭터입니다.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="field full-width">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
                   checked={requireConfirmed}
                   onChange={(event) => setRequireConfirmed(event.target.checked)}
+                  disabled={showNeedsCheckOnly}
                 />
                 외형 태그 Confirm된 캐릭터만 포함 (Review 탭에서 확정한 경우)
               </label>
@@ -327,12 +352,13 @@ export function GenerationPage() {
             <button
               className="btn btn-primary"
               type="button"
-              disabled={
+                disabled={
                 !selectedSeriesId ||
                 !naiaStatus?.ready ||
                 starting ||
                 isGeneratingSeries(Number(selectedSeriesId)) ||
-                candidates.length === 0
+                candidates.length === 0 ||
+                showNeedsCheckOnly
               }
               onClick={() => void handleStart()}
             >
@@ -397,6 +423,14 @@ export function GenerationPage() {
                   />
                   <div>
                     <strong>{candidate.character_tag}</strong>
+                    {candidate.status === "needs_check" ? (
+                      <span className="badge badge-warning" style={{ marginLeft: 8 }}>
+                        needs_check
+                      </span>
+                    ) : null}
+                    {candidate.needs_check_reason ? (
+                      <div className="field-help">{candidate.needs_check_reason}</div>
+                    ) : null}
                     <div className="generation-candidate-prompt">{candidate.generation_prompt}</div>
                   </div>
                 </label>

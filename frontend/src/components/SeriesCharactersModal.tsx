@@ -32,6 +32,7 @@ export function SeriesCharactersModal({ series, onClose }: SeriesCharactersModal
   const [items, setItems] = useState<CharacterDetail[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"" | "needs_check">("");
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +41,7 @@ export function SeriesCharactersModal({ series, onClose }: SeriesCharactersModal
 
   useEffect(() => {
     setPage(0);
-  }, [search, series.id]);
+  }, [search, statusFilter, series.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,6 +51,7 @@ export function SeriesCharactersModal({ series, onClose }: SeriesCharactersModal
       try {
         const response = await api.listSeriesCharacters(series.id, {
           search: search || undefined,
+          status: statusFilter || undefined,
           skip: page * PAGE_SIZE,
           limit: PAGE_SIZE,
         });
@@ -69,7 +71,7 @@ export function SeriesCharactersModal({ series, onClose }: SeriesCharactersModal
     return () => {
       cancelled = true;
     };
-  }, [series.id, search, page]);
+  }, [series.id, search, statusFilter, page]);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -98,6 +100,17 @@ export function SeriesCharactersModal({ series, onClose }: SeriesCharactersModal
               onChange={(event) => setSearch(event.target.value)}
               placeholder="character tag / display name"
             />
+          </div>
+          <div className="field">
+            <label htmlFor="character-status-filter">Status</label>
+            <select
+              id="character-status-filter"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as "" | "needs_check")}
+            >
+              <option value="">All</option>
+              <option value="needs_check">needs_check only</option>
+            </select>
           </div>
         </div>
 
@@ -161,7 +174,15 @@ export function SeriesCharactersModal({ series, onClose }: SeriesCharactersModal
                           "-"
                         )}
                       </td>
-                      <td className="col-narrow">{character.status}</td>
+                      <td className="col-narrow">
+                        {character.needs_check_reason ? (
+                          <span className="catalog-card-subtitle" title={character.needs_check_reason}>
+                            {character.status}
+                          </span>
+                        ) : (
+                          character.status
+                        )}
+                      </td>
                     </tr>
                   ))
                 )}

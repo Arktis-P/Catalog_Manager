@@ -6,6 +6,9 @@ class CharacterCollectResultResponse(BaseModel):
     discovered: int
     created: int
     skipped_existing: int
+    merged_children: int = 0
+    skipped_sub_series: list[str] = Field(default_factory=list)
+    used_legacy_fallback: bool = False
 
 
 class CharacterCollectSummaryResponse(BaseModel):

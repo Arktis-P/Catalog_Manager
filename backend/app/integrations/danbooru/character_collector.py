@@ -147,11 +147,17 @@ class CharacterCollector:
         series_tag: str,
         *,
         max_candidates: int | None = None,
+        post_supplement: bool | None = None,
         progress_callback: CollectProgressCallback | None = None,
     ) -> dict[str, CharacterCandidate]:
         candidates: dict[str, CharacterCandidate] = {}
+        use_post_supplement = (
+            settings.danbooru_character_post_supplement
+            if post_supplement is None
+            else post_supplement
+        )
 
-        if settings.danbooru_character_post_supplement:
+        if use_post_supplement:
             self._add_post_character_candidates(
                 series_tag,
                 candidates,

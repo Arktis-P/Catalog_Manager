@@ -55,6 +55,8 @@ def get_naia_status(db: Session = Depends(get_db)):
 def list_generation_candidates(
     series_id: int,
     require_confirmed: bool = Query(default=True),
+    exclude_needs_check: bool = Query(default=True),
+    needs_check_only: bool = Query(default=False),
     search: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
@@ -62,6 +64,8 @@ def list_generation_candidates(
     items = service.list_generation_candidates(
         series_id,
         require_confirmed=require_confirmed,
+        exclude_needs_check=exclude_needs_check,
+        needs_check_only=needs_check_only,
         search=search,
     )
     stats = service.get_candidate_stats(series_id)
@@ -75,6 +79,8 @@ def list_generation_candidates(
                 generation_prompt=character.generation_prompt,
                 appearance_confirmed=character.appearance_confirmed,
                 gender=character.gender,
+                status=character.status,
+                needs_check_reason=character.needs_check_reason,
             )
             for character in items
         ],

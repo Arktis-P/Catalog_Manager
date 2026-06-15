@@ -7,9 +7,11 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session, aliased
 
+from app.config import settings
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.integrations.danbooru.character_collector import CharacterCollector, tag_to_display_name
 from app.integrations.danbooru.client import DanbooruClient
+from app.integrations.danbooru.wiki_character_collector import WikiCharacterCollector, WikiCharacterCandidate
 from app.models.character import Character
 from app.models.series import Series
 
@@ -46,6 +48,9 @@ class CharacterCollectResult:
     discovered: int
     created: int
     skipped_existing: int
+    merged_children: int = 0
+    skipped_sub_series: list[str] | None = None
+    used_legacy_fallback: bool = False
 
 
 @dataclass
@@ -58,9 +63,15 @@ class CharacterCollectSummary:
 
 
 class CharacterService:
-    def __init__(self, db: Session, collector: CharacterCollector | None = None):
+    def __init__(
+        self,
+        db: Session,
+        collector: CharacterCollector | None = None,
+        wiki_collector: WikiCharacterCollector | None = None,
+    ):
         self.db = db
         self.collector = collector or CharacterCollector()
+        self.wiki_collector = wiki_collector or WikiCharacterCollector(self.collector.client)
 
     def get_character(self, character_id: int) -> Character | None:
         return self.db.query(Character).filter(Character.id == character_id).first()
@@ -73,6 +84,53 @@ class CharacterService:
         )
         return {row[0] for row in rows}
 
+    def _series_character_count(self, series_id: int) -> int:
+        return self.db.query(Character.id).filter(Character.series_id == series_id).count()
+
+    def _maybe_legacy_fallback(
+        self,
+        series: Series,
+        wiki_result: CharacterCollectResult,
+        *,
+        max_characters: int | None = None,
+        progress_callback: CollectProgressCallback | None = None,
+    ) -> CharacterCollectResult:
+        if not settings.danbooru_character_legacy_fallback:
+            return wiki_result
+        if self._series_character_count(series.id) > 0:
+            return wiki_result
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "discovering_fallback",
+                    "message": (
+                        f"위키에서 캐릭터 목록을 찾지 못함 · "
+                        f"기존 방식(post/패턴)으로 수집: {series.series_tag}"
+                    ),
+                    "current": 0,
+                    "total": 1,
+                    "discovered": wiki_result.discovered,
+                }
+            )
+
+        legacy_result = self._collect_for_series_legacy(
+            series,
+            max_characters=max_characters,
+            progress_callback=progress_callback,
+            manage_status=False,
+            post_supplement=True,
+        )
+        return CharacterCollectResult(
+            series_tag=series.series_tag,
+            discovered=wiki_result.discovered + legacy_result.discovered,
+            created=wiki_result.created + legacy_result.created,
+            skipped_existing=wiki_result.skipped_existing + legacy_result.skipped_existing,
+            merged_children=wiki_result.merged_children,
+            skipped_sub_series=wiki_result.skipped_sub_series,
+            used_legacy_fallback=True,
+        )
+
     def collect_for_series(
         self,
         series: Series,
@@ -80,8 +138,206 @@ class CharacterService:
         max_characters: int | None = None,
         progress_callback: CollectProgressCallback | None = None,
     ) -> CharacterCollectResult:
+        if settings.danbooru_character_wiki_collect:
+            return self._collect_for_series_wiki(
+                series,
+                max_characters=max_characters,
+                progress_callback=progress_callback,
+            )
+        return self._collect_for_series_legacy(
+            series,
+            max_characters=max_characters,
+            progress_callback=progress_callback,
+        )
+
+    def _collect_for_series_wiki(
+        self,
+        series: Series,
+        *,
+        max_characters: int | None = None,
+        progress_callback: CollectProgressCallback | None = None,
+    ) -> CharacterCollectResult:
+        target_series = series
         series.status = "collecting"
         self.db.commit()
+
+        discovery = self.wiki_collector.discover(series.series_tag, progress_callback=progress_callback)
+        skipped_sub_series: list[str] = list(discovery.skipped_sub_series)
+        merged_children = 0
+        total_discovered = len(discovery.characters)
+        total_created = 0
+        total_skipped = 0
+
+        if discovery.sub_series_tags and not discovery.characters:
+            for index, sub_tag in enumerate(discovery.sub_series_tags, start=1):
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "phase": "discovering_wiki_subseries",
+                            "message": f"하위 시리즈 처리 {index}/{len(discovery.sub_series_tags)} · {sub_tag}",
+                            "current": index,
+                            "total": len(discovery.sub_series_tags),
+                            "discovered": total_discovered,
+                        }
+                    )
+
+                child_series = (
+                    self.db.query(Series)
+                    .filter(Series.series_tag == sub_tag)
+                    .first()
+                )
+                if not child_series:
+                    skipped_sub_series.append(sub_tag)
+                    continue
+                if child_series.parent_series_id is not None:
+                    continue
+
+                child_result = self._collect_for_series_wiki(
+                    child_series,
+                    max_characters=max_characters,
+                    progress_callback=progress_callback,
+                )
+                total_discovered += child_result.discovered
+                total_created += child_result.created
+                total_skipped += child_result.skipped_existing
+                skipped_sub_series.extend(child_result.skipped_sub_series or [])
+
+                child_char_count = (
+                    self.db.query(Character.id).filter(Character.series_id == child_series.id).count()
+                )
+                if child_char_count <= 0 or child_series.id == target_series.id:
+                    continue
+
+                try:
+                    from app.services.series_merge_service import SeriesMergeService
+
+                    SeriesMergeService(self.db).merge_into_parent(child_series.id, target_series.id)
+                    merged_children += 1
+                except ValueError:
+                    skipped_sub_series.append(sub_tag)
+
+            target_series.last_collect_created = total_created
+            target_series.last_collect_skipped = total_skipped
+            if total_created and target_series.status in {"pending", "collecting"}:
+                target_series.status = "collected"
+            elif target_series.status == "collecting" and not total_created:
+                target_series.status = "pending"
+            self.db.commit()
+            result = CharacterCollectResult(
+                series_tag=target_series.series_tag,
+                discovered=total_discovered,
+                created=total_created,
+                skipped_existing=total_skipped,
+                merged_children=merged_children,
+                skipped_sub_series=skipped_sub_series,
+            )
+            return self._maybe_legacy_fallback(
+                target_series,
+                result,
+                max_characters=max_characters,
+                progress_callback=progress_callback,
+            )
+
+        created, skipped_existing, discovered = self._save_wiki_candidates(
+            target_series,
+            discovery.characters,
+            max_characters=max_characters,
+            progress_callback=progress_callback,
+        )
+        total_created += created
+        total_skipped += skipped_existing
+        total_discovered = max(total_discovered, discovered)
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "saving",
+                    "message": "DB에 저장 중...",
+                    "current": created,
+                    "total": created,
+                    "discovered": total_discovered,
+                }
+            )
+
+        if created:
+            target_series.status = "collected" if target_series.status in {"pending", "collecting"} else target_series.status
+        elif target_series.status == "collecting":
+            target_series.status = "pending"
+
+        target_series.last_collect_created = created
+        target_series.last_collect_skipped = skipped_existing
+        self.db.commit()
+        result = CharacterCollectResult(
+            series_tag=target_series.series_tag,
+            discovered=total_discovered,
+            created=total_created,
+            skipped_existing=total_skipped,
+            merged_children=merged_children,
+            skipped_sub_series=skipped_sub_series,
+        )
+        return self._maybe_legacy_fallback(
+            target_series,
+            result,
+            max_characters=max_characters,
+            progress_callback=progress_callback,
+        )
+
+    def _save_wiki_candidates(
+        self,
+        series: Series,
+        candidates: dict[str, WikiCharacterCandidate],
+        *,
+        max_characters: int | None = None,
+        progress_callback: CollectProgressCallback | None = None,
+    ) -> tuple[int, int, int]:
+        existing_tags = self.get_existing_tags(series.id)
+        new_candidates = {
+            name: candidate for name, candidate in candidates.items() if name not in existing_tags
+        }
+
+        if max_characters is not None:
+            new_candidates = dict(list(new_candidates.items())[:max_characters])
+
+        if new_candidates:
+            self.wiki_collector.enrich_post_counts(
+                series.series_tag,
+                new_candidates,
+                progress_callback=progress_callback,
+            )
+
+        created = 0
+        skipped_existing = len(candidates) - len(new_candidates)
+        for candidate in new_candidates.values():
+            self.db.add(
+                Character(
+                    series_id=series.id,
+                    character_tag=candidate.character_tag,
+                    display_name=tag_to_display_name(candidate.character_tag),
+                    danbooru_url=DanbooruClient.build_danbooru_url(
+                        candidate.character_tag,
+                        series.series_tag,
+                    ),
+                    post_count=candidate.post_count,
+                    status="needs_check",
+                    from_wiki=candidate.from_wiki,
+                    from_list_page=candidate.from_list_page,
+                )
+            )
+            created += 1
+        return created, skipped_existing, len(candidates)
+
+    def _collect_for_series_legacy(
+        self,
+        series: Series,
+        *,
+        max_characters: int | None = None,
+        progress_callback: CollectProgressCallback | None = None,
+        manage_status: bool = True,
+        post_supplement: bool | None = None,
+    ) -> CharacterCollectResult:
+        if manage_status:
+            series.status = "collecting"
+            self.db.commit()
 
         existing_tags = self.get_existing_tags(series.id)
         discover_limit = None
@@ -91,6 +347,7 @@ class CharacterService:
         candidates_map = self.collector.discover_character_tags(
             series.series_tag,
             max_candidates=discover_limit,
+            post_supplement=post_supplement,
             progress_callback=progress_callback,
         )
         new_candidates_map = {
@@ -154,6 +411,7 @@ class CharacterService:
             discovered=len(candidates_map),
             created=created,
             skipped_existing=skipped_existing,
+            used_legacy_fallback=True,
         )
 
     def collect_for_series_tag(
@@ -254,6 +512,7 @@ class CharacterService:
         *,
         series_id: int | None = None,
         search: str | None = None,
+        status: str | None = None,
     ):
         SourceSeries = aliased(Series)
         query = (
@@ -263,6 +522,8 @@ class CharacterService:
         )
         if series_id is not None:
             query = query.filter(Character.series_id == series_id)
+        if status:
+            query = query.filter(Character.status == status.strip())
         if search:
             like = f"%{search.strip()}%"
             query = query.filter(
@@ -282,10 +543,11 @@ class CharacterService:
         *,
         series_id: int | None = None,
         search: str | None = None,
+        status: str | None = None,
         skip: int = 0,
         limit: int = 500,
     ) -> tuple[list[tuple[Character, Series, Series | None]], int]:
-        query = self._character_rows_query(series_id=series_id, search=search)
+        query = self._character_rows_query(series_id=series_id, search=search, status=status)
         total = query.count()
         rows = query.offset(skip).limit(limit).all()
         return rows, total

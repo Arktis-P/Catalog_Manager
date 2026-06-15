@@ -15,6 +15,7 @@ class DanbooruAuthError(Exception):
 
 
 class DanbooruClient:
+    CATEGORY_COPYRIGHT = 3
     CATEGORY_CHARACTER = 4
 
     def __init__(
@@ -176,6 +177,27 @@ class DanbooruClient:
         payload = self._get_json("tags.json", {"search[name]": tag_name})
         tags = self._ensure_list(payload, context="get_tag")
         return tags[0] if tags else None
+
+    def get_wiki_page(self, title: str) -> dict[str, Any] | None:
+        payload = self._get_json("wiki_pages.json", {"search[title]": title, "limit": 1})
+        pages = self._ensure_list(payload, context="get_wiki_page")
+        return pages[0] if pages else None
+
+    def search_wiki_pages(
+        self,
+        *,
+        title_matches: str | None = None,
+        body_matches: str | None = None,
+        page: int = 1,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": limit, "page": page}
+        if title_matches:
+            params["search[title_matches]"] = title_matches
+        if body_matches:
+            params["search[body_matches]"] = body_matches
+        payload = self._get_json("wiki_pages.json", params)
+        return self._ensure_list(payload, context="search_wiki_pages")
 
     def list_posts(self, *, tags: str, page: int = 1, limit: int | None = None) -> list[dict[str, Any]]:
         payload = self._get_json(

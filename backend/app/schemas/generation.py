@@ -11,6 +11,8 @@ class GenerationCandidate(BaseModel):
     generation_prompt: str | None
     appearance_confirmed: bool
     gender: str | None = None
+    status: str = "needs_check"
+    needs_check_reason: str | None = None
 
 
 class GenerationCandidateListResponse(BaseModel):
@@ -20,6 +22,7 @@ class GenerationCandidateListResponse(BaseModel):
     with_prompt: int = 0
     confirmed_with_prompt: int = 0
     unconfirmed_with_prompt: int = 0
+    needs_check_with_prompt: int = 0
 
 
 class GenerationStartRequest(BaseModel):

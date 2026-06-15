@@ -80,6 +80,8 @@ class GenerationService:
         series_id: int,
         *,
         require_confirmed: bool = True,
+        exclude_needs_check: bool = True,
+        needs_check_only: bool = False,
         search: str | None = None,
     ) -> list[Character]:
         query = (
@@ -88,6 +90,10 @@ class GenerationService:
             .filter(Character.generation_prompt.isnot(None))
             .filter(Character.generation_prompt != "")
         )
+        if needs_check_only:
+            query = query.filter(Character.status == "needs_check")
+        elif exclude_needs_check:
+            query = query.filter(Character.status != "needs_check")
         if require_confirmed:
             query = query.filter(Character.appearance_confirmed.is_(True))
         if search:
@@ -109,11 +115,17 @@ class GenerationService:
             Character.generation_prompt != "",
             Character.appearance_confirmed.is_(True),
         ).count()
+        needs_check_with_prompt = base.filter(
+            Character.generation_prompt.isnot(None),
+            Character.generation_prompt != "",
+            Character.status == "needs_check",
+        ).count()
         return {
             "total_characters": total,
             "with_prompt": with_prompt,
             "confirmed_with_prompt": confirmed_with_prompt,
             "unconfirmed_with_prompt": max(0, with_prompt - confirmed_with_prompt),
+            "needs_check_with_prompt": needs_check_with_prompt,
         }
 
     def _raise_no_eligible_error(
@@ -208,6 +220,15 @@ class GenerationService:
                         "id": character.id,
                         "character_tag": character.character_tag,
                         "reason": "generation_prompt 없음",
+                    }
+                )
+                continue
+            if character.status == "needs_check":
+                skipped.append(
+                    {
+                        "id": character.id,
+                        "character_tag": character.character_tag,
+                        "reason": character.needs_check_reason or "needs_check",
                     }
                 )
                 continue

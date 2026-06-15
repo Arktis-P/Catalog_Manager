@@ -164,7 +164,7 @@ export const api = {
 
   listSeriesCharacters: (
     seriesId: number,
-    params: { search?: string; skip?: number; limit?: number } = {},
+    params: { search?: string; status?: string; skip?: number; limit?: number } = {},
   ) => request<CharacterListResponse>(`/characters/series/${seriesId}/characters${buildQuery(params)}`),
 
   exportCharactersCsv: async (params: { series_id?: number; search?: string } = {}) => {
@@ -203,7 +203,12 @@ export const api = {
 
   listGenerationCandidates: (
     seriesId: number,
-    params: { require_confirmed?: boolean; search?: string } = {},
+    params: {
+      require_confirmed?: boolean;
+      exclude_needs_check?: boolean;
+      needs_check_only?: boolean;
+      search?: string;
+    } = {},
   ) =>
     request<GenerationCandidateListResponse>(
       `/generation/series/${seriesId}/candidates${buildQuery(params)}`,

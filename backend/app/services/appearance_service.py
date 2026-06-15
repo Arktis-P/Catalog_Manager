@@ -5,7 +5,17 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from app.integrations.danbooru.appearance_extractor import AppearanceExtractor, normalize_gender
+from app.integrations.danbooru.appearance_extractor import (
+    AppearanceExtractor,
+    extract_appearance_tags,
+    normalize_gender,
+    parse_related_tags,
+)
+from app.integrations.danbooru.series_membership import (
+    MEMBERSHIP_MISMATCH_PREFIX,
+    evaluate_series_membership,
+    extract_copyright_related_tags,
+)
 from app.models.character import Character
 from app.models.series import Series
 from app.services.prompt_service import build_generation_prompt
@@ -18,12 +28,37 @@ class AppearanceExtractResult:
     series_tag: str
     processed: int
     updated: int
+    membership_flagged: int = 0
 
 
 class AppearanceService:
     def __init__(self, db: Session, extractor: AppearanceExtractor | None = None):
         self.db = db
         self.extractor = extractor or AppearanceExtractor()
+
+    def _extra_series_tags(self, series: Series, character: Character) -> set[str]:
+        extra: set[str] = {series.series_tag}
+        if character.source_series_id:
+            source = self.db.query(Series).filter(Series.id == character.source_series_id).first()
+            if source:
+                extra.add(source.series_tag)
+        child_series = (
+            self.db.query(Series.series_tag)
+            .filter(Series.parent_series_id == series.id)
+            .all()
+        )
+        extra.update(row[0] for row in child_series)
+        return extra
+
+    def _apply_membership_result(self, character: Character, reason: str | None, *, is_mismatch: bool) -> bool:
+        if is_mismatch and reason:
+            character.status = "needs_check"
+            character.needs_check_reason = reason
+            return True
+
+        if character.needs_check_reason and character.needs_check_reason.startswith(MEMBERSHIP_MISMATCH_PREFIX):
+            character.needs_check_reason = None
+        return False
 
     def extract_for_series(
         self,
@@ -39,6 +74,7 @@ class AppearanceService:
         )
         total = len(characters)
         updated = 0
+        membership_flagged = 0
 
         if progress_callback:
             progress_callback(
@@ -52,9 +88,12 @@ class AppearanceService:
 
         for index, character in enumerate(characters, start=1):
             try:
-                appearance = self.extractor.extract_for_character(character.character_tag)
+                payload = self.extractor.client.get_related_tags(character.character_tag, category=0)
             except Exception as exc:
                 raise RuntimeError(f"{character.character_tag}: {exc}") from exc
+
+            related = parse_related_tags(payload)
+            appearance = extract_appearance_tags(related)
             character.multi_color_hair = appearance.multi_color_hair
             character.hair_color = appearance.hair_color
             character.hair_shape = appearance.hair_shape
@@ -64,6 +103,19 @@ class AppearanceService:
             character.from_related = True
             character.appearance_confirmed = False
             character.generation_prompt = build_generation_prompt(character)
+
+            membership = evaluate_series_membership(
+                extract_copyright_related_tags(payload),
+                expected_series_tag=series.series_tag,
+                extra_series_tags=self._extra_series_tags(series, character),
+            )
+            if self._apply_membership_result(
+                character,
+                membership.reason,
+                is_mismatch=membership.is_mismatch,
+            ):
+                membership_flagged += 1
+
             updated += 1
 
             if progress_callback:
@@ -85,4 +137,5 @@ class AppearanceService:
             series_tag=series.series_tag,
             processed=total,
             updated=updated,
+            membership_flagged=membership_flagged,
         )
