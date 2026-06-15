@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { GenerationProgressPanel } from "../components/GenerationProgressPanel";
+import { SeriesSearchSelect } from "../components/SeriesSearchSelect";
 import { useGenerationJobs } from "../context/GenerationJobContext";
 import type { GenerationCandidate, GenerationQueuePreview, NaiaStatus, Series } from "../types";
 
@@ -14,13 +15,13 @@ function pendingReviewImageUrl(imagePath: string | null | undefined): string | n
 
 export function GenerationPage() {
   const { jobs, startGeneration, cancelJob, dismissJob, isGeneratingSeries } = useGenerationJobs();
-  const [seriesList, setSeriesList] = useState<Series[]>([]);
+  const [selectedSeries, setSelectedSeries] = useState<Series | null>(null);
   const [selectedSeriesId, setSelectedSeriesId] = useState<number | "">("");
   const [candidates, setCandidates] = useState<GenerationCandidate[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [promptLevel, setPromptLevel] = useState(1);
   const [requireConfirmed, setRequireConfirmed] = useState(true);
-  const [search, setSearch] = useState("");
+  const [characterSearch, setCharacterSearch] = useState("");
   const [naiaStatus, setNaiaStatus] = useState<NaiaStatus | null>(null);
   const [queuePreview, setQueuePreview] = useState<GenerationQueuePreview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,27 +52,14 @@ export function GenerationPage() {
   useEffect(() => {
     void (async () => {
       setLoading(true);
-      const errors: string[] = [];
-
-      const seriesPromise = api
-        .listSeries({ sort_by: "series_tag", sort_order: "asc", limit: 500 })
-        .then((response) => setSeriesList(response.items))
-        .catch((err) => {
-          errors.push(err instanceof Error ? err.message : "시리즈 목록을 불러오지 못했습니다.");
-        });
-
-      const naiaPromise = api
-        .getNaiaStatus()
-        .then((response) => setNaiaStatus(response))
-        .catch((err) => {
-          errors.push(err instanceof Error ? err.message : "NAIA 상태를 확인하지 못했습니다.");
-        });
-
-      await Promise.all([seriesPromise, naiaPromise]);
-      if (errors.length > 0) {
-        setError(errors.join(" / "));
+      try {
+        const statusResponse = await api.getNaiaStatus();
+        setNaiaStatus(statusResponse);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "NAIA 상태를 확인하지 못했습니다.");
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     })();
   }, []);
 
@@ -89,7 +77,7 @@ export function GenerationPage() {
       try {
         const response = await api.listGenerationCandidates(selectedSeriesId, {
           require_confirmed: requireConfirmed,
-          search: search || undefined,
+          search: characterSearch || undefined,
         });
         setCandidates(response.items);
         setSelectedIds(new Set(response.items.map((item) => item.id)));
@@ -99,7 +87,7 @@ export function GenerationPage() {
         setLoadingCandidates(false);
       }
     })();
-  }, [selectedSeriesId, requireConfirmed, search]);
+  }, [selectedSeriesId, requireConfirmed, characterSearch]);
 
   const toggleCandidate = (id: number) => {
     setSelectedIds((current) => {
@@ -111,6 +99,11 @@ export function GenerationPage() {
       }
       return next;
     });
+  };
+
+  const handleSeriesChange = (seriesId: number | "", series?: Series | null) => {
+    setSelectedSeriesId(seriesId);
+    setSelectedSeries(series ?? null);
   };
 
   const handlePreviewQueue = async () => {
@@ -153,7 +146,7 @@ export function GenerationPage() {
     }
   };
 
-  const selectedSeries = seriesList.find((series) => series.id === selectedSeriesId);
+  const selectedSeriesTag = selectedSeries?.series_tag ?? "";
 
   return (
     <section className="generation-page">
@@ -204,21 +197,11 @@ export function GenerationPage() {
           <div className="form-grid">
             <div className="field full-width">
               <label htmlFor="generation-series">시리즈</label>
-              <select
-                id="generation-series"
+              <SeriesSearchSelect
                 value={selectedSeriesId}
-                onChange={(event) =>
-                  setSelectedSeriesId(event.target.value ? Number(event.target.value) : "")
-                }
+                onChange={handleSeriesChange}
                 disabled={loading}
-              >
-                <option value="">시리즈 선택...</option>
-                {seriesList.map((series) => (
-                  <option key={series.id} value={series.id}>
-                    {series.series_tag} ({series.character_count})
-                  </option>
-                ))}
-              </select>
+              />
             </div>
 
             <div className="field">
@@ -237,11 +220,11 @@ export function GenerationPage() {
             </div>
 
             <div className="field">
-              <label htmlFor="generation-search">검색</label>
+              <label htmlFor="generation-character-search">캐릭터 검색</label>
               <input
-                id="generation-search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                id="generation-character-search"
+                value={characterSearch}
+                onChange={(event) => setCharacterSearch(event.target.value)}
                 placeholder="character tag"
                 disabled={!selectedSeriesId}
               />
@@ -289,7 +272,7 @@ export function GenerationPage() {
           <div className="section-header-row">
             <h2 className="section-title">
               캐릭터 목록
-              {selectedSeries ? ` · ${selectedSeries.series_tag}` : ""}
+              {selectedSeriesTag ? ` · ${selectedSeriesTag}` : ""}
             </h2>
             {candidates.length > 0 ? (
               <button

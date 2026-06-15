@@ -54,6 +54,7 @@ class SeriesResponse(SeriesBase):
     last_appearance_updated: int = 0
     appearance_extracted_count: int = 0
     all_appearance_collected: bool = False
+    generation_pipeline_done: bool = False
     created_at: datetime
     updated_at: datetime
 

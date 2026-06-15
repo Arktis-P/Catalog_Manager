@@ -19,6 +19,7 @@ export interface Series {
   last_appearance_updated: number;
   appearance_extracted_count: number;
   all_appearance_collected: boolean;
+  generation_pipeline_done: boolean;
   created_at: string;
   updated_at: string;
 }

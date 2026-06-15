@@ -2,7 +2,7 @@ import csv
 import io
 from pathlib import Path
 
-from sqlalchemy import func, or_
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.character import Character
@@ -96,6 +96,61 @@ class SeriesService:
         )
         return {parent_id: count for parent_id, count in rows if parent_id is not None}
 
+    def get_generation_pipeline_done_flags(self, series_ids: list[int]) -> dict[int, bool]:
+        if not series_ids:
+            return {}
+
+        has_cover = exists(
+            select(1).where(
+                Image.character_id == Character.id,
+                Image.is_cover.is_(True),
+            )
+        )
+        eligible_filters = (
+            Character.series_id.in_(series_ids),
+            Character.appearance_confirmed.is_(True),
+            Character.generation_prompt.isnot(None),
+            Character.generation_prompt != "",
+            Character.status != "excluded",
+        )
+        eligible_rows = (
+            self.db.query(Character.series_id, func.count(Character.id))
+            .filter(*eligible_filters)
+            .group_by(Character.series_id)
+            .all()
+        )
+        completed_rows = (
+            self.db.query(Character.series_id, func.count(Character.id))
+            .join(Review, Review.character_id == Character.id)
+            .filter(
+                *eligible_filters,
+                Review.review_status == "completed",
+                has_cover,
+            )
+            .group_by(Character.series_id)
+            .all()
+        )
+        eligible_map = {series_id: count for series_id, count in eligible_rows}
+        completed_map = {series_id: count for series_id, count in completed_rows}
+
+        completed_status_ids = {
+            row[0]
+            for row in self.db.query(Series.id)
+            .filter(Series.id.in_(series_ids), Series.status == "completed")
+            .all()
+        }
+
+        return {
+            series_id: (
+                series_id in completed_status_ids
+                or (
+                    eligible_map.get(series_id, 0) > 0
+                    and completed_map.get(series_id, 0) >= eligible_map.get(series_id, 0)
+                )
+            )
+            for series_id in series_ids
+        }
+
     def to_response(
         self,
         series: Series,
@@ -105,6 +160,7 @@ class SeriesService:
         appearance_extracted_count: int | None = None,
         parent_series_tag: str | None = None,
         child_count: int = 0,
+        generation_pipeline_done: bool = False,
     ) -> SeriesResponse:
         is_merged_child = series.parent_series_id is not None
         resolved_character_count = character_count if character_count is not None else 0
@@ -141,6 +197,7 @@ class SeriesService:
                 resolved_character_count > 0
                 and resolved_appearance_count >= resolved_character_count
             ),
+            generation_pipeline_done=generation_pipeline_done,
             created_at=series.created_at,
             updated_at=series.updated_at,
         )
@@ -153,6 +210,7 @@ class SeriesService:
         own_counts = self.get_own_character_counts(series_ids)
         appearance_counts = self.get_appearance_extracted_counts(series_ids)
         child_counts = self.get_child_counts(series_ids)
+        pipeline_done_flags = self.get_generation_pipeline_done_flags(series_ids)
 
         parent_ids = {series.parent_series_id for series in items if series.parent_series_id}
         parent_tags: dict[int, str] = {}
@@ -168,6 +226,7 @@ class SeriesService:
                 appearance_extracted_count=appearance_counts.get(series.id, 0),
                 parent_series_tag=parent_tags.get(series.parent_series_id) if series.parent_series_id else None,
                 child_count=child_counts.get(series.id, 0),
+                generation_pipeline_done=pipeline_done_flags.get(series.id, False),
             )
             for series in items
         ]
