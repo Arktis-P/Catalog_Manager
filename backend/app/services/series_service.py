@@ -144,7 +144,7 @@ class SeriesService:
         self.db.commit()
 
     def export_csv(self) -> str:
-        _, series_list = self.list_series(limit=10000, sort_by="post_count", sort_order="desc")
+        series_list, _ = self.list_series(limit=10000, sort_by="post_count", sort_order="desc")
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["series_tag", "display_name", "post_count", "priority", "status", "note"])

@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
-from app.integrations.danbooru.appearance_extractor import normalize_gender
+from app.config import settings
 from app.database import get_db
+from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.integrations.danbooru.client import DanbooruAuthError, DanbooruClient
 from app.models.character import Character
 from app.models.series import Series
