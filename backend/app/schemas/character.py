@@ -49,6 +49,8 @@ class CharacterResponse(CharacterBase):
     gender: str | None = None
     generation_prompt: str | None = None
     appearance_confirmed: bool = False
+    source_series_id: int | None = None
+    source_series_tag: str | None = None
     from_wiki: bool = False
     from_list_page: bool = False
     from_posts: bool = False

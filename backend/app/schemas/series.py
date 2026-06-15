@@ -41,7 +41,14 @@ class SeriesResponse(SeriesBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    parent_series_id: int | None = None
+    parent_series_tag: str | None = None
     character_count: int = 0
+    own_character_count: int = 0
+    merged_moved_count: int = 0
+    merged_duplicate_count: int = 0
+    child_count: int = 0
+    is_merged_child: bool = False
     last_collect_created: int = 0
     last_collect_skipped: int = 0
     last_appearance_updated: int = 0
@@ -49,6 +56,50 @@ class SeriesResponse(SeriesBase):
     all_appearance_collected: bool = False
     created_at: datetime
     updated_at: datetime
+
+
+class SeriesMergeCandidate(BaseModel):
+    id: int
+    series_tag: str
+    display_name: str
+    status: str
+    character_count: int = 0
+    similarity_score: float = 0.0
+
+
+class SeriesMergeCandidateListResponse(BaseModel):
+    items: list[SeriesMergeCandidate]
+
+
+class SeriesMergePreviewResponse(BaseModel):
+    child_series_id: int
+    child_series_tag: str
+    parent_series_id: int
+    parent_series_tag: str
+    child_character_count: int
+    duplicate_count: int
+    moved_count: int
+
+
+class SeriesMergeRequest(BaseModel):
+    parent_series_id: int = Field(ge=1)
+
+
+class SeriesMergeResponse(BaseModel):
+    child_series_id: int
+    child_series_tag: str
+    parent_series_id: int
+    parent_series_tag: str
+    moved_count: int
+    duplicate_count: int
+    parent_character_count: int
+
+
+class SeriesUnmergeResponse(BaseModel):
+    child_series_id: int
+    child_series_tag: str
+    moved_back_count: int
+    child_character_count: int
 
 
 class SeriesListResponse(BaseModel):

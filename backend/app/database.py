@@ -67,6 +67,7 @@ def _migrate_character_columns() -> None:
         "appearance_confirmed": (
             "ALTER TABLE characters ADD COLUMN appearance_confirmed BOOLEAN NOT NULL DEFAULT 0"
         ),
+        "source_series_id": "ALTER TABLE characters ADD COLUMN source_series_id INTEGER",
     }
     with engine.begin() as connection:
         for column_name, statement in migrations.items():
@@ -85,6 +86,11 @@ def _migrate_series_columns() -> None:
         "last_collect_skipped": "ALTER TABLE series ADD COLUMN last_collect_skipped INTEGER NOT NULL DEFAULT 0",
         "last_appearance_updated": (
             "ALTER TABLE series ADD COLUMN last_appearance_updated INTEGER NOT NULL DEFAULT 0"
+        ),
+        "parent_series_id": "ALTER TABLE series ADD COLUMN parent_series_id INTEGER",
+        "merged_moved_count": "ALTER TABLE series ADD COLUMN merged_moved_count INTEGER NOT NULL DEFAULT 0",
+        "merged_duplicate_count": (
+            "ALTER TABLE series ADD COLUMN merged_duplicate_count INTEGER NOT NULL DEFAULT 0"
         ),
     }
     with engine.begin() as connection:

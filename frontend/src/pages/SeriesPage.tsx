@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { SeriesCharactersModal } from "../components/SeriesCharactersModal";
+import { isSeriesMergeEligible, SeriesMergeModal } from "../components/SeriesMergeModal";
 import { useCollectJobs } from "../context/CollectJobContext";
 import type { DanbooruStatus, Series, SeriesCreatePayload } from "../types";
 import { downloadTextFile } from "../utils/download";
@@ -39,6 +40,7 @@ export function SeriesPage() {
   const [importReplace, setImportReplace] = useState(false);
   const [danbooruStatus, setDanbooruStatus] = useState<DanbooruStatus | null>(null);
   const [viewingSeries, setViewingSeries] = useState<Series | null>(null);
+  const [mergingSeries, setMergingSeries] = useState<Series | null>(null);
   const [exportingCharacters, setExportingCharacters] = useState(false);
 
   const filteredCount = useMemo(() => items.length, [items]);
@@ -53,6 +55,8 @@ export function SeriesPage() {
           status: statusFilter || undefined,
           sort_by: "post_count",
           sort_order: "desc",
+          limit: 500,
+          hierarchical: true,
         }),
         api.getSeriesStatuses(),
       ]);
@@ -143,7 +147,52 @@ export function SeriesPage() {
     }
   };
 
-  const canExtractAppearance = (series: Series) => series.character_count > 0;
+  const handleUnmerge = async (series: Series) => {
+    if (!window.confirm(`Unmerge "${series.series_tag}" from "${series.parent_series_tag}"?`)) return;
+    setError(null);
+    try {
+      await api.unmergeSeries(series.id);
+      await loadSeries();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to unmerge series");
+    }
+  };
+
+  const resolveViewingSeries = (series: Series): Series => {
+    if (!series.is_merged_child) {
+      return series;
+    }
+    const parent = items.find((item) => item.id === series.parent_series_id);
+    return parent ?? series;
+  };
+
+  const formatCharacterCount = (series: Series) => {
+    if (series.is_merged_child) {
+      return (
+        <>
+          {series.merged_moved_count.toLocaleString()}
+          {series.merged_duplicate_count > 0 ? (
+            <span className="catalog-card-subtitle" style={{ marginLeft: 6 }}>
+              dup {series.merged_duplicate_count.toLocaleString()}
+            </span>
+          ) : null}
+        </>
+      );
+    }
+    return (
+      <>
+        {series.character_count.toLocaleString()}
+        {series.child_count > 0 ? (
+          <span className="catalog-card-subtitle" style={{ marginLeft: 6 }} title="하위 시리즈 병합 포함">
+            +{series.child_count} merged
+          </span>
+        ) : null}
+      </>
+    );
+  };
+
+  const canExtractAppearance = (series: Series) =>
+    !series.is_merged_child && series.character_count > 0;
 
   const handleDelete = async (series: Series) => {
     if (!window.confirm(`Delete series "${series.series_tag}"?`)) return;
@@ -314,15 +363,17 @@ export function SeriesPage() {
                 </thead>
                 <tbody>
                   {items.map((series) => (
-                    <tr key={series.id}>
+                    <tr key={series.id} className={series.is_merged_child ? "series-child-row" : undefined}>
                       <td className="col-series-tag cell-ellipsis" title={series.series_tag}>
-                        {series.series_tag}
+                        <span className={series.is_merged_child ? "series-child-tag" : undefined}>
+                          {series.is_merged_child ? `└ ${series.series_tag}` : series.series_tag}
+                        </span>
                       </td>
                       <td className="col-display-name cell-ellipsis" title={series.display_name}>
                         {series.display_name}
                       </td>
                       <td className="col-count">{series.post_count.toLocaleString()}</td>
-                      <td className="col-count">{series.character_count.toLocaleString()}</td>
+                      <td className="col-count">{formatCharacterCount(series)}</td>
                       <td className="col-last-collect">
                         {series.last_collect_created > 0 ? (
                           <span className="badge badge-success">+{series.last_collect_created.toLocaleString()}</span>
@@ -351,52 +402,82 @@ export function SeriesPage() {
                       </td>
                       <td className="col-actions">
                         <div className="table-actions">
-                          <button
-                            className="btn btn-small btn-primary"
-                            type="button"
-                            disabled={
-                              isProcessingSeries(series.id) || danbooruStatus?.ready === false
-                            }
-                            onClick={() => void handleCollectCharacters(series)}
-                          >
-                            {isCollectingSeries(series.id) ? "Collecting..." : "Collect"}
-                          </button>
-                          <button
-                            className="btn btn-small"
-                            type="button"
-                            disabled={
-                              !canExtractAppearance(series) ||
-                              isProcessingSeries(series.id) ||
-                              danbooruStatus?.ready === false
-                            }
-                            title={
-                              canExtractAppearance(series)
-                                ? "Danbooru related tags 기반 외형 태그 추출"
-                                : "캐릭터 수집 완료 후 사용 가능"
-                            }
-                            onClick={() => void handleExtractAppearance(series)}
-                          >
-                            {isExtractingAppearanceSeries(series.id) ? "Extracting..." : "Appearance"}
-                          </button>
-                          <button
-                            className="btn btn-small"
-                            type="button"
-                            disabled={series.character_count <= 0}
-                            title={
-                              series.character_count > 0
-                                ? "수집된 캐릭터 목록과 외형 태그 보기"
-                                : "캐릭터 수집 후 사용 가능"
-                            }
-                            onClick={() => setViewingSeries(series)}
-                          >
-                            Characters
-                          </button>
-                          <button className="btn btn-small" type="button" onClick={() => openEditModal(series)}>
-                            Edit
-                          </button>
-                          <button className="btn btn-small btn-danger" type="button" onClick={() => void handleDelete(series)}>
-                            Delete
-                          </button>
+                          {series.is_merged_child ? (
+                            <>
+                              <button
+                                className="btn btn-small"
+                                type="button"
+                                onClick={() => void handleUnmerge(series)}
+                              >
+                                Unmerge
+                              </button>
+                              <button className="btn btn-small" type="button" onClick={() => openEditModal(series)}>
+                                Edit
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="btn btn-small btn-primary"
+                                type="button"
+                                disabled={
+                                  isProcessingSeries(series.id) || danbooruStatus?.ready === false
+                                }
+                                onClick={() => void handleCollectCharacters(series)}
+                              >
+                                {isCollectingSeries(series.id) ? "Collecting..." : "Collect"}
+                              </button>
+                              <button
+                                className="btn btn-small"
+                                type="button"
+                                disabled={
+                                  !canExtractAppearance(series) ||
+                                  isProcessingSeries(series.id) ||
+                                  danbooruStatus?.ready === false
+                                }
+                                title={
+                                  canExtractAppearance(series)
+                                    ? "Danbooru related tags 기반 외형 태그 추출"
+                                    : "캐릭터 수집 완료 후 사용 가능"
+                                }
+                                onClick={() => void handleExtractAppearance(series)}
+                              >
+                                {isExtractingAppearanceSeries(series.id) ? "Extracting..." : "Appearance"}
+                              </button>
+                              <button
+                                className="btn btn-small"
+                                type="button"
+                                disabled={series.character_count <= 0}
+                                title={
+                                  series.character_count > 0
+                                    ? "수집된 캐릭터 목록과 외형 태그 보기"
+                                    : "캐릭터 수집 후 사용 가능"
+                                }
+                                onClick={() => setViewingSeries(series)}
+                              >
+                                Characters
+                              </button>
+                              {isSeriesMergeEligible(series) ? (
+                                <button
+                                  className="btn btn-small"
+                                  type="button"
+                                  onClick={() => setMergingSeries(series)}
+                                >
+                                  Merge
+                                </button>
+                              ) : null}
+                              <button className="btn btn-small" type="button" onClick={() => openEditModal(series)}>
+                                Edit
+                              </button>
+                              <button
+                                className="btn btn-small btn-danger"
+                                type="button"
+                                onClick={() => void handleDelete(series)}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -491,7 +572,19 @@ export function SeriesPage() {
         </div>
       ) : null}
 
-      {viewingSeries ? <SeriesCharactersModal series={viewingSeries} onClose={() => setViewingSeries(null)} /> : null}
+      {viewingSeries ? (
+        <SeriesCharactersModal
+          series={resolveViewingSeries(viewingSeries)}
+          onClose={() => setViewingSeries(null)}
+        />
+      ) : null}
+      {mergingSeries ? (
+        <SeriesMergeModal
+          series={mergingSeries}
+          onClose={() => setMergingSeries(null)}
+          onMerged={() => void loadSeries()}
+        />
+      ) : null}
     </>
   );
 }

@@ -12,6 +12,11 @@ class Character(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     series_id: Mapped[int] = mapped_column(ForeignKey("series.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_series_id: Mapped[int | None] = mapped_column(
+        ForeignKey("series.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     character_tag: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     danbooru_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -35,7 +40,8 @@ class Character(Base):
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    series = relationship("Series", back_populates="characters")
+    series = relationship("Series", back_populates="characters", foreign_keys=[series_id])
+    source_series = relationship("Series", foreign_keys=[source_series_id])
     generation_jobs = relationship("GenerationJob", back_populates="character", cascade="all, delete-orphan")
     images = relationship("Image", back_populates="character", cascade="all, delete-orphan")
     review = relationship("Review", back_populates="character", uselist=False, cascade="all, delete-orphan")

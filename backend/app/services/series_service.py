@@ -74,17 +74,49 @@ class SeriesService:
         )
         return {series_id: count for series_id, count in rows}
 
+    def get_own_character_counts(self, series_ids: list[int]) -> dict[int, int]:
+        if not series_ids:
+            return {}
+        rows = (
+            self.db.query(Character.series_id, func.count(Character.id))
+            .filter(Character.series_id.in_(series_ids), Character.source_series_id.is_(None))
+            .group_by(Character.series_id)
+            .all()
+        )
+        return {series_id: count for series_id, count in rows}
+
+    def get_child_counts(self, series_ids: list[int]) -> dict[int, int]:
+        if not series_ids:
+            return {}
+        rows = (
+            self.db.query(Series.parent_series_id, func.count(Series.id))
+            .filter(Series.parent_series_id.in_(series_ids))
+            .group_by(Series.parent_series_id)
+            .all()
+        )
+        return {parent_id: count for parent_id, count in rows if parent_id is not None}
+
     def to_response(
         self,
         series: Series,
         *,
         character_count: int | None = None,
+        own_character_count: int | None = None,
         appearance_extracted_count: int | None = None,
+        parent_series_tag: str | None = None,
+        child_count: int = 0,
     ) -> SeriesResponse:
+        is_merged_child = series.parent_series_id is not None
         resolved_character_count = character_count if character_count is not None else 0
+        resolved_own_count = own_character_count if own_character_count is not None else resolved_character_count
         resolved_appearance_count = (
             appearance_extracted_count if appearance_extracted_count is not None else 0
         )
+        if is_merged_child and series.merged_moved_count > 0:
+            display_character_count = series.merged_moved_count
+        else:
+            display_character_count = resolved_character_count
+
         return SeriesResponse(
             id=series.id,
             series_tag=series.series_tag,
@@ -93,7 +125,14 @@ class SeriesService:
             priority=series.priority,
             status=series.status,
             note=series.note,
-            character_count=resolved_character_count,
+            parent_series_id=series.parent_series_id,
+            parent_series_tag=parent_series_tag,
+            character_count=display_character_count,
+            own_character_count=resolved_own_count,
+            merged_moved_count=series.merged_moved_count,
+            merged_duplicate_count=series.merged_duplicate_count,
+            child_count=child_count,
+            is_merged_child=is_merged_child,
             last_collect_created=series.last_collect_created,
             last_collect_skipped=series.last_collect_skipped,
             last_appearance_updated=series.last_appearance_updated,
@@ -107,17 +146,57 @@ class SeriesService:
         )
 
     def to_response_list(self, items: list[Series]) -> list[SeriesResponse]:
+        if not items:
+            return []
         series_ids = [series.id for series in items]
         counts = self.get_character_counts(series_ids)
+        own_counts = self.get_own_character_counts(series_ids)
         appearance_counts = self.get_appearance_extracted_counts(series_ids)
+        child_counts = self.get_child_counts(series_ids)
+
+        parent_ids = {series.parent_series_id for series in items if series.parent_series_id}
+        parent_tags: dict[int, str] = {}
+        if parent_ids:
+            parent_rows = self.db.query(Series.id, Series.series_tag).filter(Series.id.in_(parent_ids)).all()
+            parent_tags = {row[0]: row[1] for row in parent_rows}
+
         return [
             self.to_response(
                 series,
                 character_count=counts.get(series.id, 0),
+                own_character_count=own_counts.get(series.id, 0),
                 appearance_extracted_count=appearance_counts.get(series.id, 0),
+                parent_series_tag=parent_tags.get(series.parent_series_id) if series.parent_series_id else None,
+                child_count=child_counts.get(series.id, 0),
             )
             for series in items
         ]
+
+    def flatten_hierarchical(self, items: list[SeriesResponse]) -> list[SeriesResponse]:
+        by_id = {item.id: item for item in items}
+        children_by_parent: dict[int, list[SeriesResponse]] = {}
+        roots: list[SeriesResponse] = []
+        orphans: list[SeriesResponse] = []
+
+        for item in items:
+            if item.parent_series_id and item.parent_series_id in by_id:
+                children_by_parent.setdefault(item.parent_series_id, []).append(item)
+            elif item.parent_series_id:
+                orphans.append(item)
+            elif not item.is_merged_child:
+                roots.append(item)
+
+        roots.sort(key=lambda row: row.post_count, reverse=True)
+        for child_list in children_by_parent.values():
+            child_list.sort(key=lambda row: row.series_tag)
+
+        ordered: list[SeriesResponse] = []
+        for root in roots:
+            ordered.append(root)
+            ordered.extend(children_by_parent.get(root.id, []))
+        ordered.extend(orphans)
+        ordered.extend(item for item in items if item.is_merged_child and item not in ordered)
+        return ordered
 
     def get_series(self, series_id: int) -> Series | None:
         return self.db.query(Series).filter(Series.id == series_id).first()
@@ -140,6 +219,9 @@ class SeriesService:
         return series
 
     def delete_series(self, series: Series) -> None:
+        child_count = self.db.query(Series.id).filter(Series.parent_series_id == series.id).count()
+        if child_count > 0:
+            raise ValueError("Unmerge sub-series before deleting this series.")
         self.db.delete(series)
         self.db.commit()
 

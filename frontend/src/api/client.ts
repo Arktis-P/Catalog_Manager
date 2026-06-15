@@ -11,6 +11,9 @@ import type {
   Series,
   SeriesCreatePayload,
   SeriesListResponse,
+  SeriesMergeCandidate,
+  SeriesMergePreview,
+  SeriesMergeResult,
   SeriesUpdatePayload,
 } from "../types";
 
@@ -64,7 +67,33 @@ export const api = {
     sort_by?: string;
     sort_order?: string;
     limit?: number;
+    hierarchical?: boolean;
   } = {}) => request<SeriesListResponse>(`/series${buildQuery(params)}`),
+
+  listSeriesMergeCandidates: (
+    seriesId: number,
+    params: { mode?: "parent" | "child"; search?: string } = {},
+  ) =>
+    request<{ items: SeriesMergeCandidate[] }>(
+      `/series/${seriesId}/merge/candidates${buildQuery(params)}`,
+    ),
+
+  previewSeriesMerge: (childSeriesId: number, parentSeriesId: number) =>
+    request<SeriesMergePreview>(
+      `/series/${childSeriesId}/merge/preview${buildQuery({ parent_series_id: parentSeriesId })}`,
+    ),
+
+  mergeSeries: (childSeriesId: number, parentSeriesId: number) =>
+    request<SeriesMergeResult>(`/series/${childSeriesId}/merge`, {
+      method: "POST",
+      body: JSON.stringify({ parent_series_id: parentSeriesId }),
+    }),
+
+  unmergeSeries: (childSeriesId: number) =>
+    request<{ child_series_id: number; child_series_tag: string; moved_back_count: number; child_character_count: number }>(
+      `/series/${childSeriesId}/merge`,
+      { method: "DELETE" },
+    ),
 
   getSeriesStatuses: () => request<string[]>("/series/statuses"),
 

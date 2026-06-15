@@ -26,7 +26,7 @@ def get_character_service(db: Session = Depends(get_db)) -> CharacterService:
     return CharacterService(db)
 
 
-def _character_response(character, series) -> CharacterResponse:
+def _character_response(character, series, source_series=None) -> CharacterResponse:
     return CharacterResponse(
         id=character.id,
         series_id=character.series_id,
@@ -45,6 +45,8 @@ def _character_response(character, series) -> CharacterResponse:
         generation_prompt=character.generation_prompt,
         appearance_confirmed=character.appearance_confirmed,
         status=character.status,
+        source_series_id=character.source_series_id,
+        source_series_tag=source_series.series_tag if source_series is not None else None,
         from_wiki=character.from_wiki,
         from_list_page=character.from_list_page,
         from_posts=character.from_posts,
@@ -218,7 +220,10 @@ def list_characters_for_series(
         raise HTTPException(status_code=404, detail="Series not found")
     rows, total = service.list_characters(series_id=series_id, search=search, skip=skip, limit=limit)
     return CharacterListResponse(
-        items=[_character_response(character, row_series) for character, row_series in rows],
+        items=[
+            _character_response(character, row_series, source_series)
+            for character, row_series, source_series in rows
+        ],
         total=total,
     )
 

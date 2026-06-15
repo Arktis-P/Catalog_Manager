@@ -462,9 +462,84 @@ button,
 }
 
 .data-table .col-actions {
-  width: 480px;
-  max-width: 480px;
+  width: 560px;
+  max-width: 560px;
   white-space: nowrap;
+}
+
+.series-child-row td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.series-child-tag {
+  color: var(--text-muted);
+}
+
+.merge-mode-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.merge-mode-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.merge-preview-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.merge-modal-actions {
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.merge-progress-area {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+
+.merge-progress-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.merge-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.merge-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  transition: width 0.35s ease;
+}
+
+.merge-progress-fill-done {
+  background: linear-gradient(90deg, #22c55e, #4ade80);
+}
+
+.merge-modal-buttons {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .table-actions {

@@ -3,7 +3,20 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.series import SERIES_STATUSES, SeriesCreate, SeriesListResponse, SeriesResponse, SeriesUpdate
+from app.schemas.series import (
+    SERIES_STATUSES,
+    SeriesCreate,
+    SeriesListResponse,
+    SeriesMergeCandidate,
+    SeriesMergeCandidateListResponse,
+    SeriesMergePreviewResponse,
+    SeriesMergeRequest,
+    SeriesMergeResponse,
+    SeriesResponse,
+    SeriesUnmergeResponse,
+    SeriesUpdate,
+)
+from app.services.series_merge_service import SeriesMergeService, similarity_score
 from app.services.series_service import SeriesService
 
 router = APIRouter(prefix="/series", tags=["series"])
@@ -18,6 +31,10 @@ def list_statuses() -> list[str]:
     return SERIES_STATUSES
 
 
+def get_merge_service(db: Session = Depends(get_db)) -> SeriesMergeService:
+    return SeriesMergeService(db)
+
+
 @router.get("", response_model=SeriesListResponse)
 def list_series(
     status: str | None = None,
@@ -26,6 +43,7 @@ def list_series(
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
+    hierarchical: bool = Query(default=True),
     service: SeriesService = Depends(get_series_service),
 ):
     items, total = service.list_series(
@@ -36,7 +54,80 @@ def list_series(
         skip=skip,
         limit=limit,
     )
-    return SeriesListResponse(items=service.to_response_list(items), total=total)
+    responses = service.to_response_list(items)
+    if hierarchical:
+        responses = service.flatten_hierarchical(responses)
+    return SeriesListResponse(items=responses, total=total)
+
+
+@router.get("/{series_id}/merge/candidates", response_model=SeriesMergeCandidateListResponse)
+def list_merge_candidates(
+    series_id: int,
+    mode: str = Query(default="parent", pattern="^(parent|child)$"),
+    search: str | None = None,
+    service: SeriesService = Depends(get_series_service),
+    merge_service: SeriesMergeService = Depends(get_merge_service),
+):
+    series = service.get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+
+    if mode == "parent":
+        candidates = merge_service.list_parent_candidates(series, search=search)
+        anchor = series
+    else:
+        candidates = merge_service.list_child_candidates(series, search=search)
+        anchor = series
+
+    counts = service.get_character_counts([item.id for item in candidates])
+    return SeriesMergeCandidateListResponse(
+        items=[
+            SeriesMergeCandidate(
+                id=item.id,
+                series_tag=item.series_tag,
+                display_name=item.display_name,
+                status=item.status,
+                character_count=counts.get(item.id, 0),
+                similarity_score=similarity_score(anchor, item),
+            )
+            for item in candidates
+        ]
+    )
+
+
+@router.get("/{series_id}/merge/preview", response_model=SeriesMergePreviewResponse)
+def preview_series_merge(
+    series_id: int,
+    parent_series_id: int = Query(ge=1),
+    merge_service: SeriesMergeService = Depends(get_merge_service),
+):
+    try:
+        preview = merge_service.preview_merge(series_id, parent_series_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SeriesMergePreviewResponse(**preview.__dict__)
+
+
+@router.post("/{series_id}/merge", response_model=SeriesMergeResponse)
+def merge_series(
+    series_id: int,
+    payload: SeriesMergeRequest,
+    merge_service: SeriesMergeService = Depends(get_merge_service),
+):
+    try:
+        result = merge_service.merge_into_parent(series_id, payload.parent_series_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SeriesMergeResponse(**result.__dict__)
+
+
+@router.delete("/{series_id}/merge", response_model=SeriesUnmergeResponse)
+def unmerge_series(series_id: int, merge_service: SeriesMergeService = Depends(get_merge_service)):
+    try:
+        result = merge_service.unmerge(series_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SeriesUnmergeResponse(**result.__dict__)
 
 
 @router.get("/export/csv")
@@ -114,4 +205,7 @@ def delete_series(series_id: int, service: SeriesService = Depends(get_series_se
     series = service.get_series(series_id)
     if not series:
         raise HTTPException(status_code=404, detail="Series not found")
-    service.delete_series(series)
+    try:
+        service.delete_series(series)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

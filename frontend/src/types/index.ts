@@ -6,7 +6,14 @@ export interface Series {
   priority: number;
   status: string;
   note: string | null;
+  parent_series_id: number | null;
+  parent_series_tag: string | null;
   character_count: number;
+  own_character_count: number;
+  merged_moved_count: number;
+  merged_duplicate_count: number;
+  child_count: number;
+  is_merged_child: boolean;
   last_collect_created: number;
   last_collect_skipped: number;
   last_appearance_updated: number;
@@ -14,6 +21,35 @@ export interface Series {
   all_appearance_collected: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface SeriesMergeCandidate {
+  id: number;
+  series_tag: string;
+  display_name: string;
+  status: string;
+  character_count: number;
+  similarity_score: number;
+}
+
+export interface SeriesMergePreview {
+  child_series_id: number;
+  child_series_tag: string;
+  parent_series_id: number;
+  parent_series_tag: string;
+  child_character_count: number;
+  duplicate_count: number;
+  moved_count: number;
+}
+
+export interface SeriesMergeResult {
+  child_series_id: number;
+  child_series_tag: string;
+  parent_series_id: number;
+  parent_series_tag: string;
+  moved_count: number;
+  duplicate_count: number;
+  parent_character_count: number;
 }
 
 export interface SeriesListResponse {
@@ -84,6 +120,8 @@ export interface CharacterDetail {
   generation_prompt: string | null;
   appearance_confirmed: boolean;
   status: string;
+  source_series_id: number | null;
+  source_series_tag: string | null;
   from_wiki: boolean;
   from_list_page: boolean;
   from_posts: boolean;

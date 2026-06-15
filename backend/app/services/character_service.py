@@ -5,7 +5,7 @@ import io
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.integrations.danbooru.character_collector import CharacterCollector, tag_to_display_name
@@ -18,6 +18,7 @@ CollectProgressCallback = Callable[[dict[str, object]], None]
 CHARACTER_CSV_COLUMNS = [
     "series_tag",
     "series_display_name",
+    "source_series_tag",
     "character_tag",
     "display_name",
     "post_count",
@@ -254,7 +255,12 @@ class CharacterService:
         series_id: int | None = None,
         search: str | None = None,
     ):
-        query = self.db.query(Character, Series).join(Series, Character.series_id == Series.id)
+        SourceSeries = aliased(Series)
+        query = (
+            self.db.query(Character, Series, SourceSeries)
+            .join(Series, Character.series_id == Series.id)
+            .outerjoin(SourceSeries, Character.source_series_id == SourceSeries.id)
+        )
         if series_id is not None:
             query = query.filter(Character.series_id == series_id)
         if search:
@@ -278,17 +284,22 @@ class CharacterService:
         search: str | None = None,
         skip: int = 0,
         limit: int = 500,
-    ) -> tuple[list[tuple[Character, Series]], int]:
+    ) -> tuple[list[tuple[Character, Series, Series | None]], int]:
         query = self._character_rows_query(series_id=series_id, search=search)
         total = query.count()
         rows = query.offset(skip).limit(limit).all()
         return rows, total
 
     @staticmethod
-    def _character_csv_row(character: Character, series: Series) -> list[object]:
+    def _character_csv_row(
+        character: Character,
+        series: Series,
+        source_series: Series | None = None,
+    ) -> list[object]:
         return [
             series.series_tag,
             series.display_name,
+            source_series.series_tag if source_series is not None else "",
             character.character_tag,
             character.display_name,
             character.post_count,
@@ -320,6 +331,6 @@ class CharacterService:
         output.write("\ufeff")
         writer = csv.writer(output)
         writer.writerow(CHARACTER_CSV_COLUMNS)
-        for character, series in rows:
-            writer.writerow(self._character_csv_row(character, series))
+        for character, series, source_series in rows:
+            writer.writerow(self._character_csv_row(character, series, source_series))
         return output.getvalue()

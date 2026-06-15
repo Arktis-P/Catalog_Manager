@@ -118,6 +118,7 @@ export function SeriesCharactersModal({ series, onClose }: SeriesCharactersModal
                   <th className="col-tags">hair_shape</th>
                   <th className="col-tags">eye_color</th>
                   <th className="col-tags-wide">feature_tags</th>
+                  <th className="col-tags">source_series</th>
                   <th className="col-narrow">gender</th>
                   <th className="col-tags-wide">generation_prompt</th>
                   <th className="col-narrow">appearance</th>
@@ -127,7 +128,7 @@ export function SeriesCharactersModal({ series, onClose }: SeriesCharactersModal
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={13} className="empty-state">
+                    <td colSpan={14} className="empty-state">
                       No characters found.
                     </td>
                   </tr>
@@ -143,6 +144,7 @@ export function SeriesCharactersModal({ series, onClose }: SeriesCharactersModal
                       <td className="col-tags">{displayValue(character.hair_shape)}</td>
                       <td className="col-tags">{displayValue(character.eye_color)}</td>
                       <td className="col-tags-wide">{displayValue(character.feature_tags)}</td>
+                      <td className="col-tags">{displayValue(character.source_series_tag)}</td>
                       <td className="col-narrow">{formatGender(character.gender)}</td>
                       <td className="col-tags-wide">{displayValue(character.generation_prompt)}</td>
                       <td className="col-narrow">
