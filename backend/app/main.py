@@ -2,7 +2,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,6 +12,9 @@ from app.database import init_db
 from app.routers import catalog, characters, review, series
 from app.routers import settings as settings_router
 from app.services.seed_service import seed_demo_data
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DESKTOP_ICON_DIR = PROJECT_ROOT / "desktop" / "assets"
 
 
 @asynccontextmanager
@@ -48,6 +51,34 @@ app.include_router(catalog.router, prefix="/api")
 app.include_router(characters.router, prefix="/api")
 app.include_router(review.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
+
+
+def _static_icon_path(name: str) -> Path | None:
+    dist_dir = settings.frontend_dist_dir
+    if dist_dir:
+        candidate = dist_dir / name
+        if candidate.is_file():
+            return candidate
+    fallback = DESKTOP_ICON_DIR / name
+    if fallback.is_file():
+        return fallback
+    return None
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def serve_favicon():
+    path = _static_icon_path("favicon.ico") or _static_icon_path("appicon.ico")
+    if path is None:
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="image/x-icon")
+
+
+@app.get("/appicon.png", include_in_schema=False)
+def serve_appicon():
+    path = _static_icon_path("appicon.png")
+    if path is None:
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="image/png")
 
 
 @app.get("/api/health")

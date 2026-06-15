@@ -21,6 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = PROJECT_ROOT / "backend"
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 DIST_DIR = FRONTEND_DIR / "dist"
+APP_ICON_PATH = PROJECT_ROOT / "desktop" / "assets" / "appicon.ico"
 BACKEND_PORT = 8000
 APP_URL = f"http://127.0.0.1:{BACKEND_PORT}"
 
@@ -61,6 +62,8 @@ def ensure_frontend_build() -> None:
 def wait_for_server(url: str, timeout_seconds: int = 90) -> bool:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
+        if _backend_process is not None and _backend_process.poll() is not None:
+            return False
         try:
             with urllib.request.urlopen(url, timeout=2) as response:
                 if response.status == 200:
@@ -68,6 +71,27 @@ def wait_for_server(url: str, timeout_seconds: int = 90) -> bool:
         except (urllib.error.URLError, TimeoutError):
             time.sleep(0.5)
     return False
+
+
+def backend_exit_message(log_path: Path | None) -> str:
+    if _backend_process is None:
+        return "backend process was not started"
+    code = _backend_process.poll()
+    if code is None:
+        return "backend process is still running but /api/health did not respond in time"
+    return f"backend process exited early with code {code}"
+
+
+def read_log_tail(log_path: Path | None, max_lines: int = 20) -> str:
+    if log_path is None or not log_path.is_file():
+        return ""
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    if not lines:
+        return ""
+    return "\n".join(lines[-max_lines:])
 
 
 def _open_log_file() -> tuple[Path | None, object]:
@@ -80,6 +104,36 @@ def _open_log_file() -> tuple[Path | None, object]:
     except OSError as exc:
         print(f"[desktop] Warning: could not open log file ({exc}). Logging disabled.")
         return None, subprocess.DEVNULL
+
+
+def release_listening_port(port: int) -> None:
+    """Stop stray listeners left by a crashed desktop session."""
+    if sys.platform != "win32":
+        return
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return
+    needle = f":{port}"
+    for line in result.stdout.splitlines():
+        if "LISTENING" not in line or needle not in line:
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        pid = parts[-1]
+        if pid.isdigit() and int(pid) != os.getpid():
+            subprocess.run(
+                ["taskkill", "/F", "/PID", pid],
+                capture_output=True,
+                text=True,
+                **_hidden_subprocess_kwargs(),
+            )
 
 
 def start_backend() -> Path | None:
@@ -140,17 +194,46 @@ def stop_backend() -> None:
     _log_handle = None
 
 
+def app_icon_path() -> str | None:
+    if APP_ICON_PATH.is_file():
+        return str(APP_ICON_PATH.resolve())
+    return None
+
+
+def ensure_windows_app_identity() -> None:
+    """Group taskbar entry under our icon instead of python.exe on Windows."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("CatalogueManager.Desktop.1")
+    except Exception:
+        pass
+
+
 def run_desktop() -> int:
     import webview
+
+    ensure_windows_app_identity()
+    icon = app_icon_path()
+    if icon is None:
+        print(f"[desktop] Warning: app icon not found at {APP_ICON_PATH}")
 
     log_path: Path | None = None
     try:
         ensure_frontend_build()
+        release_listening_port(BACKEND_PORT)
         log_path = start_backend()
 
         if not wait_for_server(f"{APP_URL}/api/health"):
             log_hint = log_path or runtime_log_dir()
-            print(f"[desktop] Backend failed to start. See log: {log_hint}")
+            print(f"[desktop] Backend failed to start. See log: {log_hint}", flush=True)
+            print(f"[desktop] {backend_exit_message(log_path)}", flush=True)
+            tail = read_log_tail(log_path)
+            if tail:
+                print("[desktop] Last backend log lines:", flush=True)
+                print(tail, flush=True)
             stop_backend()
             return 1
 
@@ -163,14 +246,14 @@ def run_desktop() -> int:
             background_color="#0f1419",
         )
         window.events.closed += stop_backend
-        webview.start(gui="edgechromium")
+        webview.start(gui="edgechromium", icon=icon)
         stop_backend()
         return 0
     except KeyboardInterrupt:
         stop_backend()
         return 0
     except Exception as exc:
-        print(f"[desktop] Failed to launch: {exc}")
+        print(f"[desktop] Failed to launch: {exc}", flush=True)
         stop_backend()
         return 1
 
