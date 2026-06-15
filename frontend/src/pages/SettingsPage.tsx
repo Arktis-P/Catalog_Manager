@@ -7,7 +7,10 @@ export function SettingsPage() {
   const [maxConcurrent, setMaxConcurrent] = useState(2);
   const [naiaBaseUrl, setNaiaBaseUrl] = useState("http://127.0.0.1:7243");
   const [naiaPortableDir, setNaiaPortableDir] = useState("");
-  const [imagesPerCharacter, setImagesPerCharacter] = useState(1);
+  const [imagesPerCharacter, setImagesPerCharacter] = useState(2);
+  const [promptPrefix, setPromptPrefix] = useState("");
+  const [promptSuffix, setPromptSuffix] = useState("");
+  const [negativePrompt, setNegativePrompt] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +27,9 @@ export function SettingsPage() {
         setNaiaBaseUrl(response.naia_base_url);
         setNaiaPortableDir(response.naia_portable_dir);
         setImagesPerCharacter(response.generation_images_per_character);
+        setPromptPrefix(response.generation_prompt_prefix);
+        setPromptSuffix(response.generation_prompt_suffix);
+        setNegativePrompt(response.generation_negative_prompt);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load settings");
       } finally {
@@ -43,12 +49,18 @@ export function SettingsPage() {
         naia_base_url: naiaBaseUrl,
         naia_portable_dir: naiaPortableDir,
         generation_images_per_character: imagesPerCharacter,
+        generation_prompt_prefix: promptPrefix,
+        generation_prompt_suffix: promptSuffix,
+        generation_negative_prompt: negativePrompt,
       });
       setSettings(response);
       setMaxConcurrent(response.danbooru_collect_max_concurrent);
       setNaiaBaseUrl(response.naia_base_url);
       setNaiaPortableDir(response.naia_portable_dir);
       setImagesPerCharacter(response.generation_images_per_character);
+      setPromptPrefix(response.generation_prompt_prefix);
+      setPromptSuffix(response.generation_prompt_suffix);
+      setNegativePrompt(response.generation_negative_prompt);
       setSavedMessage("설정을 저장했습니다.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
@@ -63,7 +75,7 @@ export function SettingsPage() {
         <div>
           <h1 className="page-title">Settings</h1>
           <p className="page-description">
-            Danbooru 작업 큐와 NAIA 연결 경로를 설정합니다.
+            Danbooru 작업 큐, NAIA 연결, 이미지 생성 프롬프트 템플릿을 설정합니다.
           </p>
         </div>
       </header>
@@ -129,6 +141,49 @@ export function SettingsPage() {
                 />
                 <strong>{imagesPerCharacter}</strong>
               </div>
+              <p className="field-help">
+                기본 2장 권장. 손가락·디테일 문제로 부적절한 이미지가 있을 때 리뷰에서 대체할 수
+                있습니다.
+              </p>
+            </div>
+
+            <div className="field full-width">
+              <label htmlFor="prompt-prefix">생성 프롬프트 — 와일드카드 앞 (prefix)</label>
+              <textarea
+                id="prompt-prefix"
+                className="generation-prompt-textarea"
+                rows={5}
+                value={promptPrefix}
+                onChange={(event) => setPromptPrefix(event.target.value)}
+              />
+              <p className="field-help">
+                캐릭터 와일드카드 앞에 붙습니다. <code>{"{gender}"}</code> 플레이스홀더 사용 가능.
+              </p>
+            </div>
+
+            <div className="field full-width">
+              <label htmlFor="prompt-suffix">생성 프롬프트 — 와일드카드 뒤 (suffix)</label>
+              <textarea
+                id="prompt-suffix"
+                className="generation-prompt-textarea"
+                rows={3}
+                value={promptSuffix}
+                onChange={(event) => setPromptSuffix(event.target.value)}
+              />
+              <p className="field-help">
+                캐릭터 와일드카드 뒤에 붙습니다. <code>{"{portrait}"}</code> 플레이스홀더 사용 가능.
+              </p>
+            </div>
+
+            <div className="field full-width">
+              <label htmlFor="negative-prompt">Negative prompt</label>
+              <textarea
+                id="negative-prompt"
+                className="generation-prompt-textarea"
+                rows={3}
+                value={negativePrompt}
+                onChange={(event) => setNegativePrompt(event.target.value)}
+              />
             </div>
           </div>
           <div className="modal-actions">

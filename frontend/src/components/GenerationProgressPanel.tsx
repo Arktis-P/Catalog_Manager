@@ -38,6 +38,11 @@ export function GenerationProgressPanel({ job, onDismiss, onCancel }: Generation
   if (job.failed) {
     metaParts.push(`failed ${job.failed}`);
   }
+  if (job.auto_pass || job.auto_warning || job.auto_reject) {
+    metaParts.push(
+      `auto pass ${job.auto_pass ?? 0} / warn ${job.auto_warning ?? 0} / reject ${job.auto_reject ?? 0}`,
+    );
+  }
   if (job.current_character_tag) {
     metaParts.push(job.current_character_tag);
   }

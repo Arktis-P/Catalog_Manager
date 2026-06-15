@@ -939,6 +939,58 @@ button,
   font-size: 0.85rem;
 }
 
+.generation-prompt-textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.85rem;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.generation-prompt-config {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.subsection-title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.generation-prompt-split {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  align-items: start;
+  margin: 12px 0;
+}
+
+.generation-prompt-wildcard-slot {
+  align-self: center;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .generation-prompt-split {
+    grid-template-columns: 1fr;
+  }
+
+  .generation-prompt-wildcard-slot {
+    justify-self: start;
+  }
+}
+
 .generation-preview-panel {
   margin-bottom: 16px;
 }

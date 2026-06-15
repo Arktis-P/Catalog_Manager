@@ -36,6 +36,9 @@ class GenerationBatchState:
     prompt_level: int = 1
     current_character_tag: str = ""
     last_image_path: str | None = None
+    auto_pass: int = 0
+    auto_warning: int = 0
+    auto_reject: int = 0
     error: str | None = None
     started_at: str = field(default_factory=_utc_now)
     finished_at: str | None = None
@@ -206,6 +209,9 @@ class GenerationJobManager:
 
             completed = 0
             failed = 0
+            auto_pass = 0
+            auto_warning = 0
+            auto_reject = 0
             for index, generation_job in enumerate(jobs, start=1):
                 if self._is_cancelled(job_id):
                     return
@@ -240,13 +246,22 @@ class GenerationJobManager:
                         image_bytes=image_bytes,
                     )
                     completed += 1
+                    if image.auto_status == "pass":
+                        auto_pass += 1
+                    elif image.auto_status == "warning":
+                        auto_warning += 1
+                    elif image.auto_status == "reject_candidate":
+                        auto_reject += 1
                     self._update_job(
                         job_id,
                         completed=completed,
                         failed=failed,
+                        auto_pass=auto_pass,
+                        auto_warning=auto_warning,
+                        auto_reject=auto_reject,
                         current=index,
                         last_image_path=image.image_path,
-                        message=f"{character.character_tag} 저장 완료 ({index}/{len(jobs)})",
+                        message=f"{character.character_tag} 저장 · 자동검사 {image.auto_status} ({index}/{len(jobs)})",
                     )
                 except Exception as exc:
                     failed += 1
@@ -259,14 +274,20 @@ class GenerationJobManager:
                         message=f"{character.character_tag} 실패: {exc}",
                     )
 
+            summary = f"완료: {completed}장 저장 · 실패 {failed}"
+            if completed:
+                summary += f" · 자동검사 pass {auto_pass} / warning {auto_warning} / reject {auto_reject}"
             final_status = "completed" if failed == 0 else ("failed" if completed == 0 else "completed")
             self._update_job(
                 job_id,
                 status=final_status,
                 phase="completed" if completed else "failed",
-                message=f"완료: {completed}장 저장 · 실패 {failed}",
+                message=summary,
                 completed=completed,
                 failed=failed,
+                auto_pass=auto_pass,
+                auto_warning=auto_warning,
+                auto_reject=auto_reject,
                 current=len(jobs),
                 finished_at=_utc_now(),
             )

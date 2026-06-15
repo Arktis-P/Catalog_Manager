@@ -153,6 +153,9 @@ export interface CollectJob {
   updated: number;
   completed?: number;
   failed?: number;
+  auto_pass?: number;
+  auto_warning?: number;
+  auto_reject?: number;
   prompt_level?: number;
   current_character_tag?: string;
   last_image_path?: string | null;
@@ -175,6 +178,10 @@ export interface GenerationCandidate {
 export interface GenerationCandidateListResponse {
   items: GenerationCandidate[];
   total: number;
+  total_characters: number;
+  with_prompt: number;
+  confirmed_with_prompt: number;
+  unconfirmed_with_prompt: number;
 }
 
 export interface NaiaStatus {
@@ -197,6 +204,8 @@ export interface GenerationQueuePreview {
   wildcard_path: string;
   manifest_path: string;
   prompt_template: string;
+  prompt_prefix: string;
+  prompt_suffix: string;
   negative_prompt: string;
   skipped: Array<Record<string, unknown>>;
 }
@@ -213,6 +222,9 @@ export interface AppSettings {
   naia_base_url: string;
   naia_portable_dir: string;
   generation_images_per_character: number;
+  generation_prompt_prefix: string;
+  generation_prompt_suffix: string;
+  generation_negative_prompt: string;
 }
 
 export interface AppearanceReviewItem {

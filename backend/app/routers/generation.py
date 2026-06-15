@@ -37,6 +37,9 @@ def _job_to_schema(job) -> GenerationJobState:
         prompt_level=job.prompt_level,
         current_character_tag=job.current_character_tag,
         last_image_path=job.last_image_path,
+        auto_pass=job.auto_pass,
+        auto_warning=job.auto_warning,
+        auto_reject=job.auto_reject,
         error=job.error,
         started_at=job.started_at,
         finished_at=job.finished_at,
@@ -61,6 +64,7 @@ def list_generation_candidates(
         require_confirmed=require_confirmed,
         search=search,
     )
+    stats = service.get_candidate_stats(series_id)
     return GenerationCandidateListResponse(
         items=[
             GenerationCandidate(
@@ -75,6 +79,7 @@ def list_generation_candidates(
             for character in items
         ],
         total=len(items),
+        **stats,
     )
 
 
@@ -117,6 +122,8 @@ def preview_generation_queue(
         wildcard_path=str(result["wildcard_path"]),
         manifest_path=str(result["manifest_path"]),
         prompt_template=str(result["prompt_template"]),
+        prompt_prefix=str(result.get("prompt_prefix") or ""),
+        prompt_suffix=str(result.get("prompt_suffix") or ""),
         negative_prompt=str(result["negative_prompt"]),
         skipped=list(result.get("skipped") or []),
     )

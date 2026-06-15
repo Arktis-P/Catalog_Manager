@@ -16,6 +16,10 @@ class GenerationCandidate(BaseModel):
 class GenerationCandidateListResponse(BaseModel):
     items: list[GenerationCandidate]
     total: int
+    total_characters: int = 0
+    with_prompt: int = 0
+    confirmed_with_prompt: int = 0
+    unconfirmed_with_prompt: int = 0
 
 
 class GenerationStartRequest(BaseModel):
@@ -30,6 +34,8 @@ class GenerationPreviewResponse(BaseModel):
     prompt_level: int
     prompt: str
     negative_prompt: str
+    prompt_prefix: str = ""
+    prompt_suffix: str = ""
 
 
 class GenerationJobState(BaseModel):
@@ -48,6 +54,9 @@ class GenerationJobState(BaseModel):
     prompt_level: int
     current_character_tag: str
     last_image_path: str | None = None
+    auto_pass: int = 0
+    auto_warning: int = 0
+    auto_reject: int = 0
     error: str | None = None
     started_at: str
     finished_at: str | None = None
@@ -77,5 +86,7 @@ class GenerationQueuePreviewResponse(BaseModel):
     wildcard_path: str
     manifest_path: str
     prompt_template: str
+    prompt_prefix: str
+    prompt_suffix: str
     negative_prompt: str
     skipped: list[dict[str, object]]

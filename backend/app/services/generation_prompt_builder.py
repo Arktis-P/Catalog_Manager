@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from app.config import settings
@@ -9,11 +10,35 @@ from app.models.character import Character
 from app.services.prompt_service import build_generation_prompt, tag_to_prompt_text
 
 
+@dataclass
+class GenerationPromptConfig:
+    prefix: str
+    suffix: str
+    negative_prompt: str
+
+
 def _read_template_file(name: str, default: str = "") -> str:
     path = settings.input_dir / "prompt_templates" / name
     if not path.exists():
         return default
     return path.read_text(encoding="utf-8").strip()
+
+
+def default_generation_prompt_config() -> GenerationPromptConfig:
+    return GenerationPromptConfig(
+        prefix=_read_template_file(
+            "generation_prefix.txt",
+            "__set_artists_4.5.2__, __set_qualityTags__,\n\n{gender},",
+        ),
+        suffix=_read_template_file(
+            "generation_suffix.txt",
+            "solo, solo focus, {portrait}, smile",
+        ),
+        negative_prompt=_read_template_file(
+            "negative_prompt.txt",
+            "lowres, bad anatomy, bad hands, text, watermark, signature, blurry",
+        ),
+    )
 
 
 def _split_tags(raw: str | None) -> list[str]:
@@ -66,20 +91,20 @@ def _gender_tag(character: Character) -> str:
     return "1girl"
 
 
+def _apply_placeholders(template: str, *, gender: str) -> str:
+    return template.replace("{gender}", gender).replace("{portrait}", "portrait")
+
+
 def build_full_prompt(
     character: Character,
     *,
     prompt_level: int,
+    prompt_config: GenerationPromptConfig | None = None,
     queue_id: str | None = None,
     use_wildcard: bool = False,
-    wildcard_line_index: int | None = None,
 ) -> tuple[str, str]:
-    negative_prompt = _read_template_file(
-        "negative_prompt.txt",
-        "lowres, bad anatomy, bad hands, text, watermark, signature, blurry",
-    )
-    artist_combo = _read_template_file("artist_combo_tags.txt")
-    base_prompt = _read_template_file("base_prompt.txt")
+    config = prompt_config or default_generation_prompt_config()
+    gender = _gender_tag(character)
 
     if use_wildcard and queue_id:
         character_part = f"__*{wildcard_token_name(queue_id)}__"
@@ -89,24 +114,12 @@ def build_full_prompt(
             raise ValueError(f"{character.character_tag}: generation_prompt가 없습니다.")
         character_part = character_core
 
-    quality_prefix = "__set_qualityTags__"
-    artist_prefix = "__set_artists_4.5.2__" if not artist_combo else artist_combo
+    prefix = _apply_placeholders(config.prefix, gender=gender).strip()
+    suffix = _apply_placeholders(config.suffix, gender=gender).strip()
 
-    sections: list[str] = []
-    if prompt_level >= 5:
-        sections.append(artist_prefix)
-        sections.append(quality_prefix)
-        if base_prompt:
-            sections.append(base_prompt)
-        sections.append("backlighting, [black background, simple background], abstract background")
-
-    sections.append(f"{_gender_tag(character)}, {character_part}, solo, solo focus, {{portrait}}")
-
-    if prompt_level >= 5:
-        sections.append("smile")
-
-    prompt = ",\n\n".join(section for section in sections if section.strip())
-    return prompt, negative_prompt
+    sections = [section for section in (prefix, character_part, suffix) if section]
+    prompt = ",\n\n".join(sections)
+    return prompt, config.negative_prompt
 
 
 def build_queue_manifest(
@@ -119,6 +132,8 @@ def build_queue_manifest(
     characters: list[dict[str, object]],
     prompt_template: str,
     negative_prompt: str,
+    prompt_prefix: str,
+    prompt_suffix: str,
 ) -> dict[str, object]:
     return {
         "queue_id": queue_id,
@@ -127,14 +142,15 @@ def build_queue_manifest(
         "prompt_level": prompt_level,
         "wildcard_path": str(wildcard_path),
         "wildcard_token": f"__*{wildcard_token_name(queue_id)}__",
+        "prompt_prefix": prompt_prefix,
+        "prompt_suffix": prompt_suffix,
         "prompt_template": prompt_template,
         "negative_prompt": negative_prompt,
         "character_count": len(characters),
         "characters": characters,
         "naia_note": (
-            "NAIA 프롬프트에 wildcard_token을 넣고 Auto Generate를 켠 뒤 Random/Generate를 "
-            "반복하면 순차 와일드카드로 캐릭터가 바뀝니다. 와일드카드 파일 변경 후 NAIA에서 "
-            "Reload가 필요할 수 있습니다."
+            "캐릭터 와일드카드는 prompt_prefix와 prompt_suffix 사이에 위치합니다. "
+            "NAIA 와일드카드 파일 변경 후 Reload가 필요할 수 있습니다."
         ),
     }
 

@@ -15,11 +15,13 @@ from app.models.generation_job import GenerationJob
 from app.models.image import Image
 from app.models.series import Series
 from app.services.generation_prompt_builder import (
+    GenerationPromptConfig,
     build_character_core,
     build_full_prompt,
     build_queue_manifest,
     export_queue_manifest,
 )
+from app.services.image_auto_checker import check_generated_image
 from app.services.settings_service import SettingsService
 
 def _safe_filename_tag(character_tag: str) -> str:
@@ -95,22 +97,78 @@ class GenerationService:
             )
         return query.order_by(Character.post_count.desc(), Character.character_tag.asc()).all()
 
+    def get_candidate_stats(self, series_id: int) -> dict[str, int]:
+        base = self.db.query(Character).filter(Character.series_id == series_id)
+        total = base.count()
+        with_prompt = base.filter(
+            Character.generation_prompt.isnot(None),
+            Character.generation_prompt != "",
+        ).count()
+        confirmed_with_prompt = base.filter(
+            Character.generation_prompt.isnot(None),
+            Character.generation_prompt != "",
+            Character.appearance_confirmed.is_(True),
+        ).count()
+        return {
+            "total_characters": total,
+            "with_prompt": with_prompt,
+            "confirmed_with_prompt": confirmed_with_prompt,
+            "unconfirmed_with_prompt": max(0, with_prompt - confirmed_with_prompt),
+        }
+
+    def _raise_no_eligible_error(
+        self,
+        skipped: list[dict[str, object]],
+        *,
+        require_confirmed: bool,
+    ) -> None:
+        unconfirmed = sum(1 for item in skipped if item.get("reason") == "외형 미확정")
+        no_prompt = sum(1 for item in skipped if item.get("reason") == "generation_prompt 없음")
+        if require_confirmed and unconfirmed > 0 and no_prompt == 0:
+            raise ValueError(
+                "생성 가능한 캐릭터가 없습니다. "
+                f"generation_prompt는 {unconfirmed}명 있으나 외형 태그 Confirm이 되지 않았습니다. "
+                "Review 탭에서 Confirm하거나, Generation 화면의 "
+                "'외형 태그 확정된 캐릭터만 포함' 체크를 해제하세요."
+            )
+        if no_prompt > 0 and unconfirmed == 0:
+            raise ValueError(
+                "생성 가능한 캐릭터가 없습니다. "
+                f"generation_prompt가 없는 캐릭터 {no_prompt}명입니다. "
+                "외형 태그 추출을 먼저 실행하세요."
+            )
+        raise ValueError(
+            "생성 가능한 캐릭터가 없습니다. "
+            f"(외형 미확정 {unconfirmed}명, generation_prompt 없음 {no_prompt}명)"
+        )
+
+    def get_prompt_config(self) -> GenerationPromptConfig:
+        return self._settings.get_generation_prompt_config()
+
     def preview_prompt(
         self,
         character_id: int,
         *,
         prompt_level: int = 1,
+        prompt_config: GenerationPromptConfig | None = None,
     ) -> dict[str, str | int]:
         character = self.db.query(Character).filter(Character.id == character_id).first()
         if not character:
             raise ValueError("Character not found")
-        prompt, negative = build_full_prompt(character, prompt_level=prompt_level)
+        config = prompt_config or self.get_prompt_config()
+        prompt, negative = build_full_prompt(
+            character,
+            prompt_level=prompt_level,
+            prompt_config=config,
+        )
         return {
             "character_id": character.id,
             "character_tag": character.character_tag,
             "prompt_level": prompt_level,
             "prompt": prompt,
             "negative_prompt": negative,
+            "prompt_prefix": config.prefix,
+            "prompt_suffix": config.suffix,
         }
 
     def prepare_queue(
@@ -120,11 +178,13 @@ class GenerationService:
         character_ids: list[int] | None,
         prompt_level: int,
         require_confirmed: bool = True,
+        prompt_config: GenerationPromptConfig | None = None,
     ) -> dict[str, object]:
         series = self.db.query(Series).filter(Series.id == series_id).first()
         if not series:
             raise ValueError("Series not found")
 
+        config = prompt_config or self.get_prompt_config()
         if character_ids:
             characters = (
                 self.db.query(Character)
@@ -163,7 +223,7 @@ class GenerationService:
             eligible.append(character)
 
         if not eligible:
-            raise ValueError("생성 가능한 캐릭터가 없습니다.")
+            self._raise_no_eligible_error(skipped, require_confirmed=require_confirmed)
 
         queue_id = f"{series.series_tag}_{uuid.uuid4().hex[:8]}"
         wildcard_lines = [build_character_core(character, prompt_level) or "" for character in eligible]
@@ -172,6 +232,7 @@ class GenerationService:
         sample_prompt, negative_prompt = build_full_prompt(
             eligible[0],
             prompt_level=prompt_level,
+            prompt_config=config,
             queue_id=queue_id,
             use_wildcard=True,
         )
@@ -193,6 +254,8 @@ class GenerationService:
             ],
             prompt_template=sample_prompt,
             negative_prompt=negative_prompt,
+            prompt_prefix=config.prefix,
+            prompt_suffix=config.suffix,
         )
         manifest_path = export_queue_manifest(
             settings.output_dir / "naia_queues" / f"{queue_id}.json",
@@ -210,6 +273,8 @@ class GenerationService:
             "manifest_path": str(manifest_path),
             "prompt_template": sample_prompt,
             "negative_prompt": negative_prompt,
+            "prompt_prefix": config.prefix,
+            "prompt_suffix": config.suffix,
             "characters": manifest["characters"],
         }
 
@@ -221,7 +286,13 @@ class GenerationService:
     ) -> list[GenerationJob]:
         jobs: list[GenerationJob] = []
         prompt_level = int(queue_payload.get("prompt_level") or 1)
-        negative_prompt = str(queue_payload.get("negative_prompt") or "")
+        stored = self.get_prompt_config()
+        config = GenerationPromptConfig(
+            prefix=str(queue_payload.get("prompt_prefix") or stored.prefix),
+            suffix=str(queue_payload.get("prompt_suffix") or stored.suffix),
+            negative_prompt=str(queue_payload.get("negative_prompt") or stored.negative_prompt),
+        )
+        negative_prompt = config.negative_prompt
         characters = queue_payload.get("characters")
         if not isinstance(characters, list):
             return jobs
@@ -235,7 +306,11 @@ class GenerationService:
             character = self.db.query(Character).filter(Character.id == character_id).first()
             if not character:
                 continue
-            prompt, _ = build_full_prompt(character, prompt_level=prompt_level)
+            prompt, _ = build_full_prompt(
+                character,
+                prompt_level=prompt_level,
+                prompt_config=config,
+            )
             for _ in range(images_per_character):
                 job = GenerationJob(
                     character_id=character.id,
@@ -272,11 +347,22 @@ class GenerationService:
         output_path.write_bytes(image_bytes)
 
         rel_path = output_path.relative_to(settings.project_root).as_posix()
+        series = self.db.query(Series).filter(Series.id == character.series_id).first()
+        check = check_generated_image(
+            output_path,
+            character=character,
+            series=series,
+        )
         image = Image(
             character_id=character.id,
             generation_job_id=generation_job.id,
             image_path=rel_path,
-            auto_status="pending_review",
+            auto_tags=check.auto_tags,
+            auto_status=check.auto_status,
+            hair_match=check.hair_match,
+            eye_match=check.eye_match,
+            gender_pred=check.gender_pred,
+            cover_score=check.cover_score,
         )
         generation_job.status = "completed"
         generation_job.output_path = rel_path

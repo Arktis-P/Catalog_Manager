@@ -33,5 +33,15 @@ def update_settings(
         service.set_naia_portable_dir(payload.naia_portable_dir)
     if payload.generation_images_per_character is not None:
         service.set_generation_images_per_character(payload.generation_images_per_character)
+    if (
+        payload.generation_prompt_prefix is not None
+        or payload.generation_prompt_suffix is not None
+        or payload.generation_negative_prompt is not None
+    ):
+        service.set_generation_prompt_config(
+            prefix=payload.generation_prompt_prefix,
+            suffix=payload.generation_prompt_suffix,
+            negative_prompt=payload.generation_negative_prompt,
+        )
     data = service.get_public_settings()
     return SettingsResponse(**data)

@@ -4,6 +4,8 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+Lib/
+Scripts/
 .env
 .env.*
 !.env.example
@@ -25,16 +27,27 @@ yarn-error.log*
 
 # Local data & generated output
 data/
-output/generated_images/
-output/cover_images/
+
+# 이미지 에셋 — Git에 올리지 않음 (리뷰 대기·카탈로그 커버 등)
+output/generated_images/**/*
+output/cover_images/**/*
+output/**/*.png
+output/**/*.jpg
+output/**/*.jpeg
+output/**/*.webp
+output/**/*.gif
 output/naia_queues/
 output/exports/
 
-# Keep output folder structure
+# 폴더 구조만 유지 (.gitkeep)
 !output/.gitkeep
-!output/naia_queues/.gitkeep
+!output/generated_images/
 !output/generated_images/.gitkeep
+!output/generated_images/pending_review/
+!output/generated_images/pending_review/.gitkeep
+!output/cover_images/
 !output/cover_images/.gitkeep
+!output/naia_queues/.gitkeep
 !output/exports/.gitkeep
 !data/.gitkeep
 

@@ -132,6 +132,9 @@ export const api = {
         | "naia_base_url"
         | "naia_portable_dir"
         | "generation_images_per_character"
+        | "generation_prompt_prefix"
+        | "generation_prompt_suffix"
+        | "generation_negative_prompt"
       >
     >,
   ) => request<AppSettings>("/settings", { method: "PATCH", body: JSON.stringify(payload) }),

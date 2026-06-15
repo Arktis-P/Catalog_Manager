@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import { GenerationProgressPanel } from "../components/GenerationProgressPanel";
 import { SeriesSearchSelect } from "../components/SeriesSearchSelect";
 import { useGenerationJobs } from "../context/GenerationJobContext";
-import type { GenerationCandidate, GenerationQueuePreview, NaiaStatus, Series } from "../types";
+import type { AppSettings, GenerationCandidate, GenerationQueuePreview, NaiaStatus, Series } from "../types";
 
 function pendingReviewImageUrl(imagePath: string | null | undefined): string | null {
   if (!imagePath) {
@@ -18,11 +18,18 @@ export function GenerationPage() {
   const [selectedSeries, setSelectedSeries] = useState<Series | null>(null);
   const [selectedSeriesId, setSelectedSeriesId] = useState<number | "">("");
   const [candidates, setCandidates] = useState<GenerationCandidate[]>([]);
+  const [candidateStats, setCandidateStats] = useState({
+    total_characters: 0,
+    with_prompt: 0,
+    confirmed_with_prompt: 0,
+    unconfirmed_with_prompt: 0,
+  });
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [promptLevel, setPromptLevel] = useState(1);
   const [requireConfirmed, setRequireConfirmed] = useState(true);
   const [characterSearch, setCharacterSearch] = useState("");
   const [naiaStatus, setNaiaStatus] = useState<NaiaStatus | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [queuePreview, setQueuePreview] = useState<GenerationQueuePreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
@@ -53,8 +60,12 @@ export function GenerationPage() {
     void (async () => {
       setLoading(true);
       try {
-        const statusResponse = await api.getNaiaStatus();
+        const [statusResponse, settingsResponse] = await Promise.all([
+          api.getNaiaStatus(),
+          api.getSettings(),
+        ]);
         setNaiaStatus(statusResponse);
+        setAppSettings(settingsResponse);
       } catch (err) {
         setError(err instanceof Error ? err.message : "NAIA 상태를 확인하지 못했습니다.");
       } finally {
@@ -68,6 +79,12 @@ export function GenerationPage() {
       setCandidates([]);
       setSelectedIds(new Set());
       setQueuePreview(null);
+      setCandidateStats({
+        total_characters: 0,
+        with_prompt: 0,
+        confirmed_with_prompt: 0,
+        unconfirmed_with_prompt: 0,
+      });
       return;
     }
 
@@ -80,6 +97,12 @@ export function GenerationPage() {
           search: characterSearch || undefined,
         });
         setCandidates(response.items);
+        setCandidateStats({
+          total_characters: response.total_characters,
+          with_prompt: response.with_prompt,
+          confirmed_with_prompt: response.confirmed_with_prompt,
+          unconfirmed_with_prompt: response.unconfirmed_with_prompt,
+        });
         setSelectedIds(new Set(response.items.map((item) => item.id)));
       } catch (err) {
         setError(err instanceof Error ? err.message : "캐릭터 목록을 불러오지 못했습니다.");
@@ -104,6 +127,9 @@ export function GenerationPage() {
   const handleSeriesChange = (seriesId: number | "", series?: Series | null) => {
     setSelectedSeriesId(seriesId);
     setSelectedSeries(series ?? null);
+    if (series && (series.status === "tagged" || series.all_appearance_collected)) {
+      setRequireConfirmed(false);
+    }
   };
 
   const handlePreviewQueue = async () => {
@@ -154,8 +180,9 @@ export function GenerationPage() {
         <div>
           <h1 className="page-title">Generation</h1>
           <p className="page-description">
-            시리즈별 generation_prompt를 NAIA 와일드카드로보내고, NAIA API로 이미지를 생성한 뒤
-            검수 대기 폴더에 저장합니다.
+            시리즈별 generation_prompt를 NAIA 와일드카드로 보내고, NAIA API로 이미지를 생성한 뒤
+            자동 검사를 거쳐 검수 대기 폴더에 저장합니다. 캐릭터당 기본{" "}
+            {appSettings?.generation_images_per_character ?? 2}장 생성합니다.
           </p>
         </div>
       </header>
@@ -237,10 +264,41 @@ export function GenerationPage() {
                   checked={requireConfirmed}
                   onChange={(event) => setRequireConfirmed(event.target.checked)}
                 />
-                외형 태그 확정된 캐릭터만 포함
+                외형 태그 Confirm된 캐릭터만 포함 (Review 탭에서 확정한 경우)
               </label>
+              {selectedSeriesId && candidateStats.with_prompt > 0 ? (
+                <p className="field-help">
+                  prompt {candidateStats.with_prompt}명 · Confirm {candidateStats.confirmed_with_prompt}명
+                  {candidateStats.unconfirmed_with_prompt > 0
+                    ? ` · 미확정 ${candidateStats.unconfirmed_with_prompt}명`
+                    : ""}
+                </p>
+              ) : null}
             </div>
           </div>
+
+          {appSettings ? (
+            <div className="generation-prompt-config">
+              <h3 className="subsection-title">프롬프트 구조 (와일드카드 앞 · 뒤)</h3>
+              <p className="field-help">
+                최종 프롬프트 = prefix + 캐릭터 와일드카드 + suffix. Settings에서 편집할 수 있습니다.
+              </p>
+              <div className="generation-prompt-split">
+                <div>
+                  <span className="field-label">Prefix</span>
+                  <pre className="generation-prompt-block">{appSettings.generation_prompt_prefix}</pre>
+                </div>
+                <div className="generation-prompt-wildcard-slot">[캐릭터 와일드카드]</div>
+                <div>
+                  <span className="field-label">Suffix</span>
+                  <pre className="generation-prompt-block">{appSettings.generation_prompt_suffix}</pre>
+                </div>
+              </div>
+              <p className="field-help">
+                저장 시 자동 검사: 눈/손 디테일 (손이 가려지면 손 검사 생략). 캐릭터 태그 confidence는 WD14 설치 후 활성화 예정.
+              </p>
+            </div>
+          ) : null}
 
           <div className="modal-actions">
             <button
@@ -293,7 +351,24 @@ export function GenerationPage() {
 
           {loadingCandidates ? <div className="empty-state">캐릭터 불러오는 중...</div> : null}
           {!loadingCandidates && selectedSeriesId && candidates.length === 0 ? (
-            <div className="empty-state">생성 가능한 캐릭터가 없습니다.</div>
+            <div className="empty-state">
+              {candidateStats.with_prompt > 0 && requireConfirmed ? (
+                <>
+                  generation_prompt는 {candidateStats.with_prompt}명 있으나, Confirm된 캐릭터가 없습니다.
+                  시리즈 status가 <strong>tagged</strong>여도 Review Confirm은 별도 단계입니다.
+                  <button
+                    className="btn btn-small"
+                    type="button"
+                    style={{ marginTop: 12 }}
+                    onClick={() => setRequireConfirmed(false)}
+                  >
+                    미확정 캐릭터도 포함
+                  </button>
+                </>
+              ) : (
+                "생성 가능한 캐릭터가 없습니다. 외형 태그 추출을 먼저 실행하세요."
+              )}
+            </div>
           ) : null}
 
           {!loadingCandidates && candidates.length > 0 ? (
@@ -322,9 +397,24 @@ export function GenerationPage() {
           <div className="generation-preview-meta">
             <span>queue: {queuePreview.queue_id}</span>
             <span>characters: {queuePreview.character_count}</span>
+            <span>per character: {appSettings?.generation_images_per_character ?? 2} images</span>
             <span>wildcard: {queuePreview.wildcard_path}</span>
           </div>
+          <div className="generation-prompt-split">
+            <div>
+              <span className="field-label">Prefix</span>
+              <pre className="generation-prompt-block">{queuePreview.prompt_prefix}</pre>
+            </div>
+            <div className="generation-prompt-wildcard-slot">[와일드카드]</div>
+            <div>
+              <span className="field-label">Suffix</span>
+              <pre className="generation-prompt-block">{queuePreview.prompt_suffix}</pre>
+            </div>
+          </div>
+          <span className="field-label">전체 조합 예시</span>
           <pre className="generation-prompt-block">{queuePreview.prompt_template}</pre>
+          <span className="field-label">Negative</span>
+          <pre className="generation-prompt-block">{queuePreview.negative_prompt}</pre>
           {queuePreview.skipped.length > 0 ? (
             <p className="field-help">건너뜀 {queuePreview.skipped.length}명 (미리보기 기준)</p>
           ) : null}
