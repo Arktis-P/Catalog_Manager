@@ -18,6 +18,32 @@ from app.models.series import Series  # noqa: E402
 from app.services.series_service import SeriesService  # noqa: E402
 
 
+def _clear_pending_review_images() -> int:
+    pending_dir = settings.output_dir / "generated_images" / "pending_review"
+    pending_dir.mkdir(parents=True, exist_ok=True)
+    removed = 0
+    for path in pending_dir.iterdir():
+        if path.is_file():
+            path.unlink()
+            removed += 1
+    return removed
+
+
+def _reset_series_collect_state(db) -> int:
+    rows = db.query(Series).all()
+    for series in rows:
+        series.last_collect_created = 0
+        series.last_collect_skipped = 0
+        series.last_appearance_updated = 0
+        series.parent_series_id = None
+        series.merged_moved_count = 0
+        series.merged_duplicate_count = 0
+        if series.status in {"collected", "tagged", "collecting", "disabled", "all_collected"}:
+            series.status = "pending"
+    db.commit()
+    return len(rows)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Reset catalogue DB: wipe characters and related data, reload series from series.csv",
@@ -41,6 +67,7 @@ def reset_catalog(*, reimport_series: bool = True) -> dict[str, int | str]:
             "characters": db.query(Character).delete(),
         }
         db.commit()
+        pending_files_removed = _clear_pending_review_images()
 
         series_result = {"created": 0, "updated": 0, "merged_duplicates": 0}
         if reimport_series:
@@ -49,24 +76,17 @@ def reset_catalog(*, reimport_series: bool = True) -> dict[str, int | str]:
                 raise FileNotFoundError(f"Missing series CSV: {csv_path}")
             series_result = SeriesService(db).import_from_file(csv_path, replace=True)
         else:
-            db.query(Series).update(
-                {
-                    Series.last_collect_created: 0,
-                    Series.last_collect_skipped: 0,
-                    Series.last_appearance_updated: 0,
-                    Series.status: "pending",
-                },
-                synchronize_session=False,
-            )
-            db.commit()
+            series_reset = _reset_series_collect_state(db)
 
         return {
             **deleted,
+            "pending_review_files_removed": pending_files_removed,
             "series_created": series_result["created"],
             "series_updated": series_result["updated"],
             "series_merged_duplicates": series_result.get("merged_duplicates", 0),
             "series_total": db.query(Series).count(),
             "characters_total": db.query(Character).count(),
+            **({"series_reset": series_reset} if not reimport_series else {}),
         }
     finally:
         db.close()
