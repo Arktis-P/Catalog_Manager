@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from app.integrations.danbooru.appearance_extractor import AppearanceExtractor
+from app.integrations.danbooru.appearance_extractor import AppearanceExtractor, normalize_gender
 from app.models.character import Character
 from app.models.series import Series
 from app.services.prompt_service import build_generation_prompt
@@ -60,7 +60,7 @@ class AppearanceService:
             character.hair_shape = appearance.hair_shape
             character.eye_color = appearance.eye_color
             character.feature_tags = appearance.feature_tags
-            character.gender = appearance.gender
+            character.gender = normalize_gender(appearance.gender)
             character.from_related = True
             character.appearance_confirmed = False
             character.generation_prompt = build_generation_prompt(character)

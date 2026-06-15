@@ -1,7 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import { SeriesCharactersModal } from "../components/SeriesCharactersModal";
 import { useCollectJobs } from "../context/CollectJobContext";
 import type { DanbooruStatus, Series, SeriesCreatePayload } from "../types";
+import { downloadTextFile } from "../utils/download";
 import { resolveSeriesStatus, seriesStatusBadgeClass } from "../utils/seriesStatus";
 
 type ModalMode = "create" | "edit";
@@ -36,6 +38,8 @@ export function SeriesPage() {
   const [form, setForm] = useState<SeriesCreatePayload>(emptyForm);
   const [importReplace, setImportReplace] = useState(false);
   const [danbooruStatus, setDanbooruStatus] = useState<DanbooruStatus | null>(null);
+  const [viewingSeries, setViewingSeries] = useState<Series | null>(null);
+  const [exportingCharacters, setExportingCharacters] = useState(false);
 
   const filteredCount = useMemo(() => items.length, [items]);
 
@@ -151,18 +155,27 @@ export function SeriesPage() {
     }
   };
 
-  const handleExport = async () => {
+  const handleExportSeries = async () => {
     try {
       const csv = await api.exportSeriesCsv();
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "series.csv";
-      anchor.click();
-      URL.revokeObjectURL(url);
+      downloadTextFile(csv, "series.csv");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to export CSV");
+      setError(err instanceof Error ? err.message : "Failed to export series CSV");
+    }
+  };
+
+  const handleExportCharacters = async () => {
+    setExportingCharacters(true);
+    setError(null);
+    try {
+      const csv = await api.exportCharactersCsv({
+        search: search || undefined,
+      });
+      downloadTextFile(csv, "characters.csv");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export characters CSV");
+    } finally {
+      setExportingCharacters(false);
     }
   };
 
@@ -194,8 +207,16 @@ export function SeriesPage() {
           <button className="btn btn-primary" type="button" onClick={openCreateModal}>
             Add Series
           </button>
-          <button className="btn" type="button" onClick={() => void handleExport()}>
-            Export CSV
+          <button className="btn" type="button" onClick={() => void handleExportSeries()}>
+            Export Series CSV
+          </button>
+          <button
+            className="btn"
+            type="button"
+            disabled={exportingCharacters}
+            onClick={() => void handleExportCharacters()}
+          >
+            {exportingCharacters ? "Exporting..." : "Export Characters CSV"}
           </button>
           <label className="btn">
             Import CSV
@@ -357,6 +378,19 @@ export function SeriesPage() {
                           >
                             {isExtractingAppearanceSeries(series.id) ? "Extracting..." : "Appearance"}
                           </button>
+                          <button
+                            className="btn btn-small"
+                            type="button"
+                            disabled={series.character_count <= 0}
+                            title={
+                              series.character_count > 0
+                                ? "수집된 캐릭터 목록과 외형 태그 보기"
+                                : "캐릭터 수집 후 사용 가능"
+                            }
+                            onClick={() => setViewingSeries(series)}
+                          >
+                            Characters
+                          </button>
                           <button className="btn btn-small" type="button" onClick={() => openEditModal(series)}>
                             Edit
                           </button>
@@ -456,6 +490,8 @@ export function SeriesPage() {
           </div>
         </div>
       ) : null}
+
+      {viewingSeries ? <SeriesCharactersModal series={viewingSeries} onClose={() => setViewingSeries(null)} /> : null}
     </>
   );
 }

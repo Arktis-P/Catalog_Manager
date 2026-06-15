@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.models.character import Character
 
 MULTI_COLOR_PROMPT_TAGS = frozenset(
@@ -81,6 +82,6 @@ def mask_appearance_for_catalog(character: Character) -> dict[str, str | None]:
         "hair_shape": character.hair_shape,
         "eye_color": character.eye_color,
         "feature_tags": character.feature_tags,
-        "gender": character.gender,
+        "gender": normalize_gender(character.gender),
         "generation_prompt": character.generation_prompt,
     }

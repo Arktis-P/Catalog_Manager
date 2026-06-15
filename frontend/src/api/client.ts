@@ -5,6 +5,7 @@ import type {
   CatalogListResponse,
   CatalogStats,
   CharacterCollectResult,
+  CharacterListResponse,
   CollectJob,
   DanbooruStatus,
   Series,
@@ -116,10 +117,25 @@ export const api = {
       { method: "POST", body: JSON.stringify(payload) },
     ),
 
+  listSeriesCharacters: (
+    seriesId: number,
+    params: { search?: string; skip?: number; limit?: number } = {},
+  ) => request<CharacterListResponse>(`/characters/series/${seriesId}/characters${buildQuery(params)}`),
+
+  exportCharactersCsv: async (params: { series_id?: number; search?: string } = {}) => {
+    const response = await fetch(`${API_BASE}/characters/export/csv${buildQuery(params)}`);
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || "Character CSV export failed");
+    }
+    return response.text();
+  },
+
   exportSeriesCsv: async () => {
     const response = await fetch(`${API_BASE}/series/export/csv`);
     if (!response.ok) {
-      throw new Error("CSV export failed");
+      const detail = await response.text();
+      throw new Error(detail || "Series CSV export failed");
     }
     return response.text();
   },

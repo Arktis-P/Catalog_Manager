@@ -86,25 +86,20 @@ class AppearanceTags:
     gender: str | None = None
 
 
-GENDER_TAGS = (
-    "1girl",
-    "1boy",
-    "2girls",
-    "2boys",
-    "3girls",
-    "3boys",
-    "multiple_girls",
-    "multiple_boys",
-    "solo",
-)
+GIRL_TAG = "1girl"
+BOY_TAG = "1boy"
 
 NO_HUMAN_TAGS = (
     "no_humans",
+    "creature",
+    "creatures",
     "animal",
     "animals",
     "monster",
-    "creature",
+    "monsters",
 )
+
+ALLOWED_GENDER_VALUES = frozenset({"1girl", "1boy", "no_humans"})
 
 
 def _load_tag_dictionary(filename: str) -> tuple[str, ...]:
@@ -237,16 +232,38 @@ def extract_feature_tags(related: list[RelatedTag]) -> str | None:
     return ", ".join(item.name for item in selected)
 
 
+def _max_tag_frequency(related: list[RelatedTag], tags: tuple[str, ...]) -> float:
+    by_name = {item.name: item.frequency for item in related}
+    scores = [by_name[tag] for tag in tags if tag in by_name]
+    return max(scores) if scores else 0.0
+
+
+def normalize_gender(value: str | None) -> str | None:
+    """Map stored gender values to 1girl, 1boy, or no_humans."""
+    if not value:
+        return None
+    normalized = value.strip().lower().replace(" ", "_")
+    if normalized in ALLOWED_GENDER_VALUES:
+        return normalized
+    if normalized in NO_HUMAN_TAGS:
+        return "no_humans"
+    return None
+
+
 def extract_gender(related: list[RelatedTag]) -> str | None:
     by_name = {item.name: item.frequency for item in related}
-    if any(tag in by_name for tag in NO_HUMAN_TAGS):
-        return "no_humans"
+    no_human_score = _max_tag_frequency(related, NO_HUMAN_TAGS)
+    girl_score = by_name.get(GIRL_TAG, 0.0)
+    boy_score = by_name.get(BOY_TAG, 0.0)
+    human_score = max(girl_score, boy_score)
 
-    matches = [item for item in related if item.name in GENDER_TAGS]
-    matches.sort(key=lambda item: item.frequency, reverse=True)
-    if not matches:
-        return None
-    return matches[0].name
+    if no_human_score > human_score:
+        return "no_humans"
+    if girl_score >= boy_score and girl_score > 0:
+        return "1girl"
+    if boy_score > 0:
+        return "1boy"
+    return None
 
 
 def extract_appearance_tags(related: list[RelatedTag]) -> AppearanceTags:

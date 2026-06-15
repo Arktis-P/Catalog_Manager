@@ -1,16 +1,42 @@
 from __future__ import annotations
 
+import csv
+import io
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.integrations.danbooru.character_collector import CharacterCollector, tag_to_display_name
 from app.integrations.danbooru.client import DanbooruClient
 from app.models.character import Character
 from app.models.series import Series
 
 CollectProgressCallback = Callable[[dict[str, object]], None]
+
+CHARACTER_CSV_COLUMNS = [
+    "series_tag",
+    "series_display_name",
+    "character_tag",
+    "display_name",
+    "post_count",
+    "danbooru_url",
+    "multi_color_hair",
+    "hair_color",
+    "hair_shape",
+    "eye_color",
+    "feature_tags",
+    "gender",
+    "generation_prompt",
+    "appearance_confirmed",
+    "status",
+    "from_wiki",
+    "from_list_page",
+    "from_posts",
+    "from_related",
+    "needs_check_reason",
+]
 
 
 @dataclass
@@ -221,3 +247,79 @@ class CharacterService:
             total_skipped_existing=total_skipped,
             results=results,
         )
+
+    def _character_rows_query(
+        self,
+        *,
+        series_id: int | None = None,
+        search: str | None = None,
+    ):
+        query = self.db.query(Character, Series).join(Series, Character.series_id == Series.id)
+        if series_id is not None:
+            query = query.filter(Character.series_id == series_id)
+        if search:
+            like = f"%{search.strip()}%"
+            query = query.filter(
+                Character.character_tag.ilike(like)
+                | Character.display_name.ilike(like)
+                | Series.series_tag.ilike(like)
+                | Series.display_name.ilike(like)
+            )
+        return query.order_by(
+            Series.series_tag.asc(),
+            Character.post_count.desc(),
+            Character.character_tag.asc(),
+        )
+
+    def list_characters(
+        self,
+        *,
+        series_id: int | None = None,
+        search: str | None = None,
+        skip: int = 0,
+        limit: int = 500,
+    ) -> tuple[list[tuple[Character, Series]], int]:
+        query = self._character_rows_query(series_id=series_id, search=search)
+        total = query.count()
+        rows = query.offset(skip).limit(limit).all()
+        return rows, total
+
+    @staticmethod
+    def _character_csv_row(character: Character, series: Series) -> list[object]:
+        return [
+            series.series_tag,
+            series.display_name,
+            character.character_tag,
+            character.display_name,
+            character.post_count,
+            character.danbooru_url or "",
+            character.multi_color_hair or "",
+            character.hair_color or "",
+            character.hair_shape or "",
+            character.eye_color or "",
+            character.feature_tags or "",
+            normalize_gender(character.gender) or "",
+            character.generation_prompt or "",
+            character.appearance_confirmed,
+            character.status,
+            character.from_wiki,
+            character.from_list_page,
+            character.from_posts,
+            character.from_related,
+            character.needs_check_reason or "",
+        ]
+
+    def export_csv(
+        self,
+        *,
+        series_id: int | None = None,
+        search: str | None = None,
+    ) -> str:
+        rows = self._character_rows_query(series_id=series_id, search=search).all()
+        output = io.StringIO()
+        output.write("\ufeff")
+        writer = csv.writer(output)
+        writer.writerow(CHARACTER_CSV_COLUMNS)
+        for character, series in rows:
+            writer.writerow(self._character_csv_row(character, series))
+        return output.getvalue()

@@ -46,6 +46,9 @@ class CharacterResponse(CharacterBase):
     series_id: int
     series_tag: str = ""
     series_display_name: str = ""
+    gender: str | None = None
+    generation_prompt: str | None = None
+    appearance_confirmed: bool = False
     from_wiki: bool = False
     from_list_page: bool = False
     from_posts: bool = False
@@ -53,6 +56,11 @@ class CharacterResponse(CharacterBase):
     needs_check_reason: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class CharacterListResponse(BaseModel):
+    items: list[CharacterResponse]
+    total: int
 
 
 class ReviewSummary(BaseModel):

@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.database import get_db
 from app.integrations.danbooru.client import DanbooruAuthError, DanbooruClient
 from app.models.character import Character
 from app.models.series import Series
-from app.schemas.character import CharacterResponse, CharacterSeriesUpdate
+from app.schemas.character import CharacterListResponse, CharacterResponse, CharacterSeriesUpdate
 from app.schemas.character_collect import (
     CharacterCollectRequest,
     CharacterCollectResultResponse,
@@ -39,6 +40,9 @@ def _character_response(character, series) -> CharacterResponse:
         hair_shape=character.hair_shape,
         eye_color=character.eye_color,
         feature_tags=character.feature_tags,
+        gender=normalize_gender(character.gender),
+        generation_prompt=character.generation_prompt,
+        appearance_confirmed=character.appearance_confirmed,
         status=character.status,
         from_wiki=character.from_wiki,
         from_list_page=character.from_list_page,
@@ -179,6 +183,43 @@ def collect_characters_for_series(
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/export/csv")
+def export_characters_csv(
+    series_id: int | None = Query(default=None, ge=1),
+    search: str | None = None,
+    service: CharacterService = Depends(get_character_service),
+):
+    if series_id is not None:
+        series = service.db.query(Series).filter(Series.id == series_id).first()
+        if not series:
+            raise HTTPException(status_code=404, detail="Series not found")
+    content = service.export_csv(series_id=series_id, search=search)
+    filename = "characters.csv" if series_id is None else f"characters-{series_id}.csv"
+    return PlainTextResponse(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/series/{series_id}/characters", response_model=CharacterListResponse)
+def list_characters_for_series(
+    series_id: int,
+    search: str | None = None,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=500, ge=1, le=2000),
+    service: CharacterService = Depends(get_character_service),
+):
+    series = service.db.query(Series).filter(Series.id == series_id).first()
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    rows, total = service.list_characters(series_id=series_id, search=search, skip=skip, limit=limit)
+    return CharacterListResponse(
+        items=[_character_response(character, row_series) for character, row_series in rows],
+        total=total,
+    )
 
 
 @router.patch("/{character_id}/series", response_model=CharacterResponse)

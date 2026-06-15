@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.schemas.review import (
     AppearanceReviewConfirmResponse,
     AppearanceReviewItemResponse,
@@ -32,7 +33,7 @@ def _to_review_item(character) -> AppearanceReviewItemResponse:
         hair_shape=character.hair_shape,
         eye_color=character.eye_color,
         feature_tags=character.feature_tags,
-        gender=character.gender,
+        gender=normalize_gender(character.gender),
         generation_prompt=character.generation_prompt,
         appearance_confirmed=character.appearance_confirmed,
     )

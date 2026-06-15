@@ -66,6 +66,38 @@ export interface CharacterCollectResult {
   skipped_existing: number;
 }
 
+export interface CharacterDetail {
+  id: number;
+  series_id: number;
+  series_tag: string;
+  series_display_name: string;
+  character_tag: string;
+  display_name: string;
+  danbooru_url: string | null;
+  post_count: number;
+  multi_color_hair: string | null;
+  hair_color: string | null;
+  hair_shape: string | null;
+  eye_color: string | null;
+  feature_tags: string | null;
+  gender: string | null;
+  generation_prompt: string | null;
+  appearance_confirmed: boolean;
+  status: string;
+  from_wiki: boolean;
+  from_list_page: boolean;
+  from_posts: boolean;
+  from_related: boolean;
+  needs_check_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CharacterListResponse {
+  items: CharacterDetail[];
+  total: number;
+}
+
 export interface CollectJob {
   job_id: string;
   series_id: number;
