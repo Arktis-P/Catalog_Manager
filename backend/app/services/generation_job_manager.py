@@ -6,7 +6,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from app.database import SessionLocal
-from app.integrations.naia.client import NaiaClient, NaiaClientError
+from app.integrations.naia.client import NaiaClient
+from app.integrations.naia.generation_runner import (
+    generate_and_fetch_image,
+    wait_between_naia_generations,
+)
 from app.models.character import Character
 from app.models.generation_job import GenerationJob
 from app.models.series import Series
@@ -216,6 +220,9 @@ class GenerationJobManager:
                 if self._is_cancelled(job_id):
                     return
 
+                if index > 1:
+                    wait_between_naia_generations()
+
                 character = db.query(Character).filter(Character.id == generation_job.character_id).first()
                 if not character:
                     failed += 1
@@ -230,16 +237,22 @@ class GenerationJobManager:
                 )
 
                 try:
-                    client.generate(
+                    def _on_retry(attempt: int, exc: Exception) -> None:
+                        self._update_job(
+                            job_id,
+                            message=(
+                                f"{character.character_tag} NAIA 오류, 동일 프롬프트 재시도 "
+                                f"({attempt}회차): {exc}"
+                            ),
+                        )
+
+                    image_bytes, _ = generate_and_fetch_image(
+                        client,
                         prompt=generation_job.prompt,
                         negative_prompt=generation_job.negative_prompt or "",
+                        known_history_ids=known_history_ids,
+                        on_retry=_on_retry,
                     )
-                    history_item = client.wait_for_new_history(known_history_ids, timeout=300.0)
-                    history_id = str(history_item.get("history_id") or "")
-                    if not history_id:
-                        raise NaiaClientError("history_id가 비어 있습니다.")
-                    known_history_ids.add(history_id)
-                    image_bytes = client.download_history_image(history_id)
                     image = service.import_generated_image(
                         character=character,
                         generation_job=generation_job,

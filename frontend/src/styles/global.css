@@ -958,17 +958,88 @@ button,
   border-top: 1px solid var(--border);
 }
 
+.generation-prompt-panel {
+  margin-bottom: 16px;
+}
+
 .subsection-title {
   margin: 0 0 8px;
   font-size: 0.95rem;
 }
 
-.generation-prompt-split {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 12px;
-  align-items: start;
+.generation-prompt-pipeline {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
   margin: 12px 0;
+  overflow-x: auto;
+}
+
+.generation-prompt-pipeline__cell {
+  flex: 1 1 0;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.generation-prompt-pipeline__wildcard {
+  flex: 0 0 auto;
+  min-width: 200px;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+}
+
+.generation-prompt-pipeline__label {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.generation-prompt-pipeline__input {
+  width: 100%;
+  min-height: 72px;
+  max-height: 120px;
+  resize: vertical;
+  margin: 0;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+}
+
+.generation-prompt-pipeline__readonly {
+  resize: none;
+}
+
+.generation-prompt-pipeline__wildcard-token {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  word-break: break-all;
+  color: var(--text);
+}
+
+.generation-prompt-split {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
 }
 
 .generation-prompt-wildcard-slot {
@@ -979,16 +1050,6 @@ button,
   color: var(--text-muted);
   font-size: 0.85rem;
   white-space: nowrap;
-}
-
-@media (max-width: 900px) {
-  .generation-prompt-split {
-    grid-template-columns: 1fr;
-  }
-
-  .generation-prompt-wildcard-slot {
-    justify-self: start;
-  }
 }
 
 .generation-preview-panel {

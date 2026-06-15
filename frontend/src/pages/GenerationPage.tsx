@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { GenerationProgressPanel } from "../components/GenerationProgressPanel";
+import {
+  GenerationPromptPipeline,
+  wildcardTokenForSeries,
+  wildcardTokenFromQueue,
+} from "../components/GenerationPromptPipeline";
 import { SeriesSearchSelect } from "../components/SeriesSearchSelect";
 import { useGenerationJobs } from "../context/GenerationJobContext";
 import type { AppSettings, GenerationCandidate, GenerationQueuePreview, NaiaStatus, Series } from "../types";
@@ -30,6 +35,9 @@ export function GenerationPage() {
   const [characterSearch, setCharacterSearch] = useState("");
   const [naiaStatus, setNaiaStatus] = useState<NaiaStatus | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [promptPrefix, setPromptPrefix] = useState("");
+  const [promptSuffix, setPromptSuffix] = useState("");
+  const [savingPrompts, setSavingPrompts] = useState(false);
   const [queuePreview, setQueuePreview] = useState<GenerationQueuePreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
@@ -66,6 +74,8 @@ export function GenerationPage() {
         ]);
         setNaiaStatus(statusResponse);
         setAppSettings(settingsResponse);
+        setPromptPrefix(settingsResponse.generation_prompt_prefix);
+        setPromptSuffix(settingsResponse.generation_prompt_suffix);
       } catch (err) {
         setError(err instanceof Error ? err.message : "NAIA 상태를 확인하지 못했습니다.");
       } finally {
@@ -152,6 +162,24 @@ export function GenerationPage() {
     }
   };
 
+  const handleSavePrompts = async () => {
+    setSavingPrompts(true);
+    setError(null);
+    try {
+      const response = await api.updateSettings({
+        generation_prompt_prefix: promptPrefix,
+        generation_prompt_suffix: promptSuffix,
+      });
+      setAppSettings(response);
+      setPromptPrefix(response.generation_prompt_prefix);
+      setPromptSuffix(response.generation_prompt_suffix);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "프롬프트 저장 실패");
+    } finally {
+      setSavingPrompts(false);
+    }
+  };
+
   const handleStart = async () => {
     if (!selectedSeriesId) {
       return;
@@ -159,6 +187,16 @@ export function GenerationPage() {
     setStarting(true);
     setError(null);
     try {
+      if (
+        appSettings &&
+        (promptPrefix !== appSettings.generation_prompt_prefix ||
+          promptSuffix !== appSettings.generation_prompt_suffix)
+      ) {
+        await api.updateSettings({
+          generation_prompt_prefix: promptPrefix,
+          generation_prompt_suffix: promptSuffix,
+        });
+      }
       await startGeneration(selectedSeriesId, {
         character_ids: selectedIds.size > 0 ? Array.from(selectedIds) : undefined,
         prompt_level: promptLevel,
@@ -277,29 +315,6 @@ export function GenerationPage() {
             </div>
           </div>
 
-          {appSettings ? (
-            <div className="generation-prompt-config">
-              <h3 className="subsection-title">프롬프트 구조 (와일드카드 앞 · 뒤)</h3>
-              <p className="field-help">
-                최종 프롬프트 = prefix + 캐릭터 와일드카드 + suffix. Settings에서 편집할 수 있습니다.
-              </p>
-              <div className="generation-prompt-split">
-                <div>
-                  <span className="field-label">Prefix</span>
-                  <pre className="generation-prompt-block">{appSettings.generation_prompt_prefix}</pre>
-                </div>
-                <div className="generation-prompt-wildcard-slot">[캐릭터 와일드카드]</div>
-                <div>
-                  <span className="field-label">Suffix</span>
-                  <pre className="generation-prompt-block">{appSettings.generation_prompt_suffix}</pre>
-                </div>
-              </div>
-              <p className="field-help">
-                저장 시 자동 검사: 눈/손 디테일 (손이 가려지면 손 검사 생략). 캐릭터 태그 confidence는 WD14 설치 후 활성화 예정.
-              </p>
-            </div>
-          ) : null}
-
           <div className="modal-actions">
             <button
               className="btn"
@@ -391,6 +406,36 @@ export function GenerationPage() {
         </div>
       </div>
 
+      {appSettings ? (
+        <div className="panel generation-prompt-panel">
+          <div className="section-header-row">
+            <h2 className="section-title">프롬프트 구조</h2>
+            <button
+              className="btn btn-small"
+              type="button"
+              disabled={savingPrompts}
+              onClick={() => void handleSavePrompts()}
+            >
+              {savingPrompts ? "저장 중..." : "프롬프트 저장"}
+            </button>
+          </div>
+          <GenerationPromptPipeline
+            prefix={promptPrefix}
+            suffix={promptSuffix}
+            wildcardToken={
+              queuePreview
+                ? wildcardTokenFromQueue(queuePreview.queue_id)
+                : wildcardTokenForSeries(selectedSeriesTag || undefined)
+            }
+            onPrefixChange={setPromptPrefix}
+            onSuffixChange={setPromptSuffix}
+          />
+          <p className="field-help">
+            큐 생성 시 Wildcard 이름이 확정됩니다. 저장 시 자동 검사: 눈/손 디테일 (손이 가려지면 손 검사 생략).
+          </p>
+        </div>
+      ) : null}
+
       {queuePreview ? (
         <div className="panel generation-preview-panel">
           <h2 className="section-title">큐 미리보기</h2>
@@ -400,17 +445,12 @@ export function GenerationPage() {
             <span>per character: {appSettings?.generation_images_per_character ?? 2} images</span>
             <span>wildcard: {queuePreview.wildcard_path}</span>
           </div>
-          <div className="generation-prompt-split">
-            <div>
-              <span className="field-label">Prefix</span>
-              <pre className="generation-prompt-block">{queuePreview.prompt_prefix}</pre>
-            </div>
-            <div className="generation-prompt-wildcard-slot">[와일드카드]</div>
-            <div>
-              <span className="field-label">Suffix</span>
-              <pre className="generation-prompt-block">{queuePreview.prompt_suffix}</pre>
-            </div>
-          </div>
+          <GenerationPromptPipeline
+            prefix={queuePreview.prompt_prefix}
+            suffix={queuePreview.prompt_suffix}
+            wildcardToken={wildcardTokenFromQueue(queuePreview.queue_id)}
+            readOnly
+          />
           <span className="field-label">전체 조합 예시</span>
           <pre className="generation-prompt-block">{queuePreview.prompt_template}</pre>
           <span className="field-label">Negative</span>
