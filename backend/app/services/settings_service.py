@@ -55,8 +55,6 @@ class SettingsService:
         return clamped
 
     def get_naia_base_url(self) -> str:
-        from app.services.generation_service import DEFAULT_NAIA_BASE_URL
-
         return self._get_setting(SETTING_NAIA_BASE_URL) or DEFAULT_NAIA_BASE_URL
 
     def set_naia_base_url(self, value: str) -> str:

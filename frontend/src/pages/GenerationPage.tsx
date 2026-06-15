@@ -51,18 +51,27 @@ export function GenerationPage() {
   useEffect(() => {
     void (async () => {
       setLoading(true);
-      try {
-        const [seriesResponse, statusResponse] = await Promise.all([
-          api.listSeries({ sort_by: "series_tag", sort_order: "asc", limit: 500 }),
-          api.getNaiaStatus(),
-        ]);
-        setSeriesList(seriesResponse.items);
-        setNaiaStatus(statusResponse);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "초기 데이터를 불러오지 못했습니다.");
-      } finally {
-        setLoading(false);
+      const errors: string[] = [];
+
+      const seriesPromise = api
+        .listSeries({ sort_by: "series_tag", sort_order: "asc", limit: 500 })
+        .then((response) => setSeriesList(response.items))
+        .catch((err) => {
+          errors.push(err instanceof Error ? err.message : "시리즈 목록을 불러오지 못했습니다.");
+        });
+
+      const naiaPromise = api
+        .getNaiaStatus()
+        .then((response) => setNaiaStatus(response))
+        .catch((err) => {
+          errors.push(err instanceof Error ? err.message : "NAIA 상태를 확인하지 못했습니다.");
+        });
+
+      await Promise.all([seriesPromise, naiaPromise]);
+      if (errors.length > 0) {
+        setError(errors.join(" / "));
       }
+      setLoading(false);
     })();
   }, []);
 
