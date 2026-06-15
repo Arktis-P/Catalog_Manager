@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { CollectProgressPanel } from "./CollectProgressPanel";
+import { GenerationProgressPanel } from "./GenerationProgressPanel";
 import { useCollectJobs } from "../context/CollectJobContext";
+import { useGenerationJobs } from "../context/GenerationJobContext";
 import type { CollectJob } from "../types";
 
 function jobSortRank(job: CollectJob): number {
@@ -17,11 +19,19 @@ function jobSortRank(job: CollectJob): number {
 }
 
 export function GlobalTaskBar() {
-  const { jobs, dismissJob, lastError, clearLastError } = useCollectJobs();
+  const { jobs: collectJobs, dismissJob: dismissCollectJob, lastError: collectError, clearLastError: clearCollectError } =
+    useCollectJobs();
+  const {
+    jobs: generationJobs,
+    dismissJob: dismissGenerationJob,
+    cancelJob,
+    lastError: generationError,
+    clearLastError: clearGenerationError,
+  } = useGenerationJobs();
 
   const activeJobs = useMemo(
     () =>
-      jobs
+      [...collectJobs, ...generationJobs]
         .filter(
           (job) =>
             job.status === "queued" ||
@@ -30,8 +40,10 @@ export function GlobalTaskBar() {
             job.status === "failed",
         )
         .sort((a, b) => jobSortRank(a) - jobSortRank(b) || b.started_at.localeCompare(a.started_at)),
-    [jobs],
+    [collectJobs, generationJobs],
   );
+
+  const lastError = collectError || generationError;
 
   if (activeJobs.length === 0 && !lastError) {
     return null;
@@ -43,22 +55,46 @@ export function GlobalTaskBar() {
         {lastError ? (
           <div className="error-banner global-task-error">
             <span>{lastError}</span>
-            <button className="btn btn-small" type="button" onClick={clearLastError}>
+            <button
+              className="btn btn-small"
+              type="button"
+              onClick={() => {
+                clearCollectError();
+                clearGenerationError();
+              }}
+            >
               Dismiss
             </button>
           </div>
         ) : null}
-        {activeJobs.map((job) => (
-          <CollectProgressPanel
-            key={job.job_id}
-            job={job}
-            onDismiss={
-              job.status === "completed" || job.status === "failed"
-                ? () => dismissJob(job.job_id)
-                : undefined
-            }
-          />
-        ))}
+        {activeJobs.map((job) =>
+          job.job_type === "image_generation" ? (
+            <GenerationProgressPanel
+              key={job.job_id}
+              job={job}
+              onCancel={
+                job.status === "queued" || job.status === "running"
+                  ? () => void cancelJob(job.job_id)
+                  : undefined
+              }
+              onDismiss={
+                job.status === "completed" || job.status === "failed" || job.status === "cancelled"
+                  ? () => dismissGenerationJob(job.job_id)
+                  : undefined
+              }
+            />
+          ) : (
+            <CollectProgressPanel
+              key={job.job_id}
+              job={job}
+              onDismiss={
+                job.status === "completed" || job.status === "failed"
+                  ? () => dismissCollectJob(job.job_id)
+                  : undefined
+              }
+            />
+          ),
+        )}
       </div>
     </section>
   );

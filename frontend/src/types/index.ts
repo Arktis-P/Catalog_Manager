@@ -140,7 +140,7 @@ export interface CollectJob {
   job_id: string;
   series_id: number;
   series_tag: string;
-  job_type: "character_collect" | "appearance_extract";
+  job_type: "character_collect" | "appearance_extract" | "image_generation";
   status: string;
   phase: string;
   message: string;
@@ -150,14 +150,68 @@ export interface CollectJob {
   created: number;
   skipped_existing: number;
   updated: number;
+  completed?: number;
+  failed?: number;
+  prompt_level?: number;
+  current_character_tag?: string;
+  last_image_path?: string | null;
+  queue_id?: string;
   error?: string | null;
   started_at: string;
   finished_at?: string | null;
 }
 
+export interface GenerationCandidate {
+  id: number;
+  character_tag: string;
+  display_name: string;
+  post_count: number;
+  generation_prompt: string | null;
+  appearance_confirmed: boolean;
+  gender: string | null;
+}
+
+export interface GenerationCandidateListResponse {
+  items: GenerationCandidate[];
+  total: number;
+}
+
+export interface NaiaStatus {
+  configured: boolean;
+  ready: boolean;
+  base_url: string;
+  portable_dir: string;
+  wildcards_dir: string;
+  message: string;
+  api_mode?: string | null;
+  is_generating?: boolean | null;
+}
+
+export interface GenerationQueuePreview {
+  queue_id: string;
+  series_id: number;
+  series_tag: string;
+  prompt_level: number;
+  character_count: number;
+  wildcard_path: string;
+  manifest_path: string;
+  prompt_template: string;
+  negative_prompt: string;
+  skipped: Array<Record<string, unknown>>;
+}
+
+export interface GenerationStartPayload {
+  character_ids?: number[] | null;
+  prompt_level?: number;
+  require_confirmed?: boolean;
+}
+
 export interface AppSettings {
   danbooru_collect_max_concurrent: number;
   danbooru_request_delay: number;
+  naia_base_url: string;
+  naia_portable_dir: string;
+  generation_images_per_character: number;
 }
 
 export interface AppearanceReviewItem {

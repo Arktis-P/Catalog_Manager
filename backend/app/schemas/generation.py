@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+
+class GenerationCandidate(BaseModel):
+    id: int
+    character_tag: str
+    display_name: str
+    post_count: int
+    generation_prompt: str | None
+    appearance_confirmed: bool
+    gender: str | None = None
+
+
+class GenerationCandidateListResponse(BaseModel):
+    items: list[GenerationCandidate]
+    total: int
+
+
+class GenerationStartRequest(BaseModel):
+    character_ids: list[int] | None = None
+    prompt_level: int = Field(default=1, ge=1, le=5)
+    require_confirmed: bool = True
+
+
+class GenerationPreviewResponse(BaseModel):
+    character_id: int
+    character_tag: str
+    prompt_level: int
+    prompt: str
+    negative_prompt: str
+
+
+class GenerationJobState(BaseModel):
+    job_id: str
+    series_id: int
+    series_tag: str
+    queue_id: str
+    job_type: str
+    status: str
+    phase: str
+    message: str
+    current: int
+    total: int
+    completed: int
+    failed: int
+    prompt_level: int
+    current_character_tag: str
+    last_image_path: str | None = None
+    error: str | None = None
+    started_at: str
+    finished_at: str | None = None
+
+
+class GenerationJobListResponse(BaseModel):
+    items: list[GenerationJobState]
+
+
+class NaiaStatusResponse(BaseModel):
+    configured: bool
+    ready: bool
+    base_url: str
+    portable_dir: str
+    wildcards_dir: str
+    message: str
+    api_mode: str | None = None
+    is_generating: bool | None = None
+
+
+class GenerationQueuePreviewResponse(BaseModel):
+    queue_id: str
+    series_id: int
+    series_tag: str
+    prompt_level: int
+    character_count: int
+    wildcard_path: str
+    manifest_path: str
+    prompt_template: str
+    negative_prompt: str
+    skipped: list[dict[str, object]]

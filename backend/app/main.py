@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
-from app.routers import catalog, characters, review, series
+from app.routers import catalog, characters, generation, review, series
 from app.routers import settings as settings_router
 from app.services.seed_service import seed_demo_data
 
@@ -50,7 +50,16 @@ app.include_router(series.router, prefix="/api")
 app.include_router(catalog.router, prefix="/api")
 app.include_router(characters.router, prefix="/api")
 app.include_router(review.router, prefix="/api")
+app.include_router(generation.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
+
+pending_images_dir = settings.output_dir / "generated_images" / "pending_review"
+pending_images_dir.mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/media/pending-review",
+    StaticFiles(directory=pending_images_dir),
+    name="pending-review-images",
+)
 
 
 def _static_icon_path(name: str) -> Path | None:

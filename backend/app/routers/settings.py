@@ -24,7 +24,14 @@ def update_settings(
     payload: SettingsUpdateRequest,
     service: SettingsService = Depends(get_settings_service),
 ):
-    service.set_collect_max_concurrent(payload.danbooru_collect_max_concurrent)
-    series_job_manager.set_max_concurrent(payload.danbooru_collect_max_concurrent)
+    if payload.danbooru_collect_max_concurrent is not None:
+        service.set_collect_max_concurrent(payload.danbooru_collect_max_concurrent)
+        series_job_manager.set_max_concurrent(payload.danbooru_collect_max_concurrent)
+    if payload.naia_base_url is not None:
+        service.set_naia_base_url(payload.naia_base_url)
+    if payload.naia_portable_dir is not None:
+        service.set_naia_portable_dir(payload.naia_portable_dir)
+    if payload.generation_images_per_character is not None:
+        service.set_generation_images_per_character(payload.generation_images_per_character)
     data = service.get_public_settings()
     return SettingsResponse(**data)

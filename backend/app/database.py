@@ -49,6 +49,7 @@ def init_db() -> None:
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     for subdir in ("naia_queues", "generated_images", "cover_images", "exports"):
         (settings.output_dir / subdir).mkdir(parents=True, exist_ok=True)
+    (settings.output_dir / "generated_images" / "pending_review").mkdir(parents=True, exist_ok=True)
 
     Base.metadata.create_all(bind=engine)
     _migrate_series_columns()

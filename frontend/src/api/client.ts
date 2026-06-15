@@ -8,6 +8,10 @@ import type {
   CharacterListResponse,
   CollectJob,
   DanbooruStatus,
+  GenerationCandidateListResponse,
+  GenerationQueuePreview,
+  GenerationStartPayload,
+  NaiaStatus,
   Series,
   SeriesCreatePayload,
   SeriesListResponse,
@@ -120,8 +124,17 @@ export const api = {
 
   getSettings: () => request<AppSettings>("/settings"),
 
-  updateSettings: (payload: Pick<AppSettings, "danbooru_collect_max_concurrent">) =>
-    request<AppSettings>("/settings", { method: "PATCH", body: JSON.stringify(payload) }),
+  updateSettings: (
+    payload: Partial<
+      Pick<
+        AppSettings,
+        | "danbooru_collect_max_concurrent"
+        | "naia_base_url"
+        | "naia_portable_dir"
+        | "generation_images_per_character"
+      >
+    >,
+  ) => request<AppSettings>("/settings", { method: "PATCH", body: JSON.stringify(payload) }),
 
   listAppearanceReviews: (params: { series_tag?: string; search?: string; skip?: number; limit?: number } = {}) =>
     request<AppearanceReviewListResponse>(`/review/appearance${buildQuery(params)}`),
@@ -182,4 +195,33 @@ export const api = {
     }
     return response.json() as Promise<{ created: number; updated: number; merged_duplicates?: number }>;
   },
+
+  getNaiaStatus: () => request<NaiaStatus>("/generation/naia/status"),
+
+  listGenerationCandidates: (
+    seriesId: number,
+    params: { require_confirmed?: boolean; search?: string } = {},
+  ) =>
+    request<GenerationCandidateListResponse>(
+      `/generation/series/${seriesId}/candidates${buildQuery(params)}`,
+    ),
+
+  previewGenerationQueue: (seriesId: number, payload: GenerationStartPayload) =>
+    request<GenerationQueuePreview>(`/generation/series/${seriesId}/preview-queue`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  startGenerationJob: (seriesId: number, payload: GenerationStartPayload) =>
+    request<CollectJob>(`/generation/series/${seriesId}/start`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  getGenerationJob: (jobId: string) => request<CollectJob>(`/generation/jobs/${jobId}`),
+
+  listGenerationJobs: () => request<{ items: CollectJob[] }>("/generation/jobs"),
+
+  cancelGenerationJob: (jobId: string) =>
+    request<CollectJob>(`/generation/jobs/${jobId}/cancel`, { method: "POST" }),
 };
