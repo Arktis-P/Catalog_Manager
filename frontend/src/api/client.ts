@@ -3,6 +3,8 @@ import type {
   AppearanceReviewListResponse,
   CatalogFilters,
   CatalogListResponse,
+  CatalogReviewCompletePayload,
+  CatalogReviewListResponse,
   CatalogStats,
   CharacterCollectResult,
   CharacterListResponse,
@@ -147,6 +149,38 @@ export const api = {
       `/review/appearance/${characterId}/confirm`,
       { method: "POST" },
     ),
+
+  listCatalogReviews: (params: {
+    series_id: number;
+    filter_status?: "pending" | "completed" | "all";
+    search?: string;
+    skip?: number;
+    limit?: number;
+  }) => request<CatalogReviewListResponse>(`/review/catalog${buildQuery(params)}`),
+
+  completeCatalogReview: (characterId: number, payload: CatalogReviewCompletePayload) =>
+    request<{
+      id: number;
+      review_status: string;
+      cover_image_id: number | null;
+      gender: string | null;
+      rating: number | null;
+      final_prompt: string | null;
+    }>(`/review/catalog/${characterId}/complete`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  undoCatalogReview: (characterId: number) =>
+    request<{ id: number; review_status: string; cover_image_id: number | null }>(
+      `/review/catalog/${characterId}/undo`,
+      { method: "POST" },
+    ),
+
+  regenerateCatalogCharacter: (characterId: number, promptLevel = 1) =>
+    request<CollectJob>(`/review/catalog/${characterId}/regenerate${buildQuery({ prompt_level: promptLevel })}`, {
+      method: "POST",
+    }),
 
   getDanbooruStatus: () => request<DanbooruStatus>("/characters/danbooru/status"),
 

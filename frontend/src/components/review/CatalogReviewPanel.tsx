@@ -1,0 +1,443 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api } from "../../api/client";
+import type { CatalogReviewItem, Series } from "../../types";
+import { danbooruPostsUrl, danbooruWikiUrl, openExternal } from "../../utils/danbooruLinks";
+import { appearanceTagChips, buildFinalPrompt, defaultEnabledTagKeys } from "../../utils/reviewPrompt";
+import { SeriesSearchSelect } from "../SeriesSearchSelect";
+import { CatalogReviewRow, createDraftForItem, type CharacterDraft } from "./CatalogReviewRow";
+
+const ROW_HEIGHT = 248;
+const ROW_GAP = 12;
+const ROW_STRIDE = ROW_HEIGHT + ROW_GAP;
+const OVERSCAN = 2;
+const PAGE_SIZE = 50;
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  const tag = target.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+}
+
+export function CatalogReviewPanel() {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [selectedSeriesId, setSelectedSeriesId] = useState<number | "">("");
+  const [selectedSeries, setSelectedSeries] = useState<Series | null>(null);
+  const [items, setItems] = useState<CatalogReviewItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [filterStatus, setFilterStatus] = useState<"pending" | "completed" | "all">("pending");
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [focusIndex, setFocusIndex] = useState(0);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(640);
+  const [drafts, setDrafts] = useState<Record<number, CharacterDraft>>({});
+  const [undoStack, setUndoStack] = useState<number[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+
+  const focusedItem = items[focusIndex] ?? null;
+  const focusedDraft = focusedItem ? drafts[focusedItem.id] ?? createDraftForItem(focusedItem) : null;
+
+  const loadReviews = useCallback(async () => {
+    if (!selectedSeriesId) {
+      setItems([]);
+      setTotal(0);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await api.listCatalogReviews({
+        series_id: selectedSeriesId,
+        filter_status: filterStatus,
+        search: search || undefined,
+        skip: 0,
+        limit: PAGE_SIZE,
+      });
+      setItems(response.items);
+      setTotal(response.total);
+      setFocusIndex(0);
+      setDrafts(
+        Object.fromEntries(response.items.map((item) => [item.id, createDraftForItem(item)])),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "카탈로그 검수 목록을 불러오지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }, [filterStatus, search, selectedSeriesId]);
+
+  useEffect(() => {
+    void loadReviews();
+  }, [loadReviews]);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) {
+      return;
+    }
+
+    const onScroll = () => setScrollTop(node.scrollTop);
+    const resize = () => setViewportHeight(node.clientHeight);
+    resize();
+    node.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", resize);
+    return () => {
+      node.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", resize);
+    };
+  }, [items.length]);
+
+  const scrollToRow = useCallback((index: number) => {
+    const node = scrollRef.current;
+    if (!node) {
+      return;
+    }
+    const top = index * ROW_STRIDE;
+    const bottom = top + ROW_HEIGHT;
+    if (top < node.scrollTop) {
+      node.scrollTop = top;
+    } else if (bottom > node.scrollTop + node.clientHeight) {
+      node.scrollTop = bottom - node.clientHeight;
+    }
+  }, []);
+
+  const updateDraft = useCallback((characterId: number, draft: CharacterDraft) => {
+    setDrafts((current) => ({ ...current, [characterId]: draft }));
+  }, []);
+
+  const toggleTag = useCallback(
+    (characterId: number, tagKey: string) => {
+      const item = items.find((entry) => entry.id === characterId);
+      if (!item) {
+        return;
+      }
+      const current = drafts[characterId] ?? createDraftForItem(item);
+      const enabled = new Set(current.enabledTags.size > 0 ? current.enabledTags : defaultEnabledTagKeys(appearanceTagChips(item)));
+      if (enabled.has(tagKey)) {
+        enabled.delete(tagKey);
+      } else {
+        enabled.add(tagKey);
+      }
+      updateDraft(characterId, { ...current, enabledTags: enabled });
+    },
+    [drafts, items, updateDraft],
+  );
+
+  const completeFocused = useCallback(async () => {
+    if (!focusedItem || !focusedDraft || submitting) {
+      return;
+    }
+
+    const image = focusedItem.images[focusedDraft.imageIndex];
+    if (!image) {
+      setActionMessage("선택할 이미지가 없습니다.");
+      return;
+    }
+
+    const chips = appearanceTagChips(focusedItem);
+    const enabledTags =
+      focusedDraft.enabledTags.size > 0 ? focusedDraft.enabledTags : defaultEnabledTagKeys(chips);
+    const finalPrompt = buildFinalPrompt(
+      focusedItem.character_tag,
+      focusedItem.generation_prompt,
+      enabledTags,
+      chips,
+    );
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.completeCatalogReview(focusedItem.id, {
+        cover_image_id: image.id,
+        gender: focusedDraft.gender,
+        rating: focusedDraft.rating,
+        final_prompt: finalPrompt,
+      });
+      setUndoStack((stack) => [focusedItem.id, ...stack].slice(0, 20));
+      setItems((current) => {
+        if (filterStatus === "pending") {
+          const next = current.filter((entry) => entry.id !== focusedItem.id);
+          setFocusIndex((index) => Math.min(index, Math.max(0, next.length - 1)));
+          return next;
+        }
+        return current.map((entry) =>
+          entry.id === focusedItem.id
+            ? {
+                ...entry,
+                review_status: "completed",
+                cover_image_id: image.id,
+                rating: focusedDraft.rating,
+                gender: focusedDraft.gender,
+                final_prompt: finalPrompt,
+              }
+            : entry,
+        );
+      });
+      setTotal((count) => (filterStatus === "pending" ? Math.max(0, count - 1) : count));
+      setActionMessage(`${focusedItem.character_tag} 완료`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "검수 완료에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [filterStatus, focusedDraft, focusedItem, submitting]);
+
+  const undoLast = useCallback(async () => {
+    const characterId = undoStack[0];
+    if (!characterId || submitting) {
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.undoCatalogReview(characterId);
+      setUndoStack((stack) => stack.slice(1));
+      await loadReviews();
+      setActionMessage("이전 선택을 취소했습니다.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "실행 취소에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [loadReviews, submitting, undoStack]);
+
+  const regenerateFocused = useCallback(async () => {
+    if (!focusedItem || submitting) {
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.regenerateCatalogCharacter(focusedItem.id);
+      setActionMessage(`${focusedItem.character_tag} 재생성을 시작했습니다.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "재생성 요청에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [focusedItem, submitting]);
+
+  useEffect(() => {
+    scrollToRow(focusIndex);
+  }, [focusIndex, scrollToRow]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target) || !focusedItem || !focusedDraft) {
+        return;
+      }
+
+      if (event.ctrlKey && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        void undoLast();
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        updateDraft(focusedItem.id, {
+          ...focusedDraft,
+          imageIndex: Math.max(0, focusedDraft.imageIndex - 1),
+        });
+        return;
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        const maxIndex = Math.max(0, focusedItem.images.length - 1);
+        updateDraft(focusedItem.id, {
+          ...focusedDraft,
+          imageIndex: Math.min(maxIndex, focusedDraft.imageIndex + 1),
+        });
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setFocusIndex((index) => Math.max(0, index - 1));
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setFocusIndex((index) => Math.min(items.length - 1, index + 1));
+        return;
+      }
+
+      if (event.key >= "0" && event.key <= "6") {
+        event.preventDefault();
+        updateDraft(focusedItem.id, { ...focusedDraft, rating: Number(event.key) });
+        return;
+      }
+
+      if (event.key === "-") {
+        event.preventDefault();
+        updateDraft(focusedItem.id, { ...focusedDraft, rating: -1 });
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void completeFocused();
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "g") {
+        event.preventDefault();
+        updateDraft(focusedItem.id, { ...focusedDraft, gender: "1girl" });
+        return;
+      }
+      if (key === "b") {
+        event.preventDefault();
+        updateDraft(focusedItem.id, { ...focusedDraft, gender: "1boy" });
+        return;
+      }
+      if (key === "n") {
+        event.preventDefault();
+        updateDraft(focusedItem.id, { ...focusedDraft, gender: "no_humans" });
+        return;
+      }
+      if (key === "r") {
+        event.preventDefault();
+        void regenerateFocused();
+        return;
+      }
+      if (key === "q") {
+        event.preventDefault();
+        openExternal(danbooruPostsUrl(focusedItem.character_tag, focusedItem.series_tag, focusedItem.danbooru_url));
+        return;
+      }
+      if (key === "w") {
+        event.preventDefault();
+        openExternal(danbooruWikiUrl(focusedItem.character_tag, focusedItem.danbooru_wiki_url));
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    completeFocused,
+    focusedDraft,
+    focusedItem,
+    items.length,
+    regenerateFocused,
+    undoLast,
+    updateDraft,
+  ]);
+
+  const virtualRange = useMemo(() => {
+    const start = Math.max(0, Math.floor(scrollTop / ROW_STRIDE) - OVERSCAN);
+    const visibleCount = Math.ceil(viewportHeight / ROW_STRIDE) + OVERSCAN * 2;
+    const end = Math.min(items.length, start + visibleCount);
+    return { start, end };
+  }, [items.length, scrollTop, viewportHeight]);
+
+  const totalHeight = Math.max(0, items.length * ROW_STRIDE - ROW_GAP);
+
+  return (
+    <>
+      <div className="toolbar review-toolbar">
+        <div className="field review-series-field">
+          <label>Series</label>
+          <SeriesSearchSelect
+            value={selectedSeriesId}
+            onChange={(seriesId, series) => {
+              setSelectedSeriesId(seriesId);
+              setSelectedSeries(series ?? null);
+            }}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="catalog-review-filter">Filter</label>
+          <select
+            id="catalog-review-filter"
+            value={filterStatus}
+            onChange={(event) => setFilterStatus(event.target.value as typeof filterStatus)}
+          >
+            <option value="pending">Pending</option>
+            <option value="completed">Completed</option>
+            <option value="all">All with images</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="catalog-review-search">Search</label>
+          <input
+            id="catalog-review-search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="character tag"
+          />
+        </div>
+        <div className="field" style={{ justifyContent: "flex-end" }}>
+          <label>&nbsp;</label>
+          <button className="btn" type="button" onClick={() => void loadReviews()} disabled={!selectedSeriesId}>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="review-shortcut-bar">
+        <span>←→ 이미지</span>
+        <span>↑↓ 캐릭터</span>
+        <span>0-6 / - 레이팅</span>
+        <span>Enter 완료</span>
+        <span>g/b/n 성별</span>
+        <span>r 재생성</span>
+        <span>Ctrl+Z 취소</span>
+        <span>q/w Danbooru</span>
+      </div>
+
+      {selectedSeries ? (
+        <div className="catalog-review-progress">
+          {selectedSeries.display_name || selectedSeries.series_tag} · {items.length.toLocaleString()} /{" "}
+          {total.toLocaleString()} 표시
+          {focusedItem ? ` · focus: ${focusedItem.character_tag}` : ""}
+        </div>
+      ) : null}
+
+      {error ? <div className="error-banner">{error}</div> : null}
+      {actionMessage ? <div className="catalog-card-subtitle" style={{ marginBottom: 8 }}>{actionMessage}</div> : null}
+
+      {!selectedSeriesId ? (
+        <div className="empty-state panel">검수할 시리즈를 선택하세요.</div>
+      ) : loading ? (
+        <div className="empty-state">Loading catalog reviews...</div>
+      ) : items.length === 0 ? (
+        <div className="empty-state panel">검수할 캐릭터가 없습니다.</div>
+      ) : (
+        <div ref={scrollRef} className="catalog-review-scroll" tabIndex={-1}>
+          <div className="catalog-review-virtual-spacer" style={{ height: totalHeight }}>
+            <div
+              className="catalog-review-virtual-window"
+              style={{ transform: `translateY(${virtualRange.start * ROW_STRIDE}px)` }}
+            >
+              {items.slice(virtualRange.start, virtualRange.end).map((item, offset) => {
+                const rowIndex = virtualRange.start + offset;
+                const draft = drafts[item.id] ?? createDraftForItem(item);
+                return (
+                  <CatalogReviewRow
+                    key={item.id}
+                    item={item}
+                    rowIndex={rowIndex}
+                    focused={rowIndex === focusIndex}
+                    draft={draft}
+                    onDraftChange={(next) => updateDraft(item.id, next)}
+                    onToggleTag={(tagKey) => toggleTag(item.id, tagKey)}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

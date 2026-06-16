@@ -253,6 +253,58 @@ export interface AppearanceReviewListResponse {
   total: number;
 }
 
+export interface CatalogReviewImage {
+  id: number;
+  image_path: string;
+  auto_status: string | null;
+  cover_score: number | null;
+  hair_match: boolean | null;
+  eye_match: boolean | null;
+  gender_pred: string | null;
+  is_rejected: boolean;
+  is_cover: boolean;
+}
+
+export interface CatalogReviewItem {
+  id: number;
+  series_tag: string;
+  series_display_name: string;
+  character_tag: string;
+  display_name: string;
+  post_count: number;
+  danbooru_url: string | null;
+  danbooru_wiki_url: string | null;
+  multi_color_hair: string | null;
+  hair_color: string | null;
+  hair_shape: string | null;
+  eye_color: string | null;
+  feature_tags: string | null;
+  gender: string | null;
+  generation_prompt: string | null;
+  character_status: string;
+  needs_check_reason: string | null;
+  review_status: string | null;
+  rating: number | null;
+  type: string | null;
+  final_prompt: string | null;
+  cover_image_id: number | null;
+  images: CatalogReviewImage[];
+}
+
+export interface CatalogReviewListResponse {
+  items: CatalogReviewItem[];
+  total: number;
+  series_id: number;
+  series_tag: string;
+}
+
+export interface CatalogReviewCompletePayload {
+  cover_image_id: number;
+  gender?: string | null;
+  rating?: number | null;
+  final_prompt?: string | null;
+}
+
 export interface DanbooruStatus {
   configured: boolean;
   ready: boolean;
