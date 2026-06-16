@@ -1,9 +1,11 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import type { CatalogFilters, CatalogItem, CatalogStats, Series } from "../types";
-import { CatalogCard } from "../components/CatalogCard";
+import { CatalogEditModal } from "../components/CatalogEditModal";
+import { CatalogRandomPanel } from "../components/CatalogRandomPanel";
+import { CatalogVirtualGrid } from "../components/CatalogVirtualGrid";
 
-const PAGE_SIZE = 48;
+const PAGE_SIZE = 96;
 
 const emptyStats: CatalogStats = {
   series_count: 0,
@@ -12,23 +14,31 @@ const emptyStats: CatalogStats = {
   cover_image_count: 0,
 };
 
+function filterQuery(filters: CatalogFilters): Omit<CatalogFilters, "skip" | "limit"> {
+  const { skip: _skip, limit: _limit, ...rest } = filters;
+  return rest;
+}
+
 export function CatalogPage() {
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
   const [stats, setStats] = useState<CatalogStats>(emptyStats);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [seriesOptions, setSeriesOptions] = useState<Series[]>([]);
   const [filters, setFilters] = useState<CatalogFilters>({});
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<CatalogItem | null>(null);
   const [seriesChangeTarget, setSeriesChangeTarget] = useState<CatalogItem | null>(null);
   const [seriesChangeId, setSeriesChangeId] = useState<number | null>(null);
   const [seriesChangeSearch, setSeriesChangeSearch] = useState("");
   const [seriesPickerItems, setSeriesPickerItems] = useState<Series[]>([]);
   const [seriesChangeSaving, setSeriesChangeSaving] = useState(false);
+  const [regeneratingId, setRegeneratingId] = useState<number | null>(null);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const listFilters = useMemo(() => filterQuery(filters), [filters]);
 
   const activeFilterCount = useMemo(
     () =>
@@ -38,15 +48,11 @@ export function CatalogPage() {
     [filters],
   );
 
-  const loadData = async (targetPage = page) => {
+  const loadInitial = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const query: CatalogFilters = {
-        ...filters,
-        skip: (targetPage - 1) * PAGE_SIZE,
-        limit: PAGE_SIZE,
-      };
+      const query: CatalogFilters = { ...listFilters, skip: 0, limit: PAGE_SIZE };
       const [catalog, catalogStats, catalogStatuses, seriesList] = await Promise.all([
         api.listCatalog(query),
         api.getCatalogStats(),
@@ -63,15 +69,35 @@ export function CatalogPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [listFilters]);
+
+  const loadMore = useCallback(async () => {
+    if (loading || loadingMore || items.length >= total) {
+      return;
+    }
+    setLoadingMore(true);
+    try {
+      const response = await api.listCatalog({
+        ...listFilters,
+        skip: items.length,
+        limit: PAGE_SIZE,
+      });
+      setItems((current) => {
+        const existing = new Set(current.map((entry) => entry.id));
+        const appended = response.items.filter((entry) => !existing.has(entry.id));
+        return [...current, ...appended];
+      });
+      setTotal(response.total);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load more catalog items");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [items.length, listFilters, loading, loadingMore, total]);
 
   useEffect(() => {
-    setPage(1);
-  }, [filters]);
-
-  useEffect(() => {
-    void loadData(page);
-  }, [filters, page]);
+    void loadInitial();
+  }, [loadInitial]);
 
   useEffect(() => {
     if (!seriesChangeTarget) return;
@@ -93,6 +119,45 @@ export function CatalogPage() {
     setFilters(updater);
   };
 
+  const handleItemSaved = (updated: CatalogItem) => {
+    setItems((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
+  };
+
+  const handleRegenerate = async (item: CatalogItem) => {
+    setRegeneratingId(item.id);
+    setError(null);
+    try {
+      await api.regenerateCatalogCharacter(item.id);
+      setExportMessage(`${item.character_tag} 재생성 작업을 시작했습니다. Generation 탭에서 진행 상황을 확인하세요.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start regeneration");
+    } finally {
+      setRegeneratingId(null);
+    }
+  };
+
+  const handleExport = async () => {
+    setError(null);
+    setExportMessage(null);
+    try {
+      const result = await api.exportCatalogCsv(listFilters);
+      const blob = new Blob([result.content], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "catalog-export.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+      setExportMessage(
+        result.savedPath
+          ? `CSV를 다운로드했고 ${result.savedPath} 에도 저장했습니다.`
+          : "CSV를 다운로드했습니다.",
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export catalog CSV");
+    }
+  };
+
   const openSeriesChangeModal = (item: CatalogItem) => {
     setSeriesChangeTarget(item);
     setSeriesChangeId(null);
@@ -107,8 +172,6 @@ export function CatalogPage() {
     setSeriesChangeSaving(false);
   };
 
-  const filteredSeriesOptions = seriesPickerItems;
-
   const handleSeriesChange = async (event: FormEvent) => {
     event.preventDefault();
     if (!seriesChangeTarget || !seriesChangeId) return;
@@ -117,7 +180,7 @@ export function CatalogPage() {
     try {
       await api.updateCharacterSeries(seriesChangeTarget.id, seriesChangeId);
       closeSeriesChangeModal();
-      await loadData(page);
+      await loadInitial();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to change series");
     } finally {
@@ -131,12 +194,17 @@ export function CatalogPage() {
         <div>
           <h1 className="page-title">Catalog Viewer</h1>
           <p className="page-description">
-            수집/생성/검수 상태를 확인하고 작업 허브로 이동할 수 있는 메인 화면입니다.
+            수집·생성·검수된 캐릭터를 탐색하고, 필터·랜덤 확인·인라인 수정으로 카탈로그를 관리합니다.
           </p>
         </div>
-        <button className="btn" type="button" onClick={() => void loadData(page)}>
-          Refresh
-        </button>
+        <div className="card-actions">
+          <button className="btn" type="button" onClick={() => void handleExport()}>
+            Export CSV
+          </button>
+          <button className="btn" type="button" onClick={() => void loadInitial()}>
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="stats-row">
@@ -158,8 +226,10 @@ export function CatalogPage() {
         </div>
       </div>
 
+      <CatalogRandomPanel filters={listFilters} />
+
       <section className="panel">
-        <div className="toolbar">
+        <div className="toolbar catalog-toolbar">
           <div className="field">
             <label htmlFor="search">Search</label>
             <input
@@ -185,6 +255,85 @@ export function CatalogPage() {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="field">
+            <label htmlFor="gender">Gender</label>
+            <select
+              id="gender"
+              value={filters.gender ?? ""}
+              onChange={(event) =>
+                updateFilters((prev) => ({ ...prev, gender: event.target.value || undefined }))
+              }
+            >
+              <option value="">All</option>
+              <option value="1girl">1girl</option>
+              <option value="1boy">1boy</option>
+              <option value="no_humans">no_humans</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="rating">Rating</label>
+            <select
+              id="rating"
+              value={filters.rating === undefined ? "" : String(filters.rating)}
+              onChange={(event) => {
+                const value = event.target.value;
+                updateFilters((prev) => ({
+                  ...prev,
+                  rating: value === "" ? undefined : Number(value),
+                }));
+              }}
+            >
+              <option value="">All</option>
+              <option value="-1">-1</option>
+              {Array.from({ length: 7 }, (_, index) => (
+                <option key={index} value={String(index)}>
+                  {index}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="type">Type</label>
+            <input
+              id="type"
+              value={filters.type ?? ""}
+              onChange={(event) => updateFilters((prev) => ({ ...prev, type: event.target.value || undefined }))}
+              placeholder="type"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="hair_color">Hair</label>
+            <input
+              id="hair_color"
+              value={filters.hair_color ?? ""}
+              onChange={(event) =>
+                updateFilters((prev) => ({ ...prev, hair_color: event.target.value || undefined }))
+              }
+              placeholder="hair color"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="eye_color">Eyes</label>
+            <input
+              id="eye_color"
+              value={filters.eye_color ?? ""}
+              onChange={(event) =>
+                updateFilters((prev) => ({ ...prev, eye_color: event.target.value || undefined }))
+              }
+              placeholder="eye color"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="feature_tags">Features</label>
+            <input
+              id="feature_tags"
+              value={filters.feature_tags ?? ""}
+              onChange={(event) =>
+                updateFilters((prev) => ({ ...prev, feature_tags: event.target.value || undefined }))
+              }
+              placeholder="feature tags"
+            />
           </div>
           <div className="field">
             <label htmlFor="status">Catalog Status</label>
@@ -238,6 +387,23 @@ export function CatalogPage() {
               <option value="true">Yes</option>
             </select>
           </div>
+          <div className="field">
+            <label htmlFor="needs_regen">Needs Regen</label>
+            <select
+              id="needs_regen"
+              value={filters.needs_regen === undefined ? "" : String(filters.needs_regen)}
+              onChange={(event) => {
+                const value = event.target.value;
+                updateFilters((prev) => ({
+                  ...prev,
+                  needs_regen: value === "" ? undefined : value === "true",
+                }));
+              }}
+            >
+              <option value="">All</option>
+              <option value="true">Yes</option>
+            </select>
+          </div>
           <div className="field" style={{ justifyContent: "flex-end" }}>
             <label>&nbsp;</label>
             <button className="btn" type="button" onClick={() => updateFilters(() => ({}))}>
@@ -247,43 +413,24 @@ export function CatalogPage() {
         </div>
 
         {error ? <div className="error-banner">{error}</div> : null}
-        {loading ? <div className="empty-state">Loading catalog...</div> : null}
-        {!loading && items.length === 0 ? (
-          <div className="empty-state">표시할 캐릭터가 없습니다. Series를 추가하거나 Character Collector를 실행하세요.</div>
-        ) : null}
-        {!loading && items.length > 0 ? (
-          <>
-            <div className="catalog-grid">
-              {items.map((item) => (
-                <CatalogCard key={item.id} item={item} onChangeSeries={openSeriesChangeModal} />
-              ))}
-            </div>
-            <div className="pagination-bar">
-              <span className="catalog-card-subtitle">
-                {total.toLocaleString()} results · page {page} / {totalPages}
-              </span>
-              <div className="card-actions">
-                <button
-                  className="btn btn-small"
-                  type="button"
-                  disabled={page <= 1}
-                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                >
-                  Previous
-                </button>
-                <button
-                  className="btn btn-small"
-                  type="button"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          </>
-        ) : null}
+        {exportMessage ? <div className="success-banner">{exportMessage}</div> : null}
+        {regeneratingId ? <div className="catalog-card-subtitle">재생성 요청 중...</div> : null}
+
+        <CatalogVirtualGrid
+          items={items}
+          total={total}
+          loading={loading}
+          loadingMore={loadingMore}
+          onLoadMore={() => void loadMore()}
+          onEdit={setEditTarget}
+          onChangeSeries={openSeriesChangeModal}
+          onRegenerate={(item) => void handleRegenerate(item)}
+        />
       </section>
+
+      {editTarget ? (
+        <CatalogEditModal item={editTarget} onClose={() => setEditTarget(null)} onSaved={handleItemSaved} />
+      ) : null}
 
       {seriesChangeTarget ? (
         <div className="modal-backdrop" onClick={closeSeriesChangeModal}>
@@ -312,7 +459,7 @@ export function CatalogPage() {
                     onChange={(event) => setSeriesChangeId(Number(event.target.value))}
                   >
                     <option value="">Select series</option>
-                    {filteredSeriesOptions.map((series) => (
+                    {seriesPickerItems.map((series) => (
                       <option key={series.id} value={series.id}>
                         {series.series_tag} · {series.display_name}
                       </option>

@@ -332,6 +332,120 @@ button,
   flex: 1;
 }
 
+.catalog-card-prompt {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.catalog-toolbar {
+  align-items: end;
+}
+
+.catalog-virtual-scroll {
+  max-height: calc(100vh - 320px);
+  min-height: 480px;
+  overflow: auto;
+  position: relative;
+}
+
+.catalog-virtual-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.catalog-virtual-window {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+}
+
+.catalog-virtual-row {
+  display: grid;
+  gap: 16px;
+}
+
+.catalog-virtual-row .catalog-card {
+  height: 100%;
+  min-height: 0;
+}
+
+.catalog-loading-more {
+  padding: 12px 0;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.catalog-section-title {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+}
+
+.catalog-random-panel {
+  margin-bottom: 16px;
+}
+
+.catalog-random-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.catalog-random-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.catalog-random-image {
+  aspect-ratio: 3 / 4;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.catalog-random-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.catalog-random-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.catalog-random-prompt {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  max-height: 160px;
+  overflow: auto;
+}
+
+@media (max-width: 720px) {
+  .catalog-random-body {
+    grid-template-columns: 1fr;
+  }
+
+  .catalog-virtual-scroll {
+    max-height: none;
+  }
+}
+
 .catalog-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

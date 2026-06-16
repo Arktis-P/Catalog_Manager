@@ -107,6 +107,41 @@ class CatalogListResponse(BaseModel):
     total: int
 
 
+class CatalogItemUpdateRequest(BaseModel):
+    multi_color_hair: str | None = None
+    hair_color: str | None = None
+    hair_shape: str | None = None
+    eye_color: str | None = None
+    feature_tags: str | None = None
+    gender: str | None = None
+    rating: int | None = Field(default=None, ge=-1, le=6)
+    type: str | None = None
+    final_prompt: str | None = None
+
+
+CATALOG_EXPORT_COLUMNS = [
+    "series_tag",
+    "series_display_name",
+    "character_tag",
+    "display_name",
+    "post_count",
+    "catalog_status",
+    "character_status",
+    "gender",
+    "type",
+    "rating",
+    "hair_color",
+    "multi_color_hair",
+    "hair_shape",
+    "eye_color",
+    "feature_tags",
+    "generation_prompt",
+    "final_prompt",
+    "cover_image",
+    "danbooru_url",
+]
+
+
 class CatalogFilters(BaseModel):
     series_tag: str | None = None
     rating: int | None = Field(default=None, ge=-1, le=6)

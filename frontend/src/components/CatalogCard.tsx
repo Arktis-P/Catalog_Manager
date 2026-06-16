@@ -4,13 +4,25 @@ import { catalogCoverImageUrl } from "../utils/reviewImages";
 
 interface CatalogCardProps {
   item: CatalogItem;
+  onEdit?: (item: CatalogItem) => void;
   onChangeSeries?: (item: CatalogItem) => void;
+  onRegenerate?: (item: CatalogItem) => void;
 }
 
 function statusBadgeClass(status: string): string {
   if (status === "completed") return "badge badge-success";
-  if (status === "needs_review" || status === "missing_image") return "badge badge-warning";
+  if (status === "needs_regen") return "badge badge-warning";
+  if (status === "needs_review" || status === "missing_image" || status === "tag_needs_check") {
+    return "badge badge-warning";
+  }
+  if (status === "excluded") return "badge badge-muted";
   return "badge badge-muted";
+}
+
+function ratingLabel(rating: number | null): string | null {
+  if (rating === null) return null;
+  if (rating === -1) return "rating -1";
+  return `rating ${"★".repeat(rating)}${"☆".repeat(Math.max(0, 6 - rating))}`;
 }
 
 function formatAppearance(item: CatalogItem): string {
@@ -19,12 +31,11 @@ function formatAppearance(item: CatalogItem): string {
     .join(", ");
 }
 
-export function CatalogCard({ item, onChangeSeries }: CatalogCardProps) {
+export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: CatalogCardProps) {
   const appearance = formatAppearance(item);
-  const meta = [item.gender, item.type, item.rating !== null ? `rating ${item.rating}` : null]
-    .filter(Boolean)
-    .join(" / ");
-  const promptToCopy = item.generation_prompt || item.final_prompt;
+  const ratingText = ratingLabel(item.rating);
+  const meta = [item.gender, item.type, ratingText].filter(Boolean).join(" / ");
+  const promptToCopy = item.final_prompt || item.generation_prompt;
   const coverUrl = catalogCoverImageUrl(item.cover_image);
 
   const copyPrompt = async () => {
@@ -48,23 +59,30 @@ export function CatalogCard({ item, onChangeSeries }: CatalogCardProps) {
         </div>
         <div className="tag-row">
           <span className={statusBadgeClass(item.catalog_status)}>{item.catalog_status}</span>
-          <span className="badge">{item.character_status}</span>
+          {item.needs_regen ? <span className="badge badge-warning">needs_regen</span> : null}
+          {item.needs_review ? <span className="badge">needs_review</span> : null}
+          <span className="badge badge-muted">{item.character_status}</span>
           <span className="badge">{item.post_count.toLocaleString()} posts</span>
         </div>
         {meta ? <div className="catalog-card-subtitle">{meta}</div> : null}
         {appearance ? <div className="catalog-card-subtitle">{appearance}</div> : null}
-        {item.generation_prompt ? (
-          <div className="catalog-card-subtitle" title={item.generation_prompt}>
-            prompt: {item.generation_prompt}
+        {promptToCopy ? (
+          <div className="catalog-card-subtitle catalog-card-prompt" title={promptToCopy}>
+            {promptToCopy}
           </div>
         ) : null}
         <div className="card-actions">
-          <button className="btn btn-small" type="button" onClick={copyPrompt} disabled={!promptToCopy}>
-            Prompt Copy
+          {onEdit ? (
+            <button className="btn btn-small" type="button" onClick={() => onEdit(item)}>
+              Edit
+            </button>
+          ) : null}
+          <button className="btn btn-small" type="button" onClick={() => void copyPrompt()} disabled={!promptToCopy}>
+            Copy Prompt
           </button>
           {onChangeSeries ? (
             <button className="btn btn-small" type="button" onClick={() => onChangeSeries(item)}>
-              Change Series
+              Series
             </button>
           ) : null}
           {item.danbooru_url ? (
@@ -78,9 +96,11 @@ export function CatalogCard({ item, onChangeSeries }: CatalogCardProps) {
           >
             Review
           </Link>
-          <button className="btn btn-small" type="button" disabled title="Generation Connector (Phase 2)">
-            Regenerate
-          </button>
+          {onRegenerate ? (
+            <button className="btn btn-small" type="button" onClick={() => onRegenerate(item)}>
+              Regen
+            </button>
+          ) : null}
         </div>
       </div>
     </article>

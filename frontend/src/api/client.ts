@@ -3,6 +3,8 @@ import type {
   AppearanceReviewListResponse,
   AppearanceReviewItem,
   CatalogFilters,
+  CatalogItem,
+  CatalogItemUpdatePayload,
   CatalogListResponse,
   CatalogReviewCompletePayload,
   CatalogReviewListResponse,
@@ -65,6 +67,26 @@ export const api = {
 
   listCatalog: (filters: CatalogFilters = {}) =>
     request<CatalogListResponse>(`/catalog${buildQuery(filters as Record<string, string | number | boolean | undefined>)}`),
+
+  getRandomCatalogCharacter: (filters: Omit<CatalogFilters, "skip" | "limit"> = {}) =>
+    request<CatalogItem>(`/catalog/random${buildQuery(filters as Record<string, string | number | boolean | undefined>)}`),
+
+  updateCatalogItem: (characterId: number, payload: CatalogItemUpdatePayload) =>
+    request<CatalogItem>(`/catalog/${characterId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+
+  exportCatalogCsv: async (filters: Omit<CatalogFilters, "skip" | "limit"> = {}) => {
+    const response = await fetch(
+      `${API_BASE}/catalog/export/csv${buildQuery(filters as Record<string, string | number | boolean | undefined>)}`,
+    );
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || "Catalog CSV export failed");
+    }
+    return {
+      content: await response.text(),
+      savedPath: response.headers.get("X-Export-Path"),
+    };
+  },
 
   getCatalogStatuses: () => request<string[]>("/catalog/statuses"),
 

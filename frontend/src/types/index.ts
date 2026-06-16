@@ -335,6 +335,18 @@ export interface CatalogFilters {
   limit?: number;
 }
 
+export interface CatalogItemUpdatePayload {
+  multi_color_hair?: string | null;
+  hair_color?: string | null;
+  hair_shape?: string | null;
+  eye_color?: string | null;
+  feature_tags?: string | null;
+  gender?: string | null;
+  rating?: number | null;
+  type?: string | null;
+  final_prompt?: string | null;
+}
+
 export interface SeriesCreatePayload {
   series_tag: string;
   display_name?: string;
