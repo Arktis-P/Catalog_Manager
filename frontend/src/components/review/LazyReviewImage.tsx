@@ -7,9 +7,17 @@ interface LazyReviewImageProps {
   active?: boolean;
   selected?: boolean;
   onClick?: () => void;
+  onDoubleClick?: () => void;
 }
 
-export function LazyReviewImage({ imagePath, alt, active = false, selected = false, onClick }: LazyReviewImageProps) {
+export function LazyReviewImage({
+  imagePath,
+  alt,
+  active = false,
+  selected = false,
+  onClick,
+  onDoubleClick,
+}: LazyReviewImageProps) {
   const rootRef = useRef<HTMLButtonElement>(null);
   const [visible, setVisible] = useState(false);
   const src = pendingReviewImageUrl(imagePath);
@@ -44,8 +52,22 @@ export function LazyReviewImage({ imagePath, alt, active = false, selected = fal
     .join(" ");
 
   return (
-    <button ref={rootRef} type="button" className={className} onClick={onClick} title={alt}>
-      {visible && src ? <img src={src} alt={alt} loading="lazy" decoding="async" /> : <span className="review-image-placeholder" />}
+    <button
+      ref={rootRef}
+      type="button"
+      className={className}
+      onClick={onClick}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        onDoubleClick?.();
+      }}
+      title={`${alt} (double-click to enlarge)`}
+    >
+      {visible && src ? (
+        <img src={src} alt={alt} loading="lazy" decoding="async" />
+      ) : (
+        <span className="review-image-placeholder" />
+      )}
     </button>
   );
 }

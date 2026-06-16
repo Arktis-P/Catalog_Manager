@@ -116,3 +116,29 @@ export function genderChipClass(gender: string | null | undefined): string {
   }
   return "review-tag";
 }
+
+export function resolveFinalPrompt(
+  item: {
+    character_tag: string;
+    generation_prompt: string | null;
+    multi_color_hair: string | null;
+    hair_color: string | null;
+    eye_color: string | null;
+    feature_tags: string | null;
+    gender: string | null;
+  },
+  draft: {
+    enabledTags: Set<string>;
+    customPrompt: string | null;
+    promptEdited: boolean;
+  },
+): string | null {
+  if (draft.promptEdited && draft.customPrompt !== null) {
+    return draft.customPrompt;
+  }
+
+  const chips = appearanceTagChips(item);
+  const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
+  return buildFinalPrompt(item.character_tag, item.generation_prompt, enabledTags, chips);
+}
+

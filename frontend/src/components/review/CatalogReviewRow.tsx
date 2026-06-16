@@ -1,18 +1,23 @@
 import type { CatalogReviewItem } from "../../types";
 import { danbooruPostsUrl, danbooruWikiUrl } from "../../utils/danbooruLinks";
+import { pendingReviewImageUrl } from "../../utils/reviewImages";
 import {
   appearanceTagChips,
   buildFinalPrompt,
   defaultEnabledTagKeys,
   genderChipClass,
+  resolveFinalPrompt,
 } from "../../utils/reviewPrompt";
 import { LazyReviewImage } from "./LazyReviewImage";
+import { ReviewRatingStars } from "./ReviewRatingStars";
 
 export interface CharacterDraft {
   imageIndex: number;
   gender: string | null;
   rating: number | null;
   enabledTags: Set<string>;
+  customPrompt: string | null;
+  promptEdited: boolean;
 }
 
 interface CatalogReviewRowProps {
@@ -22,6 +27,8 @@ interface CatalogReviewRowProps {
   draft: CharacterDraft;
   onDraftChange: (draft: CharacterDraft) => void;
   onToggleTag: (tagKey: string) => void;
+  onRate: (value: number) => void;
+  onImagePreview: (src: string, alt: string) => void;
 }
 
 function autoStatusClass(status: string | null): string {
@@ -38,13 +45,16 @@ export function CatalogReviewRow({
   draft,
   onDraftChange,
   onToggleTag,
+  onRate,
+  onImagePreview,
 }: CatalogReviewRowProps) {
   const chips = appearanceTagChips(item);
   const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
-  const finalPrompt = buildFinalPrompt(item.character_tag, item.generation_prompt, enabledTags, chips);
+  const promptText = resolveFinalPrompt(item, draft) ?? "";
   const displayGender = draft.gender ?? item.gender;
   const imageSlots = item.images.slice(0, 4);
-  const paddedSlots = imageSlots.length >= 2 ? imageSlots : [...imageSlots, ...Array(Math.max(0, 2 - imageSlots.length)).fill(null)];
+  const paddedSlots =
+    imageSlots.length >= 2 ? imageSlots : [...imageSlots, ...Array(Math.max(0, 2 - imageSlots.length)).fill(null)];
 
   return (
     <article
@@ -62,6 +72,12 @@ export function CatalogReviewRow({
                 active={focused}
                 selected={focused && draft.imageIndex === index}
                 onClick={() => onDraftChange({ ...draft, imageIndex: index })}
+                onDoubleClick={() => {
+                  const src = pendingReviewImageUrl(image.image_path);
+                  if (src) {
+                    onImagePreview(src, `${item.character_tag} ${index + 1}`);
+                  }
+                }}
               />
               <div className="catalog-review-image-meta">
                 <span className={autoStatusClass(image.auto_status)}>{image.auto_status || "unknown"}</span>
@@ -112,17 +128,14 @@ export function CatalogReviewRow({
 
         <div className="catalog-review-meta">
           <span className="badge">{item.post_count.toLocaleString()} posts</span>
-          {draft.rating !== null ? <span className="badge">rating {draft.rating}</span> : null}
           {item.review_status ? <span className="badge">{item.review_status}</span> : null}
         </div>
 
+        <ReviewRatingStars rating={draft.rating} onRate={onRate} />
+
         <div className="catalog-review-tags">
           {displayGender ? (
-            <button
-              type="button"
-              className={genderChipClass(displayGender)}
-              onClick={() => onDraftChange({ ...draft, gender: displayGender })}
-            >
+            <button type="button" className={genderChipClass(displayGender)}>
               {displayGender}
             </button>
           ) : (
@@ -142,8 +155,40 @@ export function CatalogReviewRow({
             ))}
         </div>
 
-        <div className="catalog-review-prompt" title={finalPrompt || undefined}>
-          {finalPrompt || item.generation_prompt || "—"}
+        <div className="catalog-review-prompt-field">
+          <div className="catalog-review-prompt-header">
+            <label htmlFor={`review-prompt-${item.id}`}>Prompt</label>
+            {draft.promptEdited ? (
+              <button
+                type="button"
+                className="btn btn-small btn-ghost"
+                onClick={() =>
+                  onDraftChange({
+                    ...draft,
+                    customPrompt: null,
+                    promptEdited: false,
+                  })
+                }
+              >
+                Reset tags
+              </button>
+            ) : null}
+          </div>
+          <textarea
+            id={`review-prompt-${item.id}`}
+            className="catalog-review-prompt-input"
+            value={promptText}
+            rows={2}
+            spellCheck={false}
+            onChange={(event) =>
+              onDraftChange({
+                ...draft,
+                customPrompt: event.target.value,
+                promptEdited: true,
+              })
+            }
+            placeholder="e.g. {{hakurei reimu, [[light brown hair, red eyes]]}}"
+          />
         </div>
       </aside>
     </article>
@@ -152,11 +197,18 @@ export function CatalogReviewRow({
 
 export function createDraftForItem(item: CatalogReviewItem): CharacterDraft {
   const chips = appearanceTagChips(item);
+  const enabledTags = defaultEnabledTagKeys(chips);
+  const autoPrompt = buildFinalPrompt(item.character_tag, item.generation_prompt, enabledTags, chips);
+  const savedPrompt = item.final_prompt;
+  const promptEdited = Boolean(savedPrompt && savedPrompt !== autoPrompt);
   const coverIndex = item.images.findIndex((image) => image.is_cover || image.id === item.cover_image_id);
+
   return {
     imageIndex: coverIndex >= 0 ? coverIndex : 0,
     gender: item.gender,
     rating: item.rating,
-    enabledTags: defaultEnabledTagKeys(chips),
+    enabledTags,
+    customPrompt: promptEdited ? savedPrompt : null,
+    promptEdited,
   };
 }

@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
 import type { CatalogReviewItem, Series } from "../../types";
 import { danbooruPostsUrl, danbooruWikiUrl, openExternal } from "../../utils/danbooruLinks";
-import { appearanceTagChips, buildFinalPrompt, defaultEnabledTagKeys } from "../../utils/reviewPrompt";
+import { appearanceTagChips, defaultEnabledTagKeys, resolveFinalPrompt } from "../../utils/reviewPrompt";
 import { SeriesSearchSelect } from "../SeriesSearchSelect";
 import { CatalogReviewRow, createDraftForItem, type CharacterDraft } from "./CatalogReviewRow";
+import { ReviewImageLightbox } from "./ReviewImageLightbox";
+import { toggleRating } from "./ReviewRatingStars";
 
-const ROW_HEIGHT = 248;
+const ROW_HEIGHT = 296;
 const ROW_GAP = 12;
 const ROW_STRIDE = ROW_HEIGHT + ROW_GAP;
 const OVERSCAN = 2;
@@ -37,6 +39,7 @@ export function CatalogReviewPanel() {
   const [drafts, setDrafts] = useState<Record<number, CharacterDraft>>({});
   const [undoStack, setUndoStack] = useState<number[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   const focusedItem = items[focusIndex] ?? null;
   const focusedDraft = focusedItem ? drafts[focusedItem.id] ?? createDraftForItem(focusedItem) : null;
@@ -123,7 +126,12 @@ export function CatalogReviewPanel() {
       } else {
         enabled.add(tagKey);
       }
-      updateDraft(characterId, { ...current, enabledTags: enabled });
+      updateDraft(characterId, {
+        ...current,
+        enabledTags: enabled,
+        customPrompt: current.promptEdited ? current.customPrompt : null,
+        promptEdited: current.promptEdited,
+      });
     },
     [drafts, items, updateDraft],
   );
@@ -142,12 +150,10 @@ export function CatalogReviewPanel() {
     const chips = appearanceTagChips(focusedItem);
     const enabledTags =
       focusedDraft.enabledTags.size > 0 ? focusedDraft.enabledTags : defaultEnabledTagKeys(chips);
-    const finalPrompt = buildFinalPrompt(
-      focusedItem.character_tag,
-      focusedItem.generation_prompt,
+    const finalPrompt = resolveFinalPrompt(focusedItem, {
+      ...focusedDraft,
       enabledTags,
-      chips,
-    );
+    });
 
     setSubmitting(true);
     setError(null);
@@ -206,6 +212,21 @@ export function CatalogReviewPanel() {
       setSubmitting(false);
     }
   }, [loadReviews, submitting, undoStack]);
+
+  const setRating = useCallback(
+    (characterId: number, value: number) => {
+      const item = items.find((entry) => entry.id === characterId);
+      if (!item) {
+        return;
+      }
+      const current = drafts[characterId] ?? createDraftForItem(item);
+      updateDraft(characterId, {
+        ...current,
+        rating: toggleRating(current.rating, value),
+      });
+    },
+    [drafts, items, updateDraft],
+  );
 
   const regenerateFocused = useCallback(async () => {
     if (!focusedItem || submitting) {
@@ -273,13 +294,13 @@ export function CatalogReviewPanel() {
 
       if (event.key >= "0" && event.key <= "6") {
         event.preventDefault();
-        updateDraft(focusedItem.id, { ...focusedDraft, rating: Number(event.key) });
+        setRating(focusedItem.id, Number(event.key));
         return;
       }
 
       if (event.key === "-") {
         event.preventDefault();
-        updateDraft(focusedItem.id, { ...focusedDraft, rating: -1 });
+        setRating(focusedItem.id, -1);
         return;
       }
 
@@ -329,6 +350,7 @@ export function CatalogReviewPanel() {
     focusedItem,
     items.length,
     regenerateFocused,
+    setRating,
     undoLast,
     updateDraft,
   ]);
@@ -387,12 +409,13 @@ export function CatalogReviewPanel() {
       <div className="review-shortcut-bar">
         <span>←→ 이미지</span>
         <span>↑↓ 캐릭터</span>
-        <span>0-6 / - 레이팅</span>
+        <span>0-6 / - 레이팅 (재입력 시 해제)</span>
         <span>Enter 완료</span>
         <span>g/b/n 성별</span>
         <span>r 재생성</span>
         <span>Ctrl+Z 취소</span>
         <span>q/w Danbooru</span>
+        <span>더블클릭 확대</span>
       </div>
 
       {selectedSeries ? (
@@ -431,6 +454,8 @@ export function CatalogReviewPanel() {
                     draft={draft}
                     onDraftChange={(next) => updateDraft(item.id, next)}
                     onToggleTag={(tagKey) => toggleTag(item.id, tagKey)}
+                    onRate={(value) => setRating(item.id, value)}
+                    onImagePreview={(src, alt) => setLightbox({ src, alt })}
                   />
                 );
               })}
@@ -438,6 +463,10 @@ export function CatalogReviewPanel() {
           </div>
         </div>
       )}
+
+      {lightbox ? (
+        <ReviewImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
+      ) : null}
     </>
   );
 }
