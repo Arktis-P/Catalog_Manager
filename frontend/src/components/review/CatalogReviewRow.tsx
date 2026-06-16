@@ -1,6 +1,5 @@
 import type { CatalogReviewItem } from "../../types";
 import { danbooruPostsUrl, danbooruWikiUrl } from "../../utils/danbooruLinks";
-import { pendingReviewImageUrl } from "../../utils/reviewImages";
 import {
   appearanceTagChips,
   buildFinalPrompt,
@@ -28,7 +27,6 @@ interface CatalogReviewRowProps {
   onDraftChange: (draft: CharacterDraft) => void;
   onToggleTag: (tagKey: string) => void;
   onRate: (value: number) => void;
-  onImagePreview: (src: string, alt: string) => void;
 }
 
 function autoStatusClass(status: string | null): string {
@@ -46,7 +44,6 @@ export function CatalogReviewRow({
   onDraftChange,
   onToggleTag,
   onRate,
-  onImagePreview,
 }: CatalogReviewRowProps) {
   const chips = appearanceTagChips(item);
   const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
@@ -71,13 +68,8 @@ export function CatalogReviewRow({
                 alt={`${item.character_tag} ${index + 1}`}
                 active={focused}
                 selected={focused && draft.imageIndex === index}
+                previewAnchor={focused && draft.imageIndex === index}
                 onClick={() => onDraftChange({ ...draft, imageIndex: index })}
-                onDoubleClick={() => {
-                  const src = pendingReviewImageUrl(image.image_path);
-                  if (src) {
-                    onImagePreview(src, `${item.character_tag} ${index + 1}`);
-                  }
-                }}
               />
               <div className="catalog-review-image-meta">
                 <span className={autoStatusClass(image.auto_status)}>{image.auto_status || "unknown"}</span>

@@ -3,9 +3,10 @@ import { api } from "../../api/client";
 import type { CatalogReviewItem, Series } from "../../types";
 import { danbooruPostsUrl, danbooruWikiUrl, openExternal } from "../../utils/danbooruLinks";
 import { appearanceTagChips, defaultEnabledTagKeys, resolveFinalPrompt } from "../../utils/reviewPrompt";
+import { pendingReviewImageUrl } from "../../utils/reviewImages";
 import { SeriesSearchSelect } from "../SeriesSearchSelect";
 import { CatalogReviewRow, createDraftForItem, type CharacterDraft } from "./CatalogReviewRow";
-import { ReviewImageLightbox } from "./ReviewImageLightbox";
+import { ReviewImagePreview } from "./ReviewImagePreview";
 import { toggleRating } from "./ReviewRatingStars";
 
 const ROW_HEIGHT = 296;
@@ -13,6 +14,8 @@ const ROW_GAP = 12;
 const ROW_STRIDE = ROW_HEIGHT + ROW_GAP;
 const OVERSCAN = 2;
 const PAGE_SIZE = 50;
+const PREVIEW_SIZE = 600;
+const PREVIEW_GAP = 8;
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
@@ -39,10 +42,14 @@ export function CatalogReviewPanel() {
   const [drafts, setDrafts] = useState<Record<number, CharacterDraft>>({});
   const [undoStack, setUndoStack] = useState<number[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewPosition, setPreviewPosition] = useState<{ top: number; left: number } | null>(null);
 
   const focusedItem = items[focusIndex] ?? null;
   const focusedDraft = focusedItem ? drafts[focusedItem.id] ?? createDraftForItem(focusedItem) : null;
+  const focusedImage = focusedItem?.images[focusedDraft?.imageIndex ?? 0] ?? null;
+  const previewSrc = focusedImage ? pendingReviewImageUrl(focusedImage.image_path) : null;
+  const previewAlt = focusedItem ? `${focusedItem.character_tag} preview` : "";
 
   const loadReviews = useCallback(async () => {
     if (!selectedSeriesId) {
@@ -185,6 +192,7 @@ export function CatalogReviewPanel() {
         );
       });
       setTotal((count) => (filterStatus === "pending" ? Math.max(0, count - 1) : count));
+      setPreviewOpen(false);
       setActionMessage(`${focusedItem.character_tag} 완료`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "검수 완료에 실패했습니다.");
@@ -246,12 +254,94 @@ export function CatalogReviewPanel() {
   }, [focusedItem, submitting]);
 
   useEffect(() => {
+    if (!focusedItem || !previewSrc) {
+      setPreviewOpen(false);
+    }
+  }, [focusedItem, previewSrc]);
+
+  const updatePreviewPosition = useCallback(() => {
+    if (!previewOpen || !scrollRef.current) {
+      setPreviewPosition(null);
+      return;
+    }
+
+    const anchor = scrollRef.current.querySelector('[data-preview-anchor="true"]') as HTMLElement | null;
+    if (!anchor) {
+      setPreviewPosition(null);
+      return;
+    }
+
+    const rect = anchor.getBoundingClientRect();
+    let top = rect.top - PREVIEW_SIZE - PREVIEW_GAP;
+    let left = rect.left + rect.width / 2 - PREVIEW_SIZE / 2;
+
+    if (top < PREVIEW_GAP) {
+      top = rect.bottom + PREVIEW_GAP;
+    }
+
+    left = Math.max(PREVIEW_GAP, Math.min(left, window.innerWidth - PREVIEW_SIZE - PREVIEW_GAP));
+    top = Math.max(PREVIEW_GAP, Math.min(top, window.innerHeight - PREVIEW_SIZE - PREVIEW_GAP));
+
+    setPreviewPosition({ top, left });
+  }, [previewOpen]);
+
+  useEffect(() => {
+    if (!previewOpen) {
+      setPreviewPosition(null);
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      updatePreviewPosition();
+    });
+
+    const scrollNode = scrollRef.current;
+    const onReposition = () => updatePreviewPosition();
+    window.addEventListener("resize", onReposition);
+    scrollNode?.addEventListener("scroll", onReposition, { passive: true });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", onReposition);
+      scrollNode?.removeEventListener("scroll", onReposition);
+    };
+  }, [previewOpen, previewSrc, focusIndex, focusedDraft?.imageIndex, updatePreviewPosition]);
+
+  const togglePreview = useCallback(() => {
+    if (previewOpen) {
+      setPreviewOpen(false);
+      return;
+    }
+    if (previewSrc) {
+      setPreviewOpen(true);
+    }
+  }, [previewOpen, previewSrc]);
+
+  const shiftFocusedImage = useCallback(
+    (delta: -1 | 1) => {
+      if (!focusedItem || !focusedDraft) {
+        return;
+      }
+      const maxIndex = Math.max(0, focusedItem.images.length - 1);
+      const nextIndex = Math.min(maxIndex, Math.max(0, focusedDraft.imageIndex + delta));
+      updateDraft(focusedItem.id, { ...focusedDraft, imageIndex: nextIndex });
+    },
+    [focusedDraft, focusedItem, updateDraft],
+  );
+
+  useEffect(() => {
     scrollToRow(focusIndex);
   }, [focusIndex, scrollToRow]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target) || !focusedItem || !focusedDraft) {
+        return;
+      }
+
+      if (event.key === " " || event.code === "Space") {
+        event.preventDefault();
+        togglePreview();
         return;
       }
 
@@ -263,20 +353,13 @@ export function CatalogReviewPanel() {
 
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        updateDraft(focusedItem.id, {
-          ...focusedDraft,
-          imageIndex: Math.max(0, focusedDraft.imageIndex - 1),
-        });
+        shiftFocusedImage(-1);
         return;
       }
 
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        const maxIndex = Math.max(0, focusedItem.images.length - 1);
-        updateDraft(focusedItem.id, {
-          ...focusedDraft,
-          imageIndex: Math.min(maxIndex, focusedDraft.imageIndex + 1),
-        });
+        shiftFocusedImage(1);
         return;
       }
 
@@ -351,6 +434,8 @@ export function CatalogReviewPanel() {
     items.length,
     regenerateFocused,
     setRating,
+    shiftFocusedImage,
+    togglePreview,
     undoLast,
     updateDraft,
   ]);
@@ -415,7 +500,7 @@ export function CatalogReviewPanel() {
         <span>r 재생성</span>
         <span>Ctrl+Z 취소</span>
         <span>q/w Danbooru</span>
-        <span>더블클릭 확대</span>
+        <span>Space 확대</span>
       </div>
 
       {selectedSeries ? (
@@ -455,7 +540,6 @@ export function CatalogReviewPanel() {
                     onDraftChange={(next) => updateDraft(item.id, next)}
                     onToggleTag={(tagKey) => toggleTag(item.id, tagKey)}
                     onRate={(value) => setRating(item.id, value)}
-                    onImagePreview={(src, alt) => setLightbox({ src, alt })}
                   />
                 );
               })}
@@ -464,8 +548,8 @@ export function CatalogReviewPanel() {
         </div>
       )}
 
-      {lightbox ? (
-        <ReviewImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
+      {previewOpen && previewSrc && previewPosition ? (
+        <ReviewImagePreview src={previewSrc} alt={previewAlt} top={previewPosition.top} left={previewPosition.left} />
       ) : null}
     </>
   );

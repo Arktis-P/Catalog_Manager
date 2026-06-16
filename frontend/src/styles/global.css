@@ -1446,40 +1446,27 @@ button,
   transform: scale(1.05);
 }
 
-.review-lightbox {
+.review-image-preview {
   position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(0, 0, 0, 0.88);
-}
-
-.review-lightbox-content {
-  max-width: min(92vw, 832px);
-  max-height: 92vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.review-lightbox-content img {
-  max-width: 100%;
-  max-height: 92vh;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  border-radius: 8px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
-}
-
-.review-lightbox-close {
-  position: fixed;
-  top: 16px;
-  right: 16px;
   z-index: 1001;
+  width: 600px;
+  height: 600px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+  background: #111;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.review-image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #111;
 }
 
 .catalog-review-prompt {

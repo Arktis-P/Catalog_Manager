@@ -6,8 +6,8 @@ interface LazyReviewImageProps {
   alt: string;
   active?: boolean;
   selected?: boolean;
+  previewAnchor?: boolean;
   onClick?: () => void;
-  onDoubleClick?: () => void;
 }
 
 export function LazyReviewImage({
@@ -15,8 +15,8 @@ export function LazyReviewImage({
   alt,
   active = false,
   selected = false,
+  previewAnchor = false,
   onClick,
-  onDoubleClick,
 }: LazyReviewImageProps) {
   const rootRef = useRef<HTMLButtonElement>(null);
   const [visible, setVisible] = useState(false);
@@ -57,11 +57,8 @@ export function LazyReviewImage({
       type="button"
       className={className}
       onClick={onClick}
-      onDoubleClick={(event) => {
-        event.preventDefault();
-        onDoubleClick?.();
-      }}
-      title={`${alt} (double-click to enlarge)`}
+      data-preview-anchor={previewAnchor ? "true" : undefined}
+      title={`${alt} (Space로 확대)`}
     >
       {visible && src ? (
         <img src={src} alt={alt} loading="lazy" decoding="async" />
