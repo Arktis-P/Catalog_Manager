@@ -7,12 +7,12 @@ import { pendingReviewImageUrl } from "../../utils/reviewImages";
 import { SeriesSearchSelect } from "../SeriesSearchSelect";
 import { CatalogReviewRow, createDraftForItem, type CharacterDraft } from "./CatalogReviewRow";
 import { ReviewImagePreview } from "./ReviewImagePreview";
+import { ReviewMoveSeriesModal } from "./ReviewMoveSeriesModal";
 import { toggleRating } from "./ReviewRatingStars";
 
 const ROW_HEIGHT = 296;
+const ROW_HEIGHT_QUAD = 448;
 const ROW_GAP = 12;
-const ROW_STRIDE = ROW_HEIGHT + ROW_GAP;
-const OVERSCAN = 2;
 const PAGE_SIZE = 50;
 const PREVIEW_SIZE = 600;
 const PREVIEW_GAP = 8;
@@ -25,13 +25,22 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
 }
 
-export function CatalogReviewPanel() {
+function reviewProgressKey(seriesId: number): string {
+  return `catalog-review-progress-${seriesId}`;
+}
+
+interface CatalogReviewPanelProps {
+  initialSeriesId?: number | "";
+  initialCharacterId?: number | null;
+}
+
+export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = null }: CatalogReviewPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [selectedSeriesId, setSelectedSeriesId] = useState<number | "">("");
+  const [selectedSeriesId, setSelectedSeriesId] = useState<number | "">(initialSeriesId);
   const [selectedSeries, setSelectedSeries] = useState<Series | null>(null);
   const [items, setItems] = useState<CatalogReviewItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [filterStatus, setFilterStatus] = useState<"pending" | "completed" | "all">("pending");
+  const [filterStatus, setFilterStatus] = useState<"pending" | "completed" | "all" | "needs_check">("pending");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,12 +53,44 @@ export function CatalogReviewPanel() {
   const [submitting, setSubmitting] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewPosition, setPreviewPosition] = useState<{ top: number; left: number } | null>(null);
+  const [thumbSize, setThumbSize] = useState(384);
+  const [maxLoadedImages, setMaxLoadedImages] = useState(30);
+  const [imagesPerCharacter, setImagesPerCharacter] = useState(2);
+  const [moveTarget, setMoveTarget] = useState<CatalogReviewItem | null>(null);
+  const [sessionCompleted, setSessionCompleted] = useState(0);
+  const [pendingCharacterId, setPendingCharacterId] = useState<number | null>(initialCharacterId);
+
+  const quadLayout = imagesPerCharacter > 2;
+  const rowHeight = quadLayout ? ROW_HEIGHT_QUAD : ROW_HEIGHT;
+  const rowStride = rowHeight + ROW_GAP;
 
   const focusedItem = items[focusIndex] ?? null;
   const focusedDraft = focusedItem ? drafts[focusedItem.id] ?? createDraftForItem(focusedItem) : null;
   const focusedImage = focusedItem?.images[focusedDraft?.imageIndex ?? 0] ?? null;
   const previewSrc = focusedImage ? pendingReviewImageUrl(focusedImage.image_path) : null;
   const previewAlt = focusedItem ? `${focusedItem.character_tag} preview` : "";
+
+  useEffect(() => {
+    void api.getSettings().then((settings) => {
+      setThumbSize(settings.review_thumbnail_size);
+      setMaxLoadedImages(settings.review_max_loaded_images);
+      setImagesPerCharacter(settings.generation_images_per_character);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!initialSeriesId) {
+      return;
+    }
+    void api.listSeries({ limit: 1, search: undefined }).then(() => {
+      void api.listSeries({ sort_by: "post_count", sort_order: "desc", limit: 500 }).then((response) => {
+        const series = response.items.find((entry) => entry.id === initialSeriesId);
+        if (series) {
+          setSelectedSeries(series);
+        }
+      });
+    });
+  }, [initialSeriesId]);
 
   const loadReviews = useCallback(async () => {
     if (!selectedSeriesId) {
@@ -70,7 +111,30 @@ export function CatalogReviewPanel() {
       });
       setItems(response.items);
       setTotal(response.total);
-      setFocusIndex(0);
+      let nextFocus = 0;
+      if (pendingCharacterId) {
+        const found = response.items.findIndex((item) => item.id === pendingCharacterId);
+        if (found >= 0) {
+          nextFocus = found;
+        }
+        setPendingCharacterId(null);
+      } else if (selectedSeriesId) {
+        const saved = localStorage.getItem(reviewProgressKey(selectedSeriesId));
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved) as { characterId?: number };
+            if (parsed.characterId) {
+              const found = response.items.findIndex((item) => item.id === parsed.characterId);
+              if (found >= 0) {
+                nextFocus = found;
+              }
+            }
+          } catch {
+            // ignore invalid saved progress
+          }
+        }
+      }
+      setFocusIndex(nextFocus);
       setDrafts(
         Object.fromEntries(response.items.map((item) => [item.id, createDraftForItem(item)])),
       );
@@ -107,14 +171,24 @@ export function CatalogReviewPanel() {
     if (!node) {
       return;
     }
-    const top = index * ROW_STRIDE;
-    const bottom = top + ROW_HEIGHT;
+    const top = index * rowStride;
+    const bottom = top + rowHeight;
     if (top < node.scrollTop) {
       node.scrollTop = top;
     } else if (bottom > node.scrollTop + node.clientHeight) {
       node.scrollTop = bottom - node.clientHeight;
     }
-  }, []);
+  }, [rowHeight, rowStride]);
+
+  useEffect(() => {
+    if (!selectedSeriesId || !focusedItem) {
+      return;
+    }
+    localStorage.setItem(
+      reviewProgressKey(selectedSeriesId),
+      JSON.stringify({ characterId: focusedItem.id, filterStatus }),
+    );
+  }, [filterStatus, focusedItem, selectedSeriesId]);
 
   const updateDraft = useCallback((characterId: number, draft: CharacterDraft) => {
     setDrafts((current) => ({ ...current, [characterId]: draft }));
@@ -141,6 +215,63 @@ export function CatalogReviewPanel() {
       });
     },
     [drafts, items, updateDraft],
+  );
+
+  const removeCharacterFromList = useCallback((characterId: number) => {
+    setItems((current) => {
+      const next = current.filter((entry) => entry.id !== characterId);
+      setFocusIndex((index) => Math.min(index, Math.max(0, next.length - 1)));
+      return next;
+    });
+    setTotal((count) => Math.max(0, count - 1));
+    setPreviewOpen(false);
+  }, []);
+
+  const handleDismissNeedsCheck = useCallback(async (item: CatalogReviewItem) => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.dismissCatalogNeedsCheck(item.id);
+      setItems((current) =>
+        current.map((entry) =>
+          entry.id === item.id ? { ...entry, character_status: "confirmed", needs_check_reason: null } : entry,
+        ),
+      );
+      setActionMessage(`${item.character_tag} 소속을 확정했습니다.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "소속 확정에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }, []);
+
+  const handleDeleteCharacter = useCallback(
+    async (item: CatalogReviewItem) => {
+      if (!window.confirm(`${item.character_tag} 캐릭터를 삭제할까요?`)) {
+        return;
+      }
+      setSubmitting(true);
+      setError(null);
+      try {
+        await api.deleteCharacter(item.id);
+        removeCharacterFromList(item.id);
+        setActionMessage(`${item.character_tag} 삭제됨`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "캐릭터 삭제에 실패했습니다.");
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [removeCharacterFromList],
+  );
+
+  const handleMoveSeries = useCallback(
+    async (item: CatalogReviewItem, seriesId: number) => {
+      await api.updateCharacterSeries(item.id, seriesId);
+      removeCharacterFromList(item.id);
+      setActionMessage(`${item.character_tag} 시리즈 이동 완료`);
+    },
+    [removeCharacterFromList],
   );
 
   const completeFocused = useCallback(async () => {
@@ -192,6 +323,7 @@ export function CatalogReviewPanel() {
         );
       });
       setTotal((count) => (filterStatus === "pending" ? Math.max(0, count - 1) : count));
+      setSessionCompleted((count) => count + 1);
       setPreviewOpen(false);
       setActionMessage(`${focusedItem.character_tag} 완료`);
     } catch (err) {
@@ -283,7 +415,7 @@ export function CatalogReviewPanel() {
     top = Math.max(PREVIEW_GAP, Math.min(top, window.innerHeight - PREVIEW_SIZE - PREVIEW_GAP));
 
     setPreviewPosition({ top, left });
-  }, [previewOpen]);
+  }, [rowHeight, rowStride]);
 
   useEffect(() => {
     if (!previewOpen) {
@@ -441,13 +573,17 @@ export function CatalogReviewPanel() {
   ]);
 
   const virtualRange = useMemo(() => {
-    const start = Math.max(0, Math.floor(scrollTop / ROW_STRIDE) - OVERSCAN);
-    const visibleCount = Math.ceil(viewportHeight / ROW_STRIDE) + OVERSCAN * 2;
+    const imagesPerRow = quadLayout ? 4 : 2;
+    const maxRows = Math.max(1, Math.ceil(maxLoadedImages / imagesPerRow));
+    const visibleRows = Math.max(1, Math.ceil(viewportHeight / rowStride));
+    const overscan = Math.max(1, Math.floor((maxRows - visibleRows) / 2));
+    const start = Math.max(0, Math.floor(scrollTop / rowStride) - overscan);
+    const visibleCount = visibleRows + overscan * 2;
     const end = Math.min(items.length, start + visibleCount);
     return { start, end };
-  }, [items.length, scrollTop, viewportHeight]);
+  }, [items.length, maxLoadedImages, quadLayout, rowStride, scrollTop, viewportHeight]);
 
-  const totalHeight = Math.max(0, items.length * ROW_STRIDE - ROW_GAP);
+  const totalHeight = Math.max(0, items.length * rowStride - ROW_GAP);
 
   return (
     <>
@@ -472,6 +608,7 @@ export function CatalogReviewPanel() {
             <option value="pending">Pending</option>
             <option value="completed">Completed</option>
             <option value="all">All with images</option>
+            <option value="needs_check">needs_check</option>
           </select>
         </div>
         <div className="field">
@@ -508,6 +645,7 @@ export function CatalogReviewPanel() {
           {selectedSeries.display_name || selectedSeries.series_tag} · {items.length.toLocaleString()} /{" "}
           {total.toLocaleString()} 표시
           {focusedItem ? ` · focus: ${focusedItem.character_tag}` : ""}
+          {sessionCompleted > 0 ? ` · session ${sessionCompleted} completed` : ""}
         </div>
       ) : null}
 
@@ -525,7 +663,7 @@ export function CatalogReviewPanel() {
           <div className="catalog-review-virtual-spacer" style={{ height: totalHeight }}>
             <div
               className="catalog-review-virtual-window"
-              style={{ transform: `translateY(${virtualRange.start * ROW_STRIDE}px)` }}
+              style={{ transform: `translateY(${virtualRange.start * rowStride}px)` }}
             >
               {items.slice(virtualRange.start, virtualRange.end).map((item, offset) => {
                 const rowIndex = virtualRange.start + offset;
@@ -537,9 +675,20 @@ export function CatalogReviewPanel() {
                     rowIndex={rowIndex}
                     focused={rowIndex === focusIndex}
                     draft={draft}
+                    thumbSize={thumbSize}
+                    quadLayout={quadLayout}
                     onDraftChange={(next) => updateDraft(item.id, next)}
                     onToggleTag={(tagKey) => toggleTag(item.id, tagKey)}
                     onRate={(value) => setRating(item.id, value)}
+                    onDismissNeedsCheck={
+                      item.character_status === "needs_check"
+                        ? () => void handleDismissNeedsCheck(item)
+                        : undefined
+                    }
+                    onDeleteCharacter={() => void handleDeleteCharacter(item)}
+                    onMoveSeries={
+                      item.character_status === "needs_check" ? () => setMoveTarget(item) : undefined
+                    }
                   />
                 );
               })}
@@ -550,6 +699,15 @@ export function CatalogReviewPanel() {
 
       {previewOpen && previewSrc && previewPosition ? (
         <ReviewImagePreview src={previewSrc} alt={previewAlt} top={previewPosition.top} left={previewPosition.left} />
+      ) : null}
+
+      {moveTarget ? (
+        <ReviewMoveSeriesModal
+          characterTag={moveTarget.character_tag}
+          currentSeriesTag={moveTarget.series_tag}
+          onClose={() => setMoveTarget(null)}
+          onConfirm={(seriesId) => handleMoveSeries(moveTarget, seriesId)}
+        />
       ) : null}
     </>
   );

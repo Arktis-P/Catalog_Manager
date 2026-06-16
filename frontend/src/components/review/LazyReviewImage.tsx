@@ -7,6 +7,7 @@ interface LazyReviewImageProps {
   active?: boolean;
   selected?: boolean;
   previewAnchor?: boolean;
+  thumbSize?: number;
   onClick?: () => void;
 }
 
@@ -16,11 +17,12 @@ export function LazyReviewImage({
   active = false,
   selected = false,
   previewAnchor = false,
+  thumbSize,
   onClick,
 }: LazyReviewImageProps) {
   const rootRef = useRef<HTMLButtonElement>(null);
   const [visible, setVisible] = useState(false);
-  const src = pendingReviewImageUrl(imagePath);
+  const src = pendingReviewImageUrl(imagePath, thumbSize ? { thumbnail: true, thumbSize } : undefined);
 
   useEffect(() => {
     const node = rootRef.current;
@@ -31,9 +33,7 @@ export function LazyReviewImage({
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setVisible(true);
-          }
+          setVisible(entry.isIntersecting);
         }
       },
       { rootMargin: "240px 0px" },

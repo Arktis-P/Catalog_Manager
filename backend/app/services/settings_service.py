@@ -16,12 +16,20 @@ SETTING_GENERATION_IMAGES_PER_CHARACTER = "generation_images_per_character"
 SETTING_GENERATION_PROMPT_PREFIX = "generation_prompt_prefix"
 SETTING_GENERATION_PROMPT_SUFFIX = "generation_prompt_suffix"
 SETTING_GENERATION_NEGATIVE_PROMPT = "generation_negative_prompt"
+SETTING_REVIEW_THUMBNAIL_SIZE = "review_thumbnail_size"
+SETTING_REVIEW_MAX_LOADED_IMAGES = "review_max_loaded_images"
 DEFAULT_NAIA_BASE_URL = "http://127.0.0.1:7243"
 DEFAULT_IMAGES_PER_CHARACTER = 2
+DEFAULT_REVIEW_THUMBNAIL_SIZE = 384
+DEFAULT_REVIEW_MAX_LOADED_IMAGES = 30
 MIN_COLLECT_MAX_CONCURRENT = 1
 MAX_COLLECT_MAX_CONCURRENT = 5
 MIN_IMAGES_PER_CHARACTER = 1
 MAX_IMAGES_PER_CHARACTER = 4
+MIN_REVIEW_THUMBNAIL_SIZE = 128
+MAX_REVIEW_THUMBNAIL_SIZE = 1024
+MIN_REVIEW_MAX_LOADED_IMAGES = 10
+MAX_REVIEW_MAX_LOADED_IMAGES = 120
 
 
 class SettingsService:
@@ -93,6 +101,34 @@ class SettingsService:
         self._set_setting(SETTING_GENERATION_IMAGES_PER_CHARACTER, str(clamped))
         return clamped
 
+    def get_review_thumbnail_size(self) -> int:
+        raw = self._get_setting(SETTING_REVIEW_THUMBNAIL_SIZE)
+        if not raw:
+            return DEFAULT_REVIEW_THUMBNAIL_SIZE
+        try:
+            return max(MIN_REVIEW_THUMBNAIL_SIZE, min(MAX_REVIEW_THUMBNAIL_SIZE, int(raw)))
+        except ValueError:
+            return DEFAULT_REVIEW_THUMBNAIL_SIZE
+
+    def set_review_thumbnail_size(self, value: int) -> int:
+        clamped = max(MIN_REVIEW_THUMBNAIL_SIZE, min(MAX_REVIEW_THUMBNAIL_SIZE, value))
+        self._set_setting(SETTING_REVIEW_THUMBNAIL_SIZE, str(clamped))
+        return clamped
+
+    def get_review_max_loaded_images(self) -> int:
+        raw = self._get_setting(SETTING_REVIEW_MAX_LOADED_IMAGES)
+        if not raw:
+            return DEFAULT_REVIEW_MAX_LOADED_IMAGES
+        try:
+            return max(MIN_REVIEW_MAX_LOADED_IMAGES, min(MAX_REVIEW_MAX_LOADED_IMAGES, int(raw)))
+        except ValueError:
+            return DEFAULT_REVIEW_MAX_LOADED_IMAGES
+
+    def set_review_max_loaded_images(self, value: int) -> int:
+        clamped = max(MIN_REVIEW_MAX_LOADED_IMAGES, min(MAX_REVIEW_MAX_LOADED_IMAGES, value))
+        self._set_setting(SETTING_REVIEW_MAX_LOADED_IMAGES, str(clamped))
+        return clamped
+
     def get_generation_prompt_config(self) -> GenerationPromptConfig:
         defaults = default_generation_prompt_config()
         return GenerationPromptConfig(
@@ -127,4 +163,6 @@ class SettingsService:
             "generation_prompt_prefix": prompt_config.prefix,
             "generation_prompt_suffix": prompt_config.suffix,
             "generation_negative_prompt": prompt_config.negative_prompt,
+            "review_thumbnail_size": self.get_review_thumbnail_size(),
+            "review_max_loaded_images": self.get_review_max_loaded_images(),
         }

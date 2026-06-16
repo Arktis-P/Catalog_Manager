@@ -172,6 +172,8 @@ class ReviewService:
             )
         elif filter_status == "completed":
             query = query.filter(Review.review_status == "completed")
+        elif filter_status == "needs_check":
+            query = query.filter(Character.status == "needs_check")
 
         if search:
             pattern = f"%{search.strip()}%"
@@ -235,6 +237,24 @@ class ReviewService:
         for image in character.images:
             image.is_cover = image.id == cover_image_id
 
+        self.db.commit()
+        self.db.refresh(character)
+        return character
+
+    def dismiss_needs_check(self, character_id: int) -> Character:
+        character = (
+            self.db.query(Character)
+            .options(joinedload(Character.images), joinedload(Character.review))
+            .filter(Character.id == character_id)
+            .first()
+        )
+        if not character:
+            raise ValueError("Character not found")
+        if character.status != "needs_check":
+            raise ValueError("Character is not marked needs_check")
+
+        character.status = "confirmed"
+        character.needs_check_reason = None
         self.db.commit()
         self.db.refresh(character)
         return character

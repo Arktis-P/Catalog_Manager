@@ -10,6 +10,8 @@ class SettingsResponse(BaseModel):
     generation_prompt_prefix: str
     generation_prompt_suffix: str
     generation_negative_prompt: str
+    review_thumbnail_size: int = Field(ge=128, le=1024)
+    review_max_loaded_images: int = Field(ge=10, le=120)
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -20,3 +22,5 @@ class SettingsUpdateRequest(BaseModel):
     generation_prompt_prefix: str | None = None
     generation_prompt_suffix: str | None = None
     generation_negative_prompt: str | None = None
+    review_thumbnail_size: int | None = Field(default=None, ge=128, le=1024)
+    review_max_loaded_images: int | None = Field(default=None, ge=10, le=120)

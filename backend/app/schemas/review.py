@@ -104,3 +104,9 @@ class CatalogReviewUndoResponse(BaseModel):
     id: int
     review_status: str
     cover_image_id: int | None = None
+
+
+class CatalogReviewDismissNeedsCheckResponse(BaseModel):
+    id: int
+    character_status: str
+    needs_check_reason: str | None = None

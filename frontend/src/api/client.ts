@@ -1,6 +1,7 @@
 import type {
   AppSettings,
   AppearanceReviewListResponse,
+  AppearanceReviewItem,
   CatalogFilters,
   CatalogListResponse,
   CatalogReviewCompletePayload,
@@ -137,6 +138,8 @@ export const api = {
         | "generation_prompt_prefix"
         | "generation_prompt_suffix"
         | "generation_negative_prompt"
+        | "review_thumbnail_size"
+        | "review_max_loaded_images"
       >
     >,
   ) => request<AppSettings>("/settings", { method: "PATCH", body: JSON.stringify(payload) }),
@@ -150,9 +153,21 @@ export const api = {
       { method: "POST" },
     ),
 
+  updateAppearanceReview: (
+    characterId: number,
+    payload: Partial<{
+      multi_color_hair: string | null;
+      hair_color: string | null;
+      hair_shape: string | null;
+      eye_color: string | null;
+      feature_tags: string | null;
+      gender: string | null;
+    }>,
+  ) => request<AppearanceReviewItem>(`/review/appearance/${characterId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+
   listCatalogReviews: (params: {
     series_id: number;
-    filter_status?: "pending" | "completed" | "all";
+    filter_status?: "pending" | "completed" | "all" | "needs_check";
     search?: string;
     skip?: number;
     limit?: number;
@@ -181,6 +196,15 @@ export const api = {
     request<CollectJob>(`/review/catalog/${characterId}/regenerate${buildQuery({ prompt_level: promptLevel })}`, {
       method: "POST",
     }),
+
+  dismissCatalogNeedsCheck: (characterId: number) =>
+    request<{ id: number; character_status: string; needs_check_reason: string | null }>(
+      `/review/catalog/${characterId}/dismiss-needs-check`,
+      { method: "POST" },
+    ),
+
+  deleteCharacter: (characterId: number) =>
+    request<{ id: number; character_tag: string; deleted: boolean }>(`/characters/${characterId}`, { method: "DELETE" }),
 
   getDanbooruStatus: () => request<DanbooruStatus>("/characters/danbooru/status"),
 

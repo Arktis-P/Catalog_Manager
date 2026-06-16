@@ -155,6 +155,7 @@ class CatalogService:
             items.append(
                 {
                     "id": character.id,
+                    "series_id": character.series_id,
                     "series_tag": character.series.series_tag,
                     "series_display_name": character.series.display_name,
                     "character_tag": character.character_tag,

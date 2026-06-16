@@ -229,6 +229,18 @@ def list_characters_for_series(
     )
 
 
+@router.delete("/{character_id}")
+def delete_character(
+    character_id: int,
+    service: CharacterService = Depends(get_character_service),
+):
+    try:
+        tag = service.delete_character(character_id)
+        return {"id": character_id, "character_tag": tag, "deleted": True}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.patch("/{character_id}/series", response_model=CharacterResponse)
 def update_character_series(
     character_id: int,

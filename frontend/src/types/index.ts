@@ -60,6 +60,7 @@ export interface SeriesListResponse {
 
 export interface CatalogItem {
   id: number;
+  series_id: number;
   series_tag: string;
   series_display_name: string;
   character_tag: string;
@@ -228,6 +229,8 @@ export interface AppSettings {
   generation_prompt_prefix: string;
   generation_prompt_suffix: string;
   generation_negative_prompt: string;
+  review_thumbnail_size: number;
+  review_max_loaded_images: number;
 }
 
 export interface AppearanceReviewItem {

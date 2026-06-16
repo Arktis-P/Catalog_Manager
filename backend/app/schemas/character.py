@@ -77,6 +77,7 @@ class CatalogItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    series_id: int
     series_tag: str
     series_display_name: str
     character_tag: str

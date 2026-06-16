@@ -11,6 +11,7 @@ from app.schemas.review import (
     AppearanceReviewUpdateRequest,
     CatalogReviewCompleteRequest,
     CatalogReviewCompleteResponse,
+    CatalogReviewDismissNeedsCheckResponse,
     CatalogReviewImageResponse,
     CatalogReviewItemResponse,
     CatalogReviewListResponse,
@@ -158,7 +159,7 @@ def confirm_appearance_review(
 @router.get("/catalog", response_model=CatalogReviewListResponse)
 def list_catalog_reviews(
     series_id: int = Query(..., ge=1),
-    filter_status: str = Query(default="pending", pattern="^(pending|completed|all)$"),
+    filter_status: str = Query(default="pending", pattern="^(pending|completed|all|needs_check)$"),
     search: str | None = None,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=30, ge=1, le=100),
@@ -222,6 +223,22 @@ def undo_catalog_review(
             id=character.id,
             review_status=review.review_status if review else "pending",
             cover_image_id=review.cover_image_id if review else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/catalog/{character_id}/dismiss-needs-check", response_model=CatalogReviewDismissNeedsCheckResponse)
+def dismiss_catalog_needs_check(
+    character_id: int,
+    service: ReviewService = Depends(get_review_service),
+):
+    try:
+        character = service.dismiss_needs_check(character_id)
+        return CatalogReviewDismissNeedsCheckResponse(
+            id=character.id,
+            character_status=character.status,
+            needs_check_reason=character.needs_check_reason,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -1511,6 +1511,47 @@ button,
   color: var(--text-muted);
 }
 
+.catalog-review-images--quad {
+  display: grid;
+  grid-template-columns: repeat(2, 200px);
+  gap: 12px;
+}
+
+.catalog-review-row--quad {
+  grid-template-columns: 412px minmax(280px, 1fr);
+  min-height: 456px;
+}
+
+.review-needs-check-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.review-needs-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.appearance-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 10px 14px;
+}
+
+.appearance-edit-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.appearance-edit-grid input {
+  width: 100%;
+}
+
 .review-needs-check-banner {
   padding: 8px 10px;
   border-radius: 8px;

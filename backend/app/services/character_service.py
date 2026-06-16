@@ -470,6 +470,15 @@ class CharacterService:
         self.db.refresh(character)
         return character
 
+    def delete_character(self, character_id: int) -> str:
+        character = self.get_character(character_id)
+        if not character:
+            raise ValueError("Character not found")
+        tag = character.character_tag
+        self.db.delete(character)
+        self.db.commit()
+        return tag
+
     def collect_batch(
         self,
         *,

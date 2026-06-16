@@ -1,4 +1,6 @@
+import { Link } from "react-router-dom";
 import type { CatalogItem } from "../types";
+import { catalogCoverImageUrl } from "../utils/reviewImages";
 
 interface CatalogCardProps {
   item: CatalogItem;
@@ -23,6 +25,7 @@ export function CatalogCard({ item, onChangeSeries }: CatalogCardProps) {
     .filter(Boolean)
     .join(" / ");
   const promptToCopy = item.generation_prompt || item.final_prompt;
+  const coverUrl = catalogCoverImageUrl(item.cover_image);
 
   const copyPrompt = async () => {
     if (!promptToCopy) return;
@@ -32,8 +35,8 @@ export function CatalogCard({ item, onChangeSeries }: CatalogCardProps) {
   return (
     <article className="catalog-card">
       <div className="catalog-card-image">
-        {item.cover_image ? (
-          <img src={item.cover_image} alt={item.display_name} />
+        {coverUrl ? (
+          <img src={coverUrl} alt={item.display_name} loading="lazy" decoding="async" />
         ) : (
           <span>No cover image</span>
         )}
@@ -69,9 +72,12 @@ export function CatalogCard({ item, onChangeSeries }: CatalogCardProps) {
               Danbooru
             </a>
           ) : null}
-          <button className="btn btn-small" type="button" disabled title="Review Tool (Phase 3)">
+          <Link
+            className="btn btn-small"
+            to={`/review?mode=catalog&series_id=${item.series_id}&character_id=${item.id}`}
+          >
             Review
-          </button>
+          </Link>
           <button className="btn btn-small" type="button" disabled title="Generation Connector (Phase 2)">
             Regenerate
           </button>

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { api } from "../../api/client";
-import type { AppearanceReviewItem } from "../../types";
+import { SeriesSearchSelect } from "../SeriesSearchSelect";
+import type { AppearanceReviewItem, Series } from "../../types";
 
 function formatDraftTags(item: AppearanceReviewItem): string {
   return [
@@ -15,19 +16,45 @@ function formatDraftTags(item: AppearanceReviewItem): string {
     .join(" · ");
 }
 
+interface DraftFields {
+  multi_color_hair: string;
+  hair_color: string;
+  hair_shape: string;
+  eye_color: string;
+  feature_tags: string;
+  gender: string;
+}
+
+function toDraft(item: AppearanceReviewItem): DraftFields {
+  return {
+    multi_color_hair: item.multi_color_hair ?? "",
+    hair_color: item.hair_color ?? "",
+    hair_shape: item.hair_shape ?? "",
+    eye_color: item.eye_color ?? "",
+    feature_tags: item.feature_tags ?? "",
+    gender: item.gender ?? "",
+  };
+}
+
 export function AppearanceReviewPanel() {
   const [items, setItems] = useState<AppearanceReviewItem[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
+  const [selectedSeriesId, setSelectedSeriesId] = useState<number | "">("");
+  const [selectedSeries, setSelectedSeries] = useState<Series | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [drafts, setDrafts] = useState<Record<number, DraftFields>>({});
+  const [savingId, setSavingId] = useState<number | null>(null);
 
   const loadReviews = async () => {
     setLoading(true);
     setError(null);
     try {
       const response = await api.listAppearanceReviews({
+        series_tag: selectedSeries?.series_tag,
         search: search || undefined,
         limit: 100,
       });
@@ -42,7 +69,7 @@ export function AppearanceReviewPanel() {
 
   useEffect(() => {
     void loadReviews();
-  }, [search]);
+  }, [search, selectedSeries?.series_tag]);
 
   const handleConfirm = async (item: AppearanceReviewItem) => {
     setConfirmingId(item.id);
@@ -57,6 +84,28 @@ export function AppearanceReviewPanel() {
     }
   };
 
+  const handleSaveDraft = async (item: AppearanceReviewItem) => {
+    const draft = drafts[item.id] ?? toDraft(item);
+    setSavingId(item.id);
+    setError(null);
+    try {
+      const updated = await api.updateAppearanceReview(item.id, {
+        multi_color_hair: draft.multi_color_hair || null,
+        hair_color: draft.hair_color || null,
+        hair_shape: draft.hair_shape || null,
+        eye_color: draft.eye_color || null,
+        feature_tags: draft.feature_tags || null,
+        gender: draft.gender || null,
+      });
+      setItems((current) => current.map((entry) => (entry.id === item.id ? updated : entry)));
+      setEditingId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save appearance tags");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   const copyPrompt = async (prompt: string | null) => {
     if (!prompt) return;
     await navigator.clipboard.writeText(prompt);
@@ -65,6 +114,16 @@ export function AppearanceReviewPanel() {
   return (
     <>
       <div className="toolbar">
+        <div className="field review-series-field">
+          <label>Series</label>
+          <SeriesSearchSelect
+            value={selectedSeriesId}
+            onChange={(seriesId, series) => {
+              setSelectedSeriesId(seriesId);
+              setSelectedSeries(series ?? null);
+            }}
+          />
+        </div>
         <div className="field">
           <label htmlFor="review-search">Search</label>
           <input
@@ -105,52 +164,158 @@ export function AppearanceReviewPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item) => (
-                    <tr key={item.id}>
-                      <td className="cell-ellipsis" title={item.character_tag}>
-                        {item.character_tag}
-                      </td>
-                      <td className="cell-ellipsis" title={item.series_tag}>
-                        {item.series_tag}
-                      </td>
-                      <td className="cell-ellipsis" title={formatDraftTags(item)}>
-                        {formatDraftTags(item) || "-"}
-                      </td>
-                      <td className="cell-ellipsis" title={item.generation_prompt || undefined}>
-                        {item.generation_prompt || "-"}
-                      </td>
-                      <td>
-                        <div className="table-actions">
-                          <button
-                            className="btn btn-small"
-                            type="button"
-                            disabled={!item.generation_prompt}
-                            onClick={() => void copyPrompt(item.generation_prompt)}
-                          >
-                            Copy Prompt
-                          </button>
-                          <button
-                            className="btn btn-small btn-primary"
-                            type="button"
-                            disabled={confirmingId === item.id}
-                            onClick={() => void handleConfirm(item)}
-                          >
-                            {confirmingId === item.id ? "Confirming..." : "Confirm"}
-                          </button>
-                          {item.danbooru_url ? (
-                            <a
-                              className="btn btn-small"
-                              href={item.danbooru_url}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              Danbooru
-                            </a>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {items.map((item) => {
+                    const editing = editingId === item.id;
+                    const draft = drafts[item.id] ?? toDraft(item);
+                    return (
+                      <Fragment key={item.id}>
+                        <tr>
+                          <td className="cell-ellipsis" title={item.character_tag}>
+                            {item.character_tag}
+                          </td>
+                          <td className="cell-ellipsis" title={item.series_tag}>
+                            {item.series_tag}
+                          </td>
+                          <td className="cell-ellipsis" title={formatDraftTags(item)}>
+                            {formatDraftTags(item) || "-"}
+                          </td>
+                          <td className="cell-ellipsis" title={item.generation_prompt || undefined}>
+                            {item.generation_prompt || "-"}
+                          </td>
+                          <td>
+                            <div className="table-actions">
+                              <button
+                                className="btn btn-small"
+                                type="button"
+                                onClick={() => {
+                                  setEditingId(editing ? null : item.id);
+                                  setDrafts((current) => ({ ...current, [item.id]: toDraft(item) }));
+                                }}
+                              >
+                                {editing ? "Close" : "Edit"}
+                              </button>
+                              <button
+                                className="btn btn-small"
+                                type="button"
+                                disabled={!item.generation_prompt}
+                                onClick={() => void copyPrompt(item.generation_prompt)}
+                              >
+                                Copy Prompt
+                              </button>
+                              <button
+                                className="btn btn-small btn-primary"
+                                type="button"
+                                disabled={confirmingId === item.id}
+                                onClick={() => void handleConfirm(item)}
+                              >
+                                {confirmingId === item.id ? "Confirming..." : "Confirm"}
+                              </button>
+                              {item.danbooru_url ? (
+                                <a
+                                  className="btn btn-small"
+                                  href={item.danbooru_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  Danbooru
+                                </a>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                        {editing ? (
+                          <tr key={`${item.id}-edit`}>
+                            <td colSpan={5}>
+                              <div className="appearance-edit-grid">
+                                <label>
+                                  hair_color
+                                  <input
+                                    value={draft.hair_color}
+                                    onChange={(event) =>
+                                      setDrafts((current) => ({
+                                        ...current,
+                                        [item.id]: { ...draft, hair_color: event.target.value },
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  multi_color_hair
+                                  <input
+                                    value={draft.multi_color_hair}
+                                    onChange={(event) =>
+                                      setDrafts((current) => ({
+                                        ...current,
+                                        [item.id]: { ...draft, multi_color_hair: event.target.value },
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  hair_shape
+                                  <input
+                                    value={draft.hair_shape}
+                                    onChange={(event) =>
+                                      setDrafts((current) => ({
+                                        ...current,
+                                        [item.id]: { ...draft, hair_shape: event.target.value },
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  eye_color
+                                  <input
+                                    value={draft.eye_color}
+                                    onChange={(event) =>
+                                      setDrafts((current) => ({
+                                        ...current,
+                                        [item.id]: { ...draft, eye_color: event.target.value },
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  feature_tags
+                                  <input
+                                    value={draft.feature_tags}
+                                    onChange={(event) =>
+                                      setDrafts((current) => ({
+                                        ...current,
+                                        [item.id]: { ...draft, feature_tags: event.target.value },
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  gender
+                                  <input
+                                    value={draft.gender}
+                                    onChange={(event) =>
+                                      setDrafts((current) => ({
+                                        ...current,
+                                        [item.id]: { ...draft, gender: event.target.value },
+                                      }))
+                                    }
+                                  />
+                                </label>
+                              </div>
+                              <div className="table-actions" style={{ marginTop: 10 }}>
+                                <button
+                                  className="btn btn-small btn-primary"
+                                  type="button"
+                                  disabled={savingId === item.id}
+                                  onClick={() => void handleSaveDraft(item)}
+                                >
+                                  {savingId === item.id ? "Saving..." : "Save tags"}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

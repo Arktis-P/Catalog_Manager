@@ -43,5 +43,9 @@ def update_settings(
             suffix=payload.generation_prompt_suffix,
             negative_prompt=payload.generation_negative_prompt,
         )
+    if payload.review_thumbnail_size is not None:
+        service.set_review_thumbnail_size(payload.review_thumbnail_size)
+    if payload.review_max_loaded_images is not None:
+        service.set_review_max_loaded_images(payload.review_max_loaded_images)
     data = service.get_public_settings()
     return SettingsResponse(**data)

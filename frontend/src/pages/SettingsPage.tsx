@@ -11,6 +11,8 @@ export function SettingsPage() {
   const [promptPrefix, setPromptPrefix] = useState("");
   const [promptSuffix, setPromptSuffix] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
+  const [reviewThumbnailSize, setReviewThumbnailSize] = useState(384);
+  const [reviewMaxLoadedImages, setReviewMaxLoadedImages] = useState(30);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +32,8 @@ export function SettingsPage() {
         setPromptPrefix(response.generation_prompt_prefix);
         setPromptSuffix(response.generation_prompt_suffix);
         setNegativePrompt(response.generation_negative_prompt);
+        setReviewThumbnailSize(response.review_thumbnail_size);
+        setReviewMaxLoadedImages(response.review_max_loaded_images);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load settings");
       } finally {
@@ -52,6 +56,8 @@ export function SettingsPage() {
         generation_prompt_prefix: promptPrefix,
         generation_prompt_suffix: promptSuffix,
         generation_negative_prompt: negativePrompt,
+        review_thumbnail_size: reviewThumbnailSize,
+        review_max_loaded_images: reviewMaxLoadedImages,
       });
       setSettings(response);
       setMaxConcurrent(response.danbooru_collect_max_concurrent);
@@ -61,6 +67,8 @@ export function SettingsPage() {
       setPromptPrefix(response.generation_prompt_prefix);
       setPromptSuffix(response.generation_prompt_suffix);
       setNegativePrompt(response.generation_negative_prompt);
+      setReviewThumbnailSize(response.review_thumbnail_size);
+      setReviewMaxLoadedImages(response.review_max_loaded_images);
       setSavedMessage("설정을 저장했습니다.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
@@ -144,6 +152,44 @@ export function SettingsPage() {
               <p className="field-help">
                 기본 2장 권장. 손가락·디테일 문제로 부적절한 이미지가 있을 때 리뷰에서 대체할 수
                 있습니다.
+              </p>
+            </div>
+
+            <div className="field full-width">
+              <label htmlFor="review-thumbnail-size">Review 썸네일 크기 (px)</label>
+              <div className="settings-range-row">
+                <input
+                  id="review-thumbnail-size"
+                  type="range"
+                  min={128}
+                  max={512}
+                  step={32}
+                  value={reviewThumbnailSize}
+                  onChange={(event) => setReviewThumbnailSize(Number(event.target.value))}
+                />
+                <strong>{reviewThumbnailSize}</strong>
+              </div>
+              <p className="field-help">
+                Catalog Review 슬롯에 로드하는 썸네일 해상도입니다. 낮을수록 메모리 사용이 줄어듭니다.
+              </p>
+            </div>
+
+            <div className="field full-width">
+              <label htmlFor="review-max-loaded-images">Review 동시 로드 이미지 상한</label>
+              <div className="settings-range-row">
+                <input
+                  id="review-max-loaded-images"
+                  type="range"
+                  min={10}
+                  max={80}
+                  step={5}
+                  value={reviewMaxLoadedImages}
+                  onChange={(event) => setReviewMaxLoadedImages(Number(event.target.value))}
+                />
+                <strong>{reviewMaxLoadedImages}</strong>
+              </div>
+              <p className="field-help">
+                가상 스크롤 뷰포트 주변에서 유지할 이미지 수 상한입니다.
               </p>
             </div>
 

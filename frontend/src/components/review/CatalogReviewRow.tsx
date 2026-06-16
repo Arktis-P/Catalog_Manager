@@ -24,9 +24,14 @@ interface CatalogReviewRowProps {
   rowIndex: number;
   focused: boolean;
   draft: CharacterDraft;
+  thumbSize: number;
+  quadLayout: boolean;
   onDraftChange: (draft: CharacterDraft) => void;
   onToggleTag: (tagKey: string) => void;
   onRate: (value: number) => void;
+  onDismissNeedsCheck?: () => void;
+  onDeleteCharacter?: () => void;
+  onMoveSeries?: () => void;
 }
 
 function autoStatusClass(status: string | null): string {
@@ -36,60 +41,102 @@ function autoStatusClass(status: string | null): string {
   return "badge";
 }
 
+function renderImageSlot(
+  image: CatalogReviewItem["images"][number] | null,
+  index: number,
+  item: CatalogReviewItem,
+  focused: boolean,
+  draft: CharacterDraft,
+  thumbSize: number,
+  onDraftChange: (draft: CharacterDraft) => void,
+) {
+  if (!image) {
+    return (
+      <div key={`empty-${index}`} className="catalog-review-image-cell">
+        <div className="review-image-slot review-image-slot--empty">
+          <span className="review-image-placeholder">No image</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div key={image.id} className="catalog-review-image-cell">
+      <LazyReviewImage
+        imagePath={image.image_path}
+        alt={`${item.character_tag} ${index + 1}`}
+        active={focused}
+        selected={focused && draft.imageIndex === index}
+        previewAnchor={focused && draft.imageIndex === index}
+        thumbSize={thumbSize}
+        onClick={() => onDraftChange({ ...draft, imageIndex: index })}
+      />
+      <div className="catalog-review-image-meta">
+        <span className={autoStatusClass(image.auto_status)}>{image.auto_status || "unknown"}</span>
+        {image.cover_score !== null ? <span className="badge">{image.cover_score.toFixed(2)}</span> : null}
+        {image.is_rejected ? <span className="badge badge-warning">rejected</span> : null}
+      </div>
+    </div>
+  );
+}
+
 export function CatalogReviewRow({
   item,
   rowIndex,
   focused,
   draft,
+  thumbSize,
+  quadLayout,
   onDraftChange,
   onToggleTag,
   onRate,
+  onDismissNeedsCheck,
+  onDeleteCharacter,
+  onMoveSeries,
 }: CatalogReviewRowProps) {
   const chips = appearanceTagChips(item);
   const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
   const promptText = resolveFinalPrompt(item, draft) ?? "";
   const displayGender = draft.gender ?? item.gender;
   const imageSlots = item.images.slice(0, 4);
-  const paddedSlots =
-    imageSlots.length >= 2 ? imageSlots : [...imageSlots, ...Array(Math.max(0, 2 - imageSlots.length)).fill(null)];
+  const slotCount = quadLayout ? 4 : 2;
+  const paddedSlots = [...imageSlots, ...Array(Math.max(0, slotCount - imageSlots.length)).fill(null)];
 
   return (
     <article
-      className={`catalog-review-row${focused ? " catalog-review-row--focused" : ""}`}
+      className={`catalog-review-row${focused ? " catalog-review-row--focused" : ""}${quadLayout ? " catalog-review-row--quad" : ""}`}
       data-row-index={rowIndex}
       data-character-id={item.id}
     >
-      <div className="catalog-review-images">
-        {paddedSlots.slice(0, 2).map((image, index) =>
-          image ? (
-            <div key={image.id} className="catalog-review-image-cell">
-              <LazyReviewImage
-                imagePath={image.image_path}
-                alt={`${item.character_tag} ${index + 1}`}
-                active={focused}
-                selected={focused && draft.imageIndex === index}
-                previewAnchor={focused && draft.imageIndex === index}
-                onClick={() => onDraftChange({ ...draft, imageIndex: index })}
-              />
-              <div className="catalog-review-image-meta">
-                <span className={autoStatusClass(image.auto_status)}>{image.auto_status || "unknown"}</span>
-                {image.cover_score !== null ? <span className="badge">{image.cover_score.toFixed(2)}</span> : null}
-              </div>
-            </div>
-          ) : (
-            <div key={`empty-${index}`} className="catalog-review-image-cell">
-              <div className="review-image-slot review-image-slot--empty">
-                <span className="review-image-placeholder">No image</span>
-              </div>
-            </div>
-          ),
+      <div className={`catalog-review-images${quadLayout ? " catalog-review-images--quad" : ""}`}>
+        {paddedSlots.slice(0, slotCount).map((image, index) =>
+          renderImageSlot(image, index, item, focused, draft, thumbSize, onDraftChange),
         )}
       </div>
 
       <aside className="catalog-review-info">
         {item.character_status === "needs_check" && item.needs_check_reason ? (
-          <div className="review-needs-check-banner" title={item.needs_check_reason}>
-            needs_check: {item.needs_check_reason}
+          <div className="review-needs-check-block">
+            <div className="review-needs-check-banner" title={item.needs_check_reason}>
+              needs_check: {item.needs_check_reason}
+            </div>
+            <div className="review-needs-check-actions">
+              {onDismissNeedsCheck ? (
+                <button className="btn btn-small btn-primary" type="button" onClick={onDismissNeedsCheck}>
+                  소속 확정
+                </button>
+              ) : null}
+              {onMoveSeries ? (
+                <button className="btn btn-small" type="button" onClick={onMoveSeries}>
+                  시리즈 이동
+                </button>
+              ) : null}
+              {onDeleteCharacter ? (
+                <button className="btn btn-small" type="button" onClick={onDeleteCharacter}>
+                  삭제
+                </button>
+              ) : null}
+            </div>
           </div>
         ) : null}
 
@@ -121,6 +168,7 @@ export function CatalogReviewRow({
         <div className="catalog-review-meta">
           <span className="badge">{item.post_count.toLocaleString()} posts</span>
           {item.review_status ? <span className="badge">{item.review_status}</span> : null}
+          {item.type ? <span className="badge">{item.type}</span> : null}
         </div>
 
         <ReviewRatingStars rating={draft.rating} onRate={onRate} />
