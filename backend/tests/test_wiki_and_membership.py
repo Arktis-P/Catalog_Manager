@@ -55,3 +55,4 @@ def test_membership_match():
         expected_series_tag="touhou",
     )
     assert not result.is_mismatch
+    assert result.is_verified

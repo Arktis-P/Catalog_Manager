@@ -14,7 +14,7 @@ from app.integrations.danbooru.appearance_extractor import (
 from app.integrations.danbooru.series_membership import (
     MEMBERSHIP_MISMATCH_PREFIX,
     evaluate_series_membership,
-    extract_copyright_related_tags,
+    fetch_copyright_related_tags,
 )
 from app.models.character import Character
 from app.models.series import Series
@@ -50,14 +50,22 @@ class AppearanceService:
         extra.update(row[0] for row in child_series)
         return extra
 
-    def _apply_membership_result(self, character: Character, reason: str | None, *, is_mismatch: bool) -> bool:
-        if is_mismatch and reason:
+    def _apply_membership_result(
+        self,
+        character: Character,
+        membership,
+    ) -> bool:
+        if membership.is_mismatch and membership.reason:
             character.status = "needs_check"
-            character.needs_check_reason = reason
+            character.needs_check_reason = membership.reason
             return True
 
         if character.needs_check_reason and character.needs_check_reason.startswith(MEMBERSHIP_MISMATCH_PREFIX):
             character.needs_check_reason = None
+
+        if membership.is_verified and character.status == "needs_check":
+            character.status = "confirmed"
+
         return False
 
     def extract_for_series(
@@ -105,15 +113,11 @@ class AppearanceService:
             character.generation_prompt = build_generation_prompt(character)
 
             membership = evaluate_series_membership(
-                extract_copyright_related_tags(payload),
+                fetch_copyright_related_tags(self.extractor.client, character.character_tag),
                 expected_series_tag=series.series_tag,
                 extra_series_tags=self._extra_series_tags(series, character),
             )
-            if self._apply_membership_result(
-                character,
-                membership.reason,
-                is_mismatch=membership.is_mismatch,
-            ):
+            if self._apply_membership_result(character, membership):
                 membership_flagged += 1
 
             updated += 1

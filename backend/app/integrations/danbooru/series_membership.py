@@ -16,6 +16,7 @@ class SeriesMembershipResult:
     top_copyright_frequency: float
     expected_frequency: float
     is_mismatch: bool
+    is_verified: bool = False
     reason: str | None = None
 
 
@@ -45,6 +46,7 @@ def evaluate_series_membership(
             top_copyright_frequency=0.0,
             expected_frequency=0.0,
             is_mismatch=False,
+            is_verified=False,
         )
 
     sorted_copyrights = sorted(copyrights, key=lambda item: item.frequency, reverse=True)
@@ -62,6 +64,7 @@ def evaluate_series_membership(
             top_copyright_frequency=top.frequency,
             expected_frequency=expected_frequency or top.frequency,
             is_mismatch=False,
+            is_verified=True,
         )
 
     if expected_frequency <= 0:
@@ -123,6 +126,12 @@ def extract_copyright_related_tags(payload: object) -> list[RelatedTag]:
     return parse_related_tags({"related_tags": copyright_items})
 
 
+def fetch_copyright_related_tags(client: DanbooruClient, character_tag: str) -> list[RelatedTag]:
+    """Copyright related tags must be fetched with category=3 (category=0 omits them)."""
+    payload = client.get_related_tags(character_tag, category=3)
+    return parse_related_tags(payload)
+
+
 class SeriesMembershipValidator:
     def __init__(self, client: DanbooruClient | None = None):
         self.client = client or DanbooruClient()
@@ -134,8 +143,8 @@ class SeriesMembershipValidator:
         expected_series_tag: str,
         extra_series_tags: set[str] | None = None,
     ) -> SeriesMembershipResult:
-        payload = self.client.get_related_tags(character_tag, category=0)
-        copyrights = extract_copyright_related_tags(payload)
+        payload = self.client.get_related_tags(character_tag, category=3)
+        copyrights = parse_related_tags(payload)
         return evaluate_series_membership(
             copyrights,
             expected_series_tag=expected_series_tag,
