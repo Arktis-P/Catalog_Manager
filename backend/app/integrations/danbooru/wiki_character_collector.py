@@ -6,9 +6,11 @@ from dataclasses import dataclass, field
 
 from app.integrations.danbooru.client import DanbooruClient
 from app.integrations.danbooru.wiki_dtext import (
+    WIKI_LINK_RE,
     extract_wiki_links,
     is_list_of_characters_page,
     normalize_wiki_title,
+    resolve_wiki_tag_candidates,
 )
 
 CollectProgressCallback = Callable[[dict[str, object]], None]
@@ -135,28 +137,47 @@ class WikiCharacterCollector:
             source_wiki_title=wiki_title,
         )
 
-    def _classify_links(
+    def _resolve_character_tag(self, raw_link: str) -> str | None:
+        for candidate in resolve_wiki_tag_candidates(raw_link):
+            if self._get_tag_category(candidate) == DanbooruClient.CATEGORY_CHARACTER:
+                return candidate
+        return None
+
+    def _extract_raw_wiki_links(self, body: str) -> list[str]:
+        raw_links: list[str] = []
+        for match in WIKI_LINK_RE.finditer(body):
+            raw = match.group(1).strip()
+            if raw and not raw.startswith("!") and not raw.startswith("#"):
+                raw_links.append(raw)
+        return raw_links
+
+    def _classify_raw_wiki_links(
         self,
         result: WikiDiscoveryResult,
-        links: list[str],
+        raw_links: list[str],
         *,
         series_tag: str,
         wiki_title: str,
         from_list_page: bool,
     ) -> None:
         normalized_series = normalize_wiki_title(series_tag)
-        for link in links:
-            category = self._get_tag_category(link)
-            if category == DanbooruClient.CATEGORY_CHARACTER:
+        for raw in raw_links:
+            character_tag = self._resolve_character_tag(raw)
+            if character_tag:
                 self._add_character(
                     result,
-                    link,
+                    character_tag,
                     from_list_page=from_list_page,
                     wiki_title=wiki_title,
                 )
-            elif category == DanbooruClient.CATEGORY_COPYRIGHT and link != normalized_series:
-                if link not in result.sub_series_tags:
-                    result.sub_series_tags.append(link)
+                continue
+
+            for candidate in resolve_wiki_tag_candidates(raw):
+                category = self._get_tag_category(candidate)
+                if category == DanbooruClient.CATEGORY_COPYRIGHT and candidate != normalized_series:
+                    if candidate not in result.sub_series_tags:
+                        result.sub_series_tags.append(candidate)
+                    break
 
     def _parse_wiki_page(
         self,
@@ -177,10 +198,9 @@ class WikiCharacterCollector:
         if not body:
             return
 
-        links = extract_wiki_links(body)
-        self._classify_links(
+        self._classify_raw_wiki_links(
             result,
-            links,
+            self._extract_raw_wiki_links(body),
             series_tag=series_tag,
             wiki_title=normalized_title,
             from_list_page=from_list_page,
