@@ -21,6 +21,10 @@ LIST_PAGE_TITLE_PATTERNS = (
     "list_of_{series_tag}s_characters",
 )
 
+MAX_WIKI_SEARCH_RESULTS = 10
+MAX_WIKI_PARSE_PAGES = 20
+MAX_LINKS_PER_WIKI_PAGE = 500
+
 
 @dataclass
 class WikiCharacterCandidate:
@@ -102,7 +106,9 @@ class WikiCharacterCollector:
             self._emit(
                 progress_callback,
                 phase="discovering_wiki",
-                message=f"list 페이지 검색 {index}/{total_checks} · {normalized_title}",
+                message=(
+                    f"list 페이지 검색 {index}/{total_checks} · {series_tag} · {normalized_title}"
+                ),
                 current=index,
                 total=total_checks,
                 discovered=0,
@@ -110,15 +116,18 @@ class WikiCharacterCollector:
             if self._fetch_wiki_body(normalized_title):
                 found.append(normalized_title)
 
-        search_patterns = (
-            f"list_of*{normalized_series}*characters*",
-            f"list_of*{compact}*characters*" if compact else None,
-        )
+        search_patterns: list[str] = []
+        if compact:
+            search_patterns.append(f"list_of*{compact}*characters*")
+        elif "/" not in normalized_series:
+            search_patterns.append(f"list_of*{normalized_series}*characters*")
+
         search_titles: list[str] = []
         for pattern in search_patterns:
-            if not pattern:
-                continue
-            for page in self.client.search_wiki_pages(title_matches=pattern, limit=20):
+            for page in self.client.search_wiki_pages(
+                title_matches=pattern,
+                limit=MAX_WIKI_SEARCH_RESULTS,
+            ):
                 title = str(page.get("title") or "").strip()
                 if not title or not is_list_of_characters_page(title):
                     continue
@@ -133,7 +142,9 @@ class WikiCharacterCollector:
             self._emit(
                 progress_callback,
                 phase="discovering_wiki",
-                message=f"list 검색 결과 확인 {index}/{search_total} · {normalized_title}",
+                message=(
+                    f"list 검색 결과 확인 {index}/{search_total} · {series_tag} · {normalized_title}"
+                ),
                 current=index,
                 total=max(search_total, 1),
                 discovered=0,
@@ -192,7 +203,7 @@ class WikiCharacterCollector:
         from_list_page: bool,
     ) -> None:
         normalized_series = normalize_wiki_title(series_tag)
-        for raw in raw_links:
+        for raw in raw_links[:MAX_LINKS_PER_WIKI_PAGE]:
             character_tag = self._resolve_character_tag(raw)
             if character_tag:
                 self._add_character(
@@ -253,13 +264,15 @@ class WikiCharacterCollector:
         normalized_series = normalize_wiki_title(series_tag)
 
         list_titles = self._discover_list_page_titles(series_tag, progress_callback=progress_callback)
-        work_queue: list[tuple[str, bool]] = [(title, True) for title in list_titles]
+        work_queue: list[tuple[str, bool]] = [(title, True) for title in list_titles[:MAX_WIKI_PARSE_PAGES]]
         if not any(title == normalized_series for title, _ in work_queue):
             work_queue.append((normalized_series, False))
 
         processed = 0
         queue_index = 0
         while queue_index < len(work_queue):
+            if queue_index >= MAX_WIKI_PARSE_PAGES:
+                break
             wiki_title, from_list_page = work_queue[queue_index]
             queue_index += 1
             processed += 1
@@ -268,7 +281,7 @@ class WikiCharacterCollector:
             self._emit(
                 progress_callback,
                 phase="discovering_wiki",
-                message=f"위키 파싱 {processed}/{total_pages} · {wiki_title}",
+                message=f"위키 파싱 {processed}/{total_pages} · {series_tag} · {wiki_title}",
                 current=processed,
                 total=total_pages,
                 discovered=len(result.characters),
@@ -284,6 +297,8 @@ class WikiCharacterCollector:
 
             if wiki_title == normalized_series and body:
                 for link in extract_wiki_links(body):
+                    if len(work_queue) >= MAX_WIKI_PARSE_PAGES:
+                        break
                     if not is_list_of_characters_page(link):
                         continue
                     linked_title = normalize_wiki_title(link)

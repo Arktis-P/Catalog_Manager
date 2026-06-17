@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { SeriesCharactersModal } from "../components/SeriesCharactersModal";
 import { isSeriesMergeEligible, SeriesMergeModal } from "../components/SeriesMergeModal";
@@ -30,6 +30,7 @@ export function SeriesPage() {
   } = useCollectJobs();
   const [items, setItems] = useState<Series[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [loading, setLoading] = useState(true);
@@ -76,6 +77,7 @@ export function SeriesPage() {
   }, [items, expandedParentIds]);
 
   const filteredCount = useMemo(() => visibleItems.length, [visibleItems]);
+  const autoExpandedRef = useRef("");
 
   const loadSeries = async () => {
     setLoading(true);
@@ -102,11 +104,21 @@ export function SeriesPage() {
   };
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(searchInput), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
     void loadSeries();
   }, [search, statusFilter]);
 
   useEffect(() => {
     if (!search.trim()) {
+      autoExpandedRef.current = "";
+      return;
+    }
+    const fingerprint = `${search}::${items.map((series) => series.id).join(",")}`;
+    if (autoExpandedRef.current === fingerprint) {
       return;
     }
     const parentsToExpand = new Set<number>();
@@ -116,6 +128,7 @@ export function SeriesPage() {
       }
     }
     if (parentsToExpand.size === 0) {
+      autoExpandedRef.current = fingerprint;
       return;
     }
     setExpandedParentIds((current) => {
@@ -129,6 +142,7 @@ export function SeriesPage() {
       }
       return changed ? next : current;
     });
+    autoExpandedRef.current = fingerprint;
   }, [search, items]);
 
   useEffect(() => {
@@ -389,8 +403,8 @@ export function SeriesPage() {
             <label htmlFor="series-search">Search</label>
             <input
               id="series-search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
               placeholder="series tag / display name"
             />
           </div>

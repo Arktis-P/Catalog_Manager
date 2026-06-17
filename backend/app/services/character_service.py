@@ -17,6 +17,8 @@ from app.models.series import Series
 
 CollectProgressCallback = Callable[[dict[str, object]], None]
 
+MAX_HUB_SUB_SERIES = 40
+
 CHARACTER_CSV_COLUMNS = [
     "series_tag",
     "series_display_name",
@@ -156,7 +158,18 @@ class CharacterService:
         *,
         max_characters: int | None = None,
         progress_callback: CollectProgressCallback | None = None,
+        _collect_stack: set[int] | None = None,
     ) -> CharacterCollectResult:
+        stack = set(_collect_stack or ())
+        if series.id in stack:
+            return CharacterCollectResult(
+                series_tag=series.series_tag,
+                discovered=0,
+                created=0,
+                skipped_existing=0,
+            )
+        stack.add(series.id)
+
         target_series = series
         series.status = "collecting"
         self.db.commit()
@@ -169,14 +182,21 @@ class CharacterService:
         total_skipped = 0
 
         if discovery.sub_series_tags and not discovery.characters:
-            for index, sub_tag in enumerate(discovery.sub_series_tags, start=1):
+            sub_series_tags = discovery.sub_series_tags[:MAX_HUB_SUB_SERIES]
+            if len(discovery.sub_series_tags) > len(sub_series_tags):
+                skipped_sub_series.extend(discovery.sub_series_tags[len(sub_series_tags) :])
+
+            for index, sub_tag in enumerate(sub_series_tags, start=1):
                 if progress_callback:
                     progress_callback(
                         {
                             "phase": "discovering_wiki_subseries",
-                            "message": f"하위 시리즈 처리 {index}/{len(discovery.sub_series_tags)} · {sub_tag}",
+                            "message": (
+                                f"하위 시리즈 처리 {index}/{len(sub_series_tags)} · "
+                                f"{target_series.series_tag} → {sub_tag}"
+                            ),
                             "current": index,
-                            "total": len(discovery.sub_series_tags),
+                            "total": len(sub_series_tags),
                             "discovered": total_discovered,
                         }
                     )
@@ -191,11 +211,18 @@ class CharacterService:
                     continue
                 if child_series.parent_series_id is not None:
                     continue
+                if child_series.id in stack:
+                    skipped_sub_series.append(sub_tag)
+                    continue
+                if child_series.status == "collecting" and child_series.id != series.id:
+                    skipped_sub_series.append(sub_tag)
+                    continue
 
                 child_result = self._collect_for_series_wiki(
                     child_series,
                     max_characters=max_characters,
                     progress_callback=progress_callback,
+                    _collect_stack=stack,
                 )
                 total_discovered += child_result.discovered
                 total_created += child_result.created

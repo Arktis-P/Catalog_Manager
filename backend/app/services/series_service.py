@@ -12,6 +12,14 @@ from app.models.series import Series
 from app.schemas.series import SeriesCreate, SeriesUpdate, SeriesResponse
 
 
+def _escape_like_pattern(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+
+
 class SeriesService:
     def __init__(self, db: Session):
         self.db = db
@@ -31,8 +39,13 @@ class SeriesService:
         if status:
             query = query.filter(Series.status == status)
         if search:
-            pattern = f"%{search}%"
-            query = query.filter(or_(Series.series_tag.ilike(pattern), Series.display_name.ilike(pattern)))
+            pattern = f"%{_escape_like_pattern(search.strip())}%"
+            query = query.filter(
+                or_(
+                    Series.series_tag.ilike(pattern, escape="\\"),
+                    Series.display_name.ilike(pattern, escape="\\"),
+                )
+            )
 
         sort_columns = {
             "post_count": Series.post_count,
