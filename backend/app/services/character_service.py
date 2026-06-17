@@ -89,6 +89,12 @@ class CharacterService:
     def _series_character_count(self, series_id: int) -> int:
         return self.db.query(Character.id).filter(Character.series_id == series_id).count()
 
+    @staticmethod
+    def _finalize_collect_status(series: Series) -> None:
+        """Mark series collected after a successful collect run (including all-skipped re-collects)."""
+        if series.status in {"pending", "collecting"}:
+            series.status = "collected"
+
     def _maybe_legacy_fallback(
         self,
         series: Series,
@@ -245,10 +251,7 @@ class CharacterService:
 
             target_series.last_collect_created = total_created
             target_series.last_collect_skipped = total_skipped
-            if total_created and target_series.status in {"pending", "collecting"}:
-                target_series.status = "collected"
-            elif target_series.status == "collecting" and not total_created:
-                target_series.status = "pending"
+            self._finalize_collect_status(target_series)
             self.db.commit()
             result = CharacterCollectResult(
                 series_tag=target_series.series_tag,
@@ -286,11 +289,7 @@ class CharacterService:
                 }
             )
 
-        if created:
-            target_series.status = "collected" if target_series.status in {"pending", "collecting"} else target_series.status
-        elif target_series.status == "collecting":
-            target_series.status = "pending"
-
+        self._finalize_collect_status(target_series)
         target_series.last_collect_created = created
         target_series.last_collect_skipped = skipped_existing
         self.db.commit()
@@ -424,10 +423,8 @@ class CharacterService:
             )
             created += 1
 
-        if created:
-            series.status = "collected" if series.status in {"pending", "collecting"} else series.status
-        elif series.status == "collecting":
-            series.status = "collecting"
+        if manage_status:
+            self._finalize_collect_status(series)
 
         series.last_collect_created = created
         series.last_collect_skipped = skipped_existing
