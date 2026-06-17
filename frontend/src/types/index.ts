@@ -304,7 +304,7 @@ export interface CatalogReviewListResponse {
 }
 
 export interface CatalogReviewCompletePayload {
-  cover_image_id: number;
+  cover_image_id?: number | null;
   gender?: string | null;
   rating?: number | null;
   final_prompt?: string | null;

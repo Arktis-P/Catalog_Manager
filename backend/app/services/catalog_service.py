@@ -13,6 +13,7 @@ from app.models.image import Image
 from app.models.review import Review
 from app.models.series import Series
 from app.schemas.character import CATALOG_EXPORT_COLUMNS
+from app.services.character_image_service import purge_character_images
 from app.services.prompt_service import build_generation_prompt, mask_appearance_for_catalog
 
 
@@ -26,7 +27,13 @@ def catalog_status_expression():
     return case(
         (Character.status == "excluded", "excluded"),
         (Character.status == "tag_needs_check", "tag_needs_check"),
-        (and_(Review.review_status == "completed", has_cover), "completed"),
+        (
+            and_(
+                Review.review_status == "completed",
+                or_(has_cover, Review.rating == 0),
+            ),
+            "completed",
+        ),
         (Review.review_status == "needs_regen", "needs_regen"),
         (Review.review_status == "pending", "needs_review"),
         (~has_cover, "missing_image"),
@@ -161,6 +168,11 @@ class CatalogService:
     @staticmethod
     def _build_catalog_item(character: Character, catalog_status: str, has_cover: bool, cover_image: Image | None) -> dict:
         review = character.review
+        rating = review.rating if review else None
+        if rating == 0:
+            cover_image = None
+            has_cover = False
+
         appearance = mask_appearance_for_catalog(character)
         return {
             "id": character.id,
@@ -240,6 +252,22 @@ class CatalogService:
         )
 
         page_character_ids = [character.id for character, _, _ in rows]
+        purged_any = False
+        for character, _, _ in rows:
+            review = character.review
+            if review and review.rating == 0 and character.images:
+                purge_character_images(self.db, character)
+                purged_any = True
+        if purged_any:
+            self.db.commit()
+            rows = (
+                query.order_by(Series.post_count.desc(), Character.post_count.desc(), Character.id.asc())
+                .offset(skip)
+                .limit(limit)
+                .all()
+            )
+            page_character_ids = [character.id for character, _, _ in rows]
+
         cover_image_by_character = self._cover_map(page_character_ids)
 
         items = [
@@ -258,7 +286,12 @@ class CatalogService:
         series_count = self.db.query(Series).count()
         character_count = self.db.query(Character).count()
         review_count = self.db.query(Review).filter(Review.review_status == "completed").count()
-        cover_count = self.db.query(Image).filter(Image.is_cover.is_(True)).count()
+        cover_count = (
+            self.db.query(Image)
+            .join(Review, Review.character_id == Image.character_id)
+            .filter(Image.is_cover.is_(True), or_(Review.rating.is_(None), Review.rating != 0))
+            .count()
+        )
         return {
             "series_count": series_count,
             "character_count": character_count,
@@ -380,6 +413,8 @@ class CatalogService:
                 review.gender = normalize_gender(gender) if gender else None
             if rating is not None:
                 review.rating = rating
+                if rating == 0:
+                    purge_character_images(self.db, character)
             if type_ is not None:
                 review.type = type_ or None
             if final_prompt is not None:

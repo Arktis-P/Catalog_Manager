@@ -45,9 +45,8 @@ export function appearanceTagChips(item: {
     chips.push({ key: `gender:${item.gender}`, label: item.gender, group: "gender" });
   }
 
-  const primaryHair = splitTags(item.hair_color)[0];
-  if (primaryHair) {
-    chips.push({ key: `hair:${primaryHair}`, label: tagToPromptText(primaryHair), group: "hair" });
+  for (const tag of splitTags(item.hair_color)) {
+    chips.push({ key: `hair:${tag}`, label: tagToPromptText(tag), group: "hair" });
   }
 
   for (const tag of splitTags(item.multi_color_hair)) {

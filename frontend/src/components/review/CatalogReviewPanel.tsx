@@ -339,8 +339,9 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
       return;
     }
 
+    const isRatingZero = focusedDraft.rating === 0;
     const image = focusedItem.images[focusedDraft.imageIndex];
-    if (!image) {
+    if (!isRatingZero && !image) {
       setActionMessage("선택할 이미지가 없습니다.");
       return;
     }
@@ -357,7 +358,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
     setError(null);
     try {
       await api.completeCatalogReview(focusedItem.id, {
-        cover_image_id: image.id,
+        cover_image_id: isRatingZero ? null : image!.id,
         gender: focusedDraft.gender,
         rating: focusedDraft.rating,
         final_prompt: finalPrompt,
@@ -374,7 +375,8 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
             ? {
                 ...entry,
                 review_status: "completed",
-                cover_image_id: image.id,
+                cover_image_id: isRatingZero ? null : image!.id,
+                images: isRatingZero ? [] : entry.images,
                 rating: focusedDraft.rating,
                 gender: focusedDraft.gender,
                 final_prompt: finalPrompt,

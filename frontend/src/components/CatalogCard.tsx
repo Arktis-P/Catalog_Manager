@@ -34,7 +34,6 @@ function formatAppearance(item: CatalogItem): string {
 export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: CatalogCardProps) {
   const appearance = formatAppearance(item);
   const ratingText = ratingLabel(item.rating);
-  const meta = [item.gender, item.type, ratingText].filter(Boolean).join(" / ");
   const promptToCopy = item.final_prompt || item.generation_prompt;
   const coverUrl = catalogCoverImageUrl(item.cover_image);
 
@@ -53,10 +52,11 @@ export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: Cata
         )}
       </div>
       <div className="catalog-card-body">
-        <div>
+        <div className="catalog-card-header">
           <h3 className="catalog-card-title">{item.character_tag}</h3>
           <div className="catalog-card-subtitle">{item.series_display_name || item.series_tag}</div>
         </div>
+
         <div className="tag-row">
           <span className={statusBadgeClass(item.catalog_status)}>{item.catalog_status}</span>
           {item.needs_regen ? <span className="badge badge-warning">needs_regen</span> : null}
@@ -64,13 +64,42 @@ export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: Cata
           <span className="badge badge-muted">{item.character_status}</span>
           <span className="badge">{item.post_count.toLocaleString()} posts</span>
         </div>
-        {meta ? <div className="catalog-card-subtitle">{meta}</div> : null}
-        {appearance ? <div className="catalog-card-subtitle">{appearance}</div> : null}
+
+        <dl className="catalog-card-details">
+          {item.gender ? (
+            <>
+              <dt>Gender</dt>
+              <dd>{item.gender}</dd>
+            </>
+          ) : null}
+          {item.type ? (
+            <>
+              <dt>Type</dt>
+              <dd>{item.type}</dd>
+            </>
+          ) : null}
+          {ratingText ? (
+            <>
+              <dt>Rating</dt>
+              <dd>{ratingText}</dd>
+            </>
+          ) : null}
+          {appearance ? (
+            <>
+              <dt>Appearance</dt>
+              <dd>{appearance}</dd>
+            </>
+          ) : null}
+        </dl>
+
         {promptToCopy ? (
-          <div className="catalog-card-subtitle catalog-card-prompt" title={promptToCopy}>
+          <div className="catalog-card-prompt" title={promptToCopy}>
             {promptToCopy}
           </div>
-        ) : null}
+        ) : (
+          <div className="catalog-card-subtitle">No prompt</div>
+        )}
+
         <div className="card-actions">
           {onEdit ? (
             <button className="btn btn-small" type="button" onClick={() => onEdit(item)}>

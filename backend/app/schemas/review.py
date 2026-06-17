@@ -85,7 +85,7 @@ class CatalogReviewListResponse(BaseModel):
 
 
 class CatalogReviewCompleteRequest(BaseModel):
-    cover_image_id: int
+    cover_image_id: int | None = None
     gender: str | None = None
     rating: int | None = Field(default=None, ge=-1, le=6)
     final_prompt: str | None = None

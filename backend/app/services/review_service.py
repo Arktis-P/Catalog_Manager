@@ -11,6 +11,7 @@ from app.models.character import Character
 from app.models.image import Image
 from app.models.review import Review
 from app.models.series import Series
+from app.services.character_image_service import purge_character_images
 from app.services.prompt_service import build_generation_prompt
 
 
@@ -197,7 +198,7 @@ class ReviewService:
         self,
         character_id: int,
         *,
-        cover_image_id: int,
+        cover_image_id: int | None = None,
         gender: str | None = None,
         rating: int | None = None,
         final_prompt: str | None = None,
@@ -211,13 +212,6 @@ class ReviewService:
         if not character:
             raise ValueError("Character not found")
 
-        cover_image = next(
-            (image for image in character.images if image.id == cover_image_id and not image.is_rejected),
-            None,
-        )
-        if not cover_image:
-            raise ValueError("Cover image not found or rejected")
-
         review = character.review
         if not review:
             review = Review(character_id=character.id)
@@ -229,13 +223,27 @@ class ReviewService:
             character.gender = normalized_gender
             review.gender = normalized_gender
 
-        review.cover_image_id = cover_image_id
+        if rating == 0:
+            purge_character_images(self.db, character)
+            review.cover_image_id = None
+        else:
+            if not cover_image_id:
+                raise ValueError("Cover image is required unless rating is 0")
+
+            cover_image = next(
+                (image for image in character.images if image.id == cover_image_id and not image.is_rejected),
+                None,
+            )
+            if not cover_image:
+                raise ValueError("Cover image not found or rejected")
+
+            review.cover_image_id = cover_image_id
+            for image in character.images:
+                image.is_cover = image.id == cover_image_id
+
         review.rating = rating
         review.final_prompt = final_prompt or character.generation_prompt
         review.review_status = "completed"
-
-        for image in character.images:
-            image.is_cover = image.id == cover_image_id
 
         self.db.commit()
         self.db.refresh(character)
