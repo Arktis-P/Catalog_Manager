@@ -65,6 +65,10 @@ def list_merge_candidates(
     series_id: int,
     mode: str = Query(default="parent", pattern="^(parent|child)$"),
     search: str | None = None,
+    exclude_ids: str | None = Query(
+        default=None,
+        description="Comma-separated series IDs to exclude from candidates",
+    ),
     service: SeriesService = Depends(get_series_service),
     merge_service: SeriesMergeService = Depends(get_merge_service),
 ):
@@ -72,11 +76,18 @@ def list_merge_candidates(
     if not series:
         raise HTTPException(status_code=404, detail="Series not found")
 
+    excluded: set[int] = set()
+    if exclude_ids:
+        for part in exclude_ids.split(","):
+            part = part.strip()
+            if part.isdigit():
+                excluded.add(int(part))
+
     if mode == "parent":
-        candidates = merge_service.list_parent_candidates(series, search=search)
+        candidates = merge_service.list_parent_candidates(series, search=search, exclude_ids=excluded or None)
         anchor = series
     else:
-        candidates = merge_service.list_child_candidates(series, search=search)
+        candidates = merge_service.list_child_candidates(series, search=search, exclude_ids=excluded or None)
         anchor = series
 
     counts = service.get_character_counts([item.id for item in candidates])
@@ -87,6 +98,7 @@ def list_merge_candidates(
                 series_tag=item.series_tag,
                 display_name=item.display_name,
                 status=item.status,
+                post_count=item.post_count,
                 character_count=counts.get(item.id, 0),
                 similarity_score=similarity_score(anchor, item),
             )

@@ -5,7 +5,7 @@ import type { Series, SeriesMergeCandidate, SeriesMergePreview } from "../types"
 type MergeMode = "into_parent" | "absorb_child";
 
 interface SeriesMergeModalProps {
-  series: Series;
+  seriesList: Series[];
   onClose: () => void;
   onMerged: () => void;
 }
@@ -14,39 +14,88 @@ function canMergeSeries(series: Series): boolean {
   return !series.is_merged_child && (series.status === "collected" || series.status === "tagged");
 }
 
-export function SeriesMergeModal({ series, onClose, onMerged }: SeriesMergeModalProps) {
+function pickAnchorSeries(seriesList: Series[]): Series {
+  return [...seriesList].sort((left, right) => right.post_count - left.post_count)[0];
+}
+
+export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeModalProps) {
+  const mergeableSeries = useMemo(
+    () => seriesList.filter((item) => canMergeSeries(item)),
+    [seriesList],
+  );
+  const isBulkMerge = mergeableSeries.length > 1;
+  const anchorSeries = useMemo(() => pickAnchorSeries(mergeableSeries), [mergeableSeries]);
+  const sourceIds = useMemo(() => new Set(mergeableSeries.map((item) => item.id)), [mergeableSeries]);
+
   const [mode, setMode] = useState<MergeMode>("into_parent");
   const [search, setSearch] = useState("");
   const [candidates, setCandidates] = useState<SeriesMergeCandidate[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [preview, setPreview] = useState<SeriesMergePreview | null>(null);
+  const [previews, setPreviews] = useState<SeriesMergePreview[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [mergeProgress, setMergeProgress] = useState(0);
+  const [mergeStepLabel, setMergeStepLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  const effectiveMode: MergeMode = isBulkMerge ? "into_parent" : mode;
 
   const selectedCandidate = useMemo(
     () => candidates.find((item) => item.id === selectedId) ?? null,
     [candidates, selectedId],
   );
 
+  const childIdsForMerge = useMemo(() => {
+    if (effectiveMode === "into_parent") {
+      if (!selectedId) {
+        return [];
+      }
+      return mergeableSeries.filter((item) => item.id !== selectedId).map((item) => item.id);
+    }
+    return selectedId ? [selectedId] : [];
+  }, [effectiveMode, mergeableSeries, selectedId]);
+
+  const previewTotals = useMemo(
+    () =>
+      previews.reduce(
+        (acc, preview) => ({
+          moved: acc.moved + preview.moved_count,
+          duplicate: acc.duplicate + preview.duplicate_count,
+          characters: acc.characters + preview.child_character_count,
+        }),
+        { moved: 0, duplicate: 0, characters: 0 },
+      ),
+    [previews],
+  );
+
   useEffect(() => {
+    if (mergeableSeries.length === 0) {
+      return;
+    }
     let cancelled = false;
     const load = async () => {
       setLoading(true);
       setError(null);
       try {
-        const response = await api.listSeriesMergeCandidates(series.id, {
-          mode: mode === "into_parent" ? "parent" : "child",
+        const excludeIds = effectiveMode === "absorb_child" ? [anchorSeries.id] : undefined;
+        const response = await api.listSeriesMergeCandidates(anchorSeries.id, {
+          mode: effectiveMode === "into_parent" ? "parent" : "child",
           search: search || undefined,
+          exclude_ids: excludeIds,
         });
         if (cancelled) return;
-        setCandidates(response.items);
+
+        const nextCandidates =
+          effectiveMode === "absorb_child"
+            ? response.items.filter((item) => !sourceIds.has(item.id))
+            : response.items;
+
+        setCandidates(nextCandidates);
         setSelectedId((current) => {
-          if (current && response.items.some((item) => item.id === current)) {
+          if (current && nextCandidates.some((item) => item.id === current)) {
             return current;
           }
-          return response.items[0]?.id ?? null;
+          return nextCandidates[0]?.id ?? null;
         });
       } catch (err) {
         if (cancelled) return;
@@ -61,38 +110,53 @@ export function SeriesMergeModal({ series, onClose, onMerged }: SeriesMergeModal
     return () => {
       cancelled = true;
     };
-  }, [series.id, mode, search]);
+  }, [anchorSeries.id, effectiveMode, mergeableSeries, search, sourceIds]);
 
   useEffect(() => {
-    if (!selectedId) {
-      setPreview(null);
+    if (effectiveMode === "into_parent") {
+      if (!selectedId || childIdsForMerge.length === 0) {
+        setPreviews([]);
+        return;
+      }
+    } else if (!selectedId) {
+      setPreviews([]);
       return;
     }
-    const childId = mode === "into_parent" ? series.id : selectedId;
-    const parentId = mode === "into_parent" ? selectedId : series.id;
+
     let cancelled = false;
-    const loadPreview = async () => {
+    const loadPreviews = async () => {
       try {
-        const result = await api.previewSeriesMerge(childId, parentId);
+        const nextPreviews: SeriesMergePreview[] = [];
+        if (effectiveMode === "into_parent") {
+          for (const childId of childIdsForMerge) {
+            const result = await api.previewSeriesMerge(childId, selectedId!);
+            nextPreviews.push(result);
+          }
+        } else {
+          const result = await api.previewSeriesMerge(selectedId!, anchorSeries.id);
+          nextPreviews.push(result);
+        }
         if (!cancelled) {
-          setPreview(result);
+          setPreviews(nextPreviews);
+          setError(null);
         }
       } catch (err) {
         if (!cancelled) {
-          setPreview(null);
+          setPreviews([]);
           setError(err instanceof Error ? err.message : "Failed to preview merge");
         }
       }
     };
-    void loadPreview();
+    void loadPreviews();
     return () => {
       cancelled = true;
     };
-  }, [selectedId, mode, series.id]);
+  }, [selectedId, effectiveMode, childIdsForMerge, anchorSeries.id]);
 
   useEffect(() => {
     if (!submitting) {
       setMergeProgress(0);
+      setMergeStepLabel("");
       return;
     }
     setMergeProgress(8);
@@ -111,14 +175,27 @@ export function SeriesMergeModal({ series, onClose, onMerged }: SeriesMergeModal
   };
 
   const handleSubmit = async () => {
-    if (!selectedId) return;
+    if (!selectedId || previews.length === 0) return;
     setSubmitting(true);
     setMergeProgress(8);
     setError(null);
     try {
-      const childId = mode === "into_parent" ? series.id : selectedId;
-      const parentId = mode === "into_parent" ? selectedId : series.id;
-      await api.mergeSeries(childId, parentId);
+      const jobs =
+        effectiveMode === "into_parent"
+          ? childIdsForMerge.map((childId) => ({ childId, parentId: selectedId! }))
+          : [{ childId: selectedId!, parentId: anchorSeries.id }];
+
+      for (let index = 0; index < jobs.length; index += 1) {
+        const job = jobs[index]!;
+        const preview = previews.find((item) => item.child_series_id === job.childId);
+        setMergeStepLabel(
+          preview
+            ? `${preview.child_series_tag} → ${preview.parent_series_tag} (${index + 1}/${jobs.length})`
+            : `${index + 1}/${jobs.length}`,
+        );
+        setMergeProgress(8 + ((index + 0.5) / jobs.length) * 82);
+        await api.mergeSeries(job.childId, job.parentId);
+      }
       setMergeProgress(100);
       onMerged();
       onClose();
@@ -129,110 +206,169 @@ export function SeriesMergeModal({ series, onClose, onMerged }: SeriesMergeModal
     }
   };
 
-  if (!canMergeSeries(series)) {
+  if (mergeableSeries.length === 0) {
     return null;
   }
+
+  const title =
+    mergeableSeries.length === 1
+      ? `Merge Series — ${mergeableSeries[0]!.series_tag}`
+      : `Merge ${mergeableSeries.length} Series`;
+
+  const parentTag =
+    effectiveMode === "into_parent"
+      ? selectedCandidate?.series_tag
+      : anchorSeries.series_tag;
 
   return (
     <div className="modal-backdrop" onClick={handleClose}>
       <div className="modal modal-wide" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header-row">
           <div>
-            <h2 className="modal-title">Merge Series — {series.series_tag}</h2>
+            <h2 className="modal-title">{title}</h2>
             <p className="catalog-card-subtitle">
               collected/tagged 시리즈끼리 병합합니다. 중복 캐릭터는 상위 시리즈 쪽을 유지합니다.
             </p>
+            {isBulkMerge ? (
+              <p className="catalog-card-subtitle" style={{ marginTop: 6 }}>
+                병합 대상:{" "}
+                {mergeableSeries.map((item) => item.series_tag).join(", ")}
+              </p>
+            ) : null}
           </div>
           <button className="btn btn-small" type="button" disabled={submitting} onClick={handleClose}>
             Close
           </button>
         </div>
 
-        <div className="merge-mode-toggle">
-          <label>
-            <input
-              type="radio"
-              name="merge-mode"
-              checked={mode === "into_parent"}
-              disabled={submitting}
-              onChange={() => setMode("into_parent")}
-            />
-            이 시리즈를 다른 시리즈의 하위로 병합
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="merge-mode"
-              checked={mode === "absorb_child"}
-              disabled={submitting}
-              onChange={() => setMode("absorb_child")}
-            />
-            다른 시리즈를 이 시리즈로 흡수 (상위 시리즈가 됨)
-          </label>
-        </div>
+        {!isBulkMerge ? (
+          <div className="merge-mode-toggle">
+            <label>
+              <input
+                type="radio"
+                name="merge-mode"
+                checked={mode === "into_parent"}
+                disabled={submitting}
+                onChange={() => setMode("into_parent")}
+              />
+              이 시리즈를 다른 시리즈의 하위로 병합
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="merge-mode"
+                checked={mode === "absorb_child"}
+                disabled={submitting}
+                onChange={() => setMode("absorb_child")}
+              />
+              다른 시리즈를 이 시리즈로 흡수 (상위 시리즈가 됨)
+            </label>
+          </div>
+        ) : null}
 
         <div className="toolbar" style={{ marginBottom: 12 }}>
           <div className="field full-width">
             <label htmlFor="merge-search">
-              {mode === "into_parent" ? "상위 시리즈 검색" : "하위 시리즈 검색"}
+              {effectiveMode === "into_parent" ? "상위 시리즈 검색" : "하위 시리즈 검색"}
             </label>
             <input
               id="merge-search"
               value={search}
               disabled={submitting}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="series tag / display name"
+              placeholder="series tag / display name 입력 후 목록에서 선택"
+              autoComplete="off"
             />
           </div>
         </div>
 
         {error ? <div className="error-banner">{error}</div> : null}
-        {loading ? <div className="empty-state">Loading candidates...</div> : null}
 
-        {!loading ? (
-          <div className="field full-width">
-            <label htmlFor="merge-target">대상 시리즈</label>
-            <select
-              id="merge-target"
-              value={selectedId ?? ""}
-              disabled={submitting}
-              onChange={(event) => setSelectedId(Number(event.target.value))}
-            >
-              {candidates.length === 0 ? <option value="">No candidates found</option> : null}
-              {candidates.map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.series_tag}
-                  {candidate.display_name ? ` (${candidate.display_name})` : ""}
-                  {` · ${candidate.character_count} chars`}
-                  {candidate.similarity_score > 0
-                    ? ` · match ${Math.round(candidate.similarity_score * 100)}%`
-                    : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : null}
+        <div className="field full-width">
+          <label>
+            {effectiveMode === "into_parent" ? "병합될 상위 시리즈" : "흡수할 하위 시리즈"}
+          </label>
+          {loading ? <div className="empty-state">후보 불러오는 중...</div> : null}
+          {!loading ? (
+            <div className="merge-candidate-list" role="listbox" aria-label="merge target candidates">
+              {candidates.length === 0 ? (
+                <div className="empty-state">검색 조건에 맞는 시리즈가 없습니다.</div>
+              ) : (
+                candidates.map((candidate) => {
+                  const isSelected = candidate.id === selectedId;
+                  return (
+                    <button
+                      key={candidate.id}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      className={`merge-candidate-item${isSelected ? " merge-candidate-item-selected" : ""}`}
+                      disabled={submitting}
+                      onClick={() => setSelectedId(candidate.id)}
+                    >
+                      <span className="merge-candidate-tag">{candidate.series_tag}</span>
+                      {candidate.display_name ? (
+                        <span className="merge-candidate-meta">{candidate.display_name}</span>
+                      ) : null}
+                      <span className="merge-candidate-stats">
+                        posts {candidate.post_count.toLocaleString()}
+                        {" · "}
+                        {candidate.character_count.toLocaleString()} chars
+                        {candidate.similarity_score > 0
+                          ? ` · match ${Math.round(candidate.similarity_score * 100)}%`
+                          : ""}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          ) : null}
+        </div>
 
-        {preview ? (
+        {previews.length > 0 ? (
           <div className="merge-preview-panel">
             <div>
               <strong>Preview</strong>
             </div>
-            <div className="catalog-card-subtitle">
-              Child: {preview.child_series_tag} ({preview.child_character_count} characters)
-            </div>
-            <div className="catalog-card-subtitle">
-              Parent: {preview.parent_series_tag}
-            </div>
-            <div>
-              이동 {preview.moved_count.toLocaleString()} · 중복 제외 {preview.duplicate_count.toLocaleString()}
-            </div>
+            {previews.length === 1 && previews[0] ? (
+              <>
+                <div className="catalog-card-subtitle">
+                  Child: {previews[0].child_series_tag} ({previews[0].child_character_count} characters)
+                </div>
+                <div className="catalog-card-subtitle">Parent: {previews[0].parent_series_tag}</div>
+                <div>
+                  이동 {previews[0].moved_count.toLocaleString()} · 중복 제외{" "}
+                  {previews[0].duplicate_count.toLocaleString()}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="catalog-card-subtitle">Parent: {parentTag}</div>
+                <div className="catalog-card-subtitle">
+                  하위 {previews.length}개 시리즈 · 캐릭터 {previewTotals.characters.toLocaleString()}명
+                </div>
+                <div>
+                  총 이동 {previewTotals.moved.toLocaleString()} · 중복 제외{" "}
+                  {previewTotals.duplicate.toLocaleString()}
+                </div>
+                <ul className="merge-preview-child-list">
+                  {previews.map((preview) => (
+                    <li key={preview.child_series_id}>
+                      {preview.child_series_tag}: 이동 {preview.moved_count.toLocaleString()} · 중복{" "}
+                      {preview.duplicate_count.toLocaleString()}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </div>
         ) : null}
 
         {selectedCandidate ? (
           <div className="catalog-card-subtitle" style={{ marginTop: 8 }}>
-            선택: {selectedCandidate.series_tag} · status {selectedCandidate.status}
+            선택: {selectedCandidate.series_tag} · status {selectedCandidate.status} · posts{" "}
+            {selectedCandidate.post_count.toLocaleString()}
           </div>
         ) : null}
 
@@ -242,11 +378,18 @@ export function SeriesMergeModal({ series, onClose, onMerged }: SeriesMergeModal
               <>
                 <div className="merge-progress-label">
                   병합 중…
-                  {preview
-                    ? ` ${preview.child_series_tag} → ${preview.parent_series_tag} (이동 ${preview.moved_count.toLocaleString()}명)`
-                    : ""}
+                  {mergeStepLabel ? ` ${mergeStepLabel}` : null}
+                  {!mergeStepLabel && previews.length === 1 && previews[0]
+                    ? ` ${previews[0].child_series_tag} → ${previews[0].parent_series_tag}`
+                    : null}
                 </div>
-                <div className="merge-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(mergeProgress)}>
+                <div
+                  className="merge-progress-track"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(mergeProgress)}
+                >
                   <div
                     className={`merge-progress-fill${mergeProgress >= 100 ? " merge-progress-fill-done" : ""}`}
                     style={{ width: `${Math.min(mergeProgress, 100)}%` }}
@@ -262,10 +405,14 @@ export function SeriesMergeModal({ series, onClose, onMerged }: SeriesMergeModal
             <button
               className="btn btn-primary"
               type="button"
-              disabled={!selectedId || !preview || submitting}
+              disabled={!selectedId || previews.length === 0 || submitting}
               onClick={() => void handleSubmit()}
             >
-              {submitting ? "Merging..." : "Merge"}
+              {submitting
+                ? "Merging..."
+                : isBulkMerge
+                  ? `Merge ${childIdsForMerge.length} into parent`
+                  : "Merge"}
             </button>
           </div>
         </div>

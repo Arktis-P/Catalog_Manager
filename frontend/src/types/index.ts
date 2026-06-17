@@ -29,6 +29,7 @@ export interface SeriesMergeCandidate {
   series_tag: string;
   display_name: string;
   status: string;
+  post_count: number;
   character_count: number;
   similarity_score: number;
 }

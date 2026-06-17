@@ -101,11 +101,17 @@ export const api = {
 
   listSeriesMergeCandidates: (
     seriesId: number,
-    params: { mode?: "parent" | "child"; search?: string } = {},
-  ) =>
-    request<{ items: SeriesMergeCandidate[] }>(
-      `/series/${seriesId}/merge/candidates${buildQuery(params)}`,
-    ),
+    params: { mode?: "parent" | "child"; search?: string; exclude_ids?: number[] } = {},
+  ) => {
+    const { exclude_ids, ...rest } = params;
+    const query = {
+      ...rest,
+      ...(exclude_ids?.length ? { exclude_ids: exclude_ids.join(",") } : {}),
+    };
+    return request<{ items: SeriesMergeCandidate[] }>(
+      `/series/${seriesId}/merge/candidates${buildQuery(query)}`,
+    );
+  },
 
   previewSeriesMerge: (childSeriesId: number, parentSeriesId: number) =>
     request<SeriesMergePreview>(

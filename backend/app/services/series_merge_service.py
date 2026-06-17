@@ -98,29 +98,55 @@ class SeriesMergeService:
         if child_count > 0:
             raise ValueError("Series with sub-series cannot be merged into another series.")
 
-    def list_parent_candidates(self, child: Series, *, search: str | None = None, limit: int = 50) -> list[Series]:
+    @staticmethod
+    def _rank_candidates(anchor: Series, candidates: list[Series], *, search: str | None, limit: int) -> list[Series]:
+        def sort_key(item: Series) -> tuple[float, int, float]:
+            return (-item.post_count, -similarity_score(anchor, item), item.series_tag.lower())
+
+        ranked = sorted(candidates, key=sort_key)
+        if search:
+            return ranked[:limit]
+        similar = [item for item in ranked if similarity_score(anchor, item) > 0]
+        return similar[:limit] if similar else ranked[:limit]
+
+    def list_parent_candidates(
+        self,
+        child: Series,
+        *,
+        search: str | None = None,
+        limit: int = 50,
+        exclude_ids: set[int] | None = None,
+    ) -> list[Series]:
         query = self.db.query(Series).filter(
             Series.id != child.id,
             Series.parent_series_id.is_(None),
             Series.status.in_(MERGEABLE_STATUSES),
         )
+        if exclude_ids:
+            query = query.filter(~Series.id.in_(exclude_ids))
         if search:
             pattern = f"%{search.strip()}%"
             query = query.filter(
                 (Series.series_tag.ilike(pattern)) | (Series.display_name.ilike(pattern))
             )
         candidates = query.limit(max(limit * 4, 100)).all()
-        ranked = sorted(candidates, key=lambda item: similarity_score(child, item), reverse=True)
-        if search:
-            return ranked[:limit]
-        return [item for item in ranked if similarity_score(child, item) > 0][:limit] or ranked[:limit]
+        return self._rank_candidates(child, candidates, search=search, limit=limit)
 
-    def list_child_candidates(self, parent: Series, *, search: str | None = None, limit: int = 50) -> list[Series]:
+    def list_child_candidates(
+        self,
+        parent: Series,
+        *,
+        search: str | None = None,
+        limit: int = 50,
+        exclude_ids: set[int] | None = None,
+    ) -> list[Series]:
         query = self.db.query(Series).filter(
             Series.id != parent.id,
             Series.parent_series_id.is_(None),
             Series.status.in_(MERGEABLE_STATUSES),
         )
+        if exclude_ids:
+            query = query.filter(~Series.id.in_(exclude_ids))
         if search:
             pattern = f"%{search.strip()}%"
             query = query.filter(
@@ -136,10 +162,7 @@ class SeriesMergeService:
             if row[0] is not None
         }
         filtered = [item for item in candidates if item.id not in series_with_children]
-        ranked = sorted(filtered, key=lambda item: similarity_score(parent, item), reverse=True)
-        if search:
-            return ranked[:limit]
-        return [item for item in ranked if similarity_score(parent, item) > 0][:limit] or ranked[:limit]
+        return self._rank_candidates(parent, filtered, search=search, limit=limit)
 
     def preview_merge(self, child_id: int, parent_id: int) -> MergePreview:
         child = self._get_series(child_id)

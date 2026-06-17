@@ -64,6 +64,7 @@ class SeriesMergeCandidate(BaseModel):
     series_tag: str
     display_name: str
     status: str
+    post_count: int = 0
     character_count: int = 0
     similarity_score: float = 0.0
 

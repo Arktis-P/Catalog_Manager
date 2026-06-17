@@ -40,8 +40,14 @@ export function SeriesPage() {
   const [importReplace, setImportReplace] = useState(false);
   const [danbooruStatus, setDanbooruStatus] = useState<DanbooruStatus | null>(null);
   const [viewingSeries, setViewingSeries] = useState<Series | null>(null);
-  const [mergingSeries, setMergingSeries] = useState<Series | null>(null);
+  const [mergingSeriesList, setMergingSeriesList] = useState<Series[] | null>(null);
+  const [selectedMergeIds, setSelectedMergeIds] = useState<Set<number>>(() => new Set());
   const [exportingCharacters, setExportingCharacters] = useState(false);
+
+  const mergeEligibleItems = useMemo(
+    () => items.filter((series) => isSeriesMergeEligible(series)),
+    [items],
+  );
 
   const filteredCount = useMemo(() => items.length, [items]);
 
@@ -228,6 +234,35 @@ export function SeriesPage() {
     }
   };
 
+  const toggleMergeSelection = (seriesId: number) => {
+    setSelectedMergeIds((current) => {
+      const next = new Set(current);
+      if (next.has(seriesId)) {
+        next.delete(seriesId);
+      } else {
+        next.add(seriesId);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllMergeSelection = () => {
+    setSelectedMergeIds((current) =>
+      current.size === mergeEligibleItems.length
+        ? new Set()
+        : new Set(mergeEligibleItems.map((item) => item.id)),
+    );
+  };
+
+  const openMergeModal = (series: Series) => {
+    const selected = mergeEligibleItems.filter((item) => selectedMergeIds.has(item.id));
+    if (selectedMergeIds.has(series.id) && selected.length > 1) {
+      setMergingSeriesList(selected);
+      return;
+    }
+    setMergingSeriesList([series]);
+  };
+
   const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -338,6 +373,7 @@ export function SeriesPage() {
             <div style={{ overflowX: "auto" }}>
               <table className="data-table">
                 <colgroup>
+                  <col className="col-checkbox" />
                   <col className="col-series-tag" />
                   <col className="col-display-name" />
                   <col className="col-count" />
@@ -350,6 +386,19 @@ export function SeriesPage() {
                 </colgroup>
                 <thead>
                   <tr>
+                    <th className="col-checkbox">
+                      {mergeEligibleItems.length > 0 ? (
+                        <input
+                          type="checkbox"
+                          aria-label="Select all merge-eligible series"
+                          checked={
+                            mergeEligibleItems.length > 0 &&
+                            selectedMergeIds.size === mergeEligibleItems.length
+                          }
+                          onChange={toggleAllMergeSelection}
+                        />
+                      ) : null}
+                    </th>
                     <th className="col-series-tag">series_tag</th>
                     <th className="col-display-name">display_name</th>
                     <th className="col-count">post_count</th>
@@ -364,6 +413,16 @@ export function SeriesPage() {
                 <tbody>
                   {items.map((series) => (
                     <tr key={series.id} className={series.is_merged_child ? "series-child-row" : undefined}>
+                      <td className="col-checkbox">
+                        {isSeriesMergeEligible(series) ? (
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${series.series_tag} for merge`}
+                            checked={selectedMergeIds.has(series.id)}
+                            onChange={() => toggleMergeSelection(series.id)}
+                          />
+                        ) : null}
+                      </td>
                       <td className="col-series-tag cell-ellipsis" title={series.series_tag}>
                         <span className={series.is_merged_child ? "series-child-tag" : undefined}>
                           {series.is_merged_child ? `└ ${series.series_tag}` : series.series_tag}
@@ -461,7 +520,7 @@ export function SeriesPage() {
                                 <button
                                   className="btn btn-small"
                                   type="button"
-                                  onClick={() => setMergingSeries(series)}
+                                  onClick={() => openMergeModal(series)}
                                 >
                                   Merge
                                 </button>
@@ -578,11 +637,14 @@ export function SeriesPage() {
           onClose={() => setViewingSeries(null)}
         />
       ) : null}
-      {mergingSeries ? (
+      {mergingSeriesList ? (
         <SeriesMergeModal
-          series={mergingSeries}
-          onClose={() => setMergingSeries(null)}
-          onMerged={() => void loadSeries()}
+          seriesList={mergingSeriesList}
+          onClose={() => setMergingSeriesList(null)}
+          onMerged={() => {
+            setSelectedMergeIds(new Set());
+            void loadSeries();
+          }}
         />
       ) : null}
     </>
