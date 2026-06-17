@@ -67,7 +67,9 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
   const focusedItem = items[focusIndex] ?? null;
   const focusedDraft = focusedItem ? drafts[focusedItem.id] ?? createDraftForItem(focusedItem) : null;
   const focusedImage = focusedItem?.images[focusedDraft?.imageIndex ?? 0] ?? null;
-  const previewSrc = focusedImage ? pendingReviewImageUrl(focusedImage.image_path) : null;
+  const previewSrc = focusedImage
+    ? pendingReviewImageUrl(focusedImage.image_path, { thumbnail: true, thumbSize: PREVIEW_SIZE })
+    : null;
   const previewAlt = focusedItem ? `${focusedItem.character_tag} preview` : "";
 
   useEffect(() => {
@@ -392,12 +394,13 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
   }, [focusedItem, previewSrc]);
 
   const updatePreviewPosition = useCallback(() => {
-    if (!previewOpen || !scrollRef.current) {
+    const scrollNode = scrollRef.current;
+    if (!scrollNode) {
       setPreviewPosition(null);
       return;
     }
 
-    const anchor = scrollRef.current.querySelector('[data-preview-anchor="true"]') as HTMLElement | null;
+    const anchor = scrollNode.querySelector('[data-preview-anchor="true"]') as HTMLElement | null;
     if (!anchor) {
       setPreviewPosition(null);
       return;
@@ -415,7 +418,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
     top = Math.max(PREVIEW_GAP, Math.min(top, window.innerHeight - PREVIEW_SIZE - PREVIEW_GAP));
 
     setPreviewPosition({ top, left });
-  }, [rowHeight, rowStride]);
+  }, []);
 
   useEffect(() => {
     if (!previewOpen) {
@@ -437,7 +440,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
       window.removeEventListener("resize", onReposition);
       scrollNode?.removeEventListener("scroll", onReposition);
     };
-  }, [previewOpen, previewSrc, focusIndex, focusedDraft?.imageIndex, updatePreviewPosition]);
+  }, [previewOpen, previewSrc, focusIndex, updatePreviewPosition]);
 
   const togglePreview = useCallback(() => {
     if (previewOpen) {
@@ -701,8 +704,13 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
         </div>
       )}
 
-      {previewOpen && previewSrc && previewPosition ? (
-        <ReviewImagePreview src={previewSrc} alt={previewAlt} top={previewPosition.top} left={previewPosition.left} />
+      {previewOpen && previewSrc ? (
+        <ReviewImagePreview
+          src={previewSrc}
+          alt={previewAlt}
+          top={previewPosition?.top ?? PREVIEW_GAP}
+          left={previewPosition?.left ?? PREVIEW_GAP}
+        />
       ) : null}
 
       {moveTarget ? (

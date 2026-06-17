@@ -67,7 +67,7 @@ function renderImageSlot(
         alt={`${item.character_tag} ${index + 1}`}
         active={focused}
         selected={focused && draft.imageIndex === index}
-        previewAnchor={focused && draft.imageIndex === index}
+        previewAnchor={focused && index === 0}
         thumbSize={thumbSize}
         onClick={() => onDraftChange({ ...draft, imageIndex: index })}
       />

@@ -57,6 +57,11 @@ export function LazyReviewImage({
       type="button"
       className={className}
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === " " || event.code === "Space") {
+          event.preventDefault();
+        }
+      }}
       data-preview-anchor={previewAnchor ? "true" : undefined}
       title={`${alt} (Space로 확대)`}
     >
