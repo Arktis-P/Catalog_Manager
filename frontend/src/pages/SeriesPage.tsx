@@ -174,27 +174,25 @@ export function SeriesPage() {
 
   const formatCharacterCount = (series: Series) => {
     if (series.is_merged_child) {
-      return (
-        <>
-          {series.merged_moved_count.toLocaleString()}
-          {series.merged_duplicate_count > 0 ? (
-            <span className="catalog-card-subtitle" style={{ marginLeft: 6 }}>
-              dup {series.merged_duplicate_count.toLocaleString()}
-            </span>
-          ) : null}
-        </>
-      );
+      const dup =
+        series.merged_duplicate_count > 0
+          ? ` · dup ${series.merged_duplicate_count.toLocaleString()}`
+          : "";
+      return `${series.merged_moved_count.toLocaleString()}${dup}`;
     }
-    return (
-      <>
-        {series.character_count.toLocaleString()}
-        {series.child_count > 0 ? (
-          <span className="catalog-card-subtitle" style={{ marginLeft: 6 }} title="하위 시리즈 병합 포함">
-            +{series.child_count} merged
-          </span>
-        ) : null}
-      </>
-    );
+    const merged = series.child_count > 0 ? ` · +${series.child_count}m` : "";
+    return `${series.character_count.toLocaleString()}${merged}`;
+  };
+
+  const formatLastCollect = (series: Series) => {
+    if (series.last_collect_created <= 0 && series.last_collect_skipped <= 0) {
+      return "-";
+    }
+    const created =
+      series.last_collect_created > 0 ? `+${series.last_collect_created.toLocaleString()}` : "";
+    const skipped =
+      series.last_collect_skipped > 0 ? `s${series.last_collect_skipped.toLocaleString()}` : "";
+    return [created, skipped].filter(Boolean).join(" · ");
   };
 
   const canExtractAppearance = (series: Series) =>
@@ -370,8 +368,8 @@ export function SeriesPage() {
             <div className="catalog-card-subtitle" style={{ marginBottom: 12 }}>
               Total: {filteredCount}
             </div>
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table">
+            <div className="series-table-scroll">
+              <table className="data-table series-table">
                 <colgroup>
                   <col className="col-checkbox" />
                   <col className="col-series-tag" />
@@ -401,10 +399,10 @@ export function SeriesPage() {
                     </th>
                     <th className="col-series-tag">series_tag</th>
                     <th className="col-display-name">display_name</th>
-                    <th className="col-count">post_count</th>
-                    <th className="col-count">characters</th>
-                    <th className="col-last-collect">last collect</th>
-                    <th className="col-priority">priority</th>
+                    <th className="col-count">posts</th>
+                    <th className="col-count">chars</th>
+                    <th className="col-last-collect">collect</th>
+                    <th className="col-priority">pri</th>
                     <th className="col-status">status</th>
                     <th className="col-note">note</th>
                     <th className="col-actions">Actions</th>
@@ -431,22 +429,26 @@ export function SeriesPage() {
                       <td className="col-display-name cell-ellipsis" title={series.display_name}>
                         {series.display_name}
                       </td>
-                      <td className="col-count">{series.post_count.toLocaleString()}</td>
-                      <td className="col-count">{formatCharacterCount(series)}</td>
-                      <td className="col-last-collect">
-                        {series.last_collect_created > 0 ? (
-                          <span className="badge badge-success">+{series.last_collect_created.toLocaleString()}</span>
-                        ) : (
-                          "-"
-                        )}
-                        {series.last_collect_skipped > 0 ? (
-                          <span className="catalog-card-subtitle" style={{ marginLeft: 8 }}>
-                            skip {series.last_collect_skipped.toLocaleString()}
-                          </span>
-                        ) : null}
+                      <td className="col-count series-cell-nowrap">{series.post_count.toLocaleString()}</td>
+                      <td
+                        className="col-count series-cell-nowrap"
+                        title={
+                          series.is_merged_child
+                            ? series.merged_duplicate_count > 0
+                              ? `병합 시 중복 제외 ${series.merged_duplicate_count.toLocaleString()}`
+                              : undefined
+                            : series.child_count > 0
+                              ? `하위 시리즈 ${series.child_count}개 병합 포함`
+                              : undefined
+                        }
+                      >
+                        {formatCharacterCount(series)}
                       </td>
-                      <td className="col-priority">{series.priority}</td>
-                      <td className="col-status">
+                      <td className="col-last-collect series-cell-nowrap" title={formatLastCollect(series)}>
+                        {formatLastCollect(series)}
+                      </td>
+                      <td className="col-priority series-cell-nowrap">{series.priority}</td>
+                      <td className="col-status series-cell-nowrap">
                         {(() => {
                           const displayStatus = resolveSeriesStatus(series);
                           return (
