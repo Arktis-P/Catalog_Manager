@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppearanceReviewPanel } from "../components/review/AppearanceReviewPanel";
 import { CatalogReviewPanel } from "../components/review/CatalogReviewPanel";
+import { ReviewRatingGuide } from "../components/review/ReviewRatingGuide";
 
 export function ReviewPage() {
   const [searchParams] = useSearchParams();
@@ -52,6 +53,8 @@ export function ReviewPage() {
           Appearance
         </Link>
       </div>
+
+      <ReviewRatingGuide />
 
       {initialMode === "catalog" ? (
         <CatalogReviewPanel initialSeriesId={initialSeriesId} initialCharacterId={initialCharacterId} />
