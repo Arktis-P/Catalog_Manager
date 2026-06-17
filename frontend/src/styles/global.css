@@ -685,6 +685,49 @@ button,
   background: rgba(255, 255, 255, 0.02);
 }
 
+.series-tag-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.series-tag-cell > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.series-children-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.series-children-toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.series-children-toggle-icon {
+  font-size: 0.62rem;
+}
+
+.series-children-toggle-count {
+  font-variant-numeric: tabular-nums;
+}
+
 .series-child-tag {
   color: var(--text-muted);
 }
@@ -792,6 +835,14 @@ button,
 .merge-candidate-item-selected {
   background: rgba(99, 102, 241, 0.15);
   border-color: rgba(99, 102, 241, 0.45);
+}
+
+.merge-candidate-item-disabled {
+  opacity: 0.72;
+}
+
+.merge-candidate-item-disabled.merge-candidate-item-selected {
+  opacity: 0.9;
 }
 
 .merge-candidate-tag {

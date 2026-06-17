@@ -32,6 +32,7 @@ export interface SeriesMergeCandidate {
   post_count: number;
   character_count: number;
   similarity_score: number;
+  mergeable: boolean;
 }
 
 export interface SeriesMergePreview {

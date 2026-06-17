@@ -101,7 +101,7 @@ export const api = {
 
   listSeriesMergeCandidates: (
     seriesId: number,
-    params: { mode?: "parent" | "child"; search?: string; exclude_ids?: number[] } = {},
+    params: { mode?: "parent" | "child"; search?: string; exclude_ids?: number[]; limit?: number } = {},
   ) => {
     const { exclude_ids, ...rest } = params;
     const query = {

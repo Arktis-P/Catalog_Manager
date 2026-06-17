@@ -82,6 +82,7 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
           mode: effectiveMode === "into_parent" ? "parent" : "child",
           search: search || undefined,
           exclude_ids: excludeIds,
+          limit: search ? 100 : 50,
         });
         if (cancelled) return;
 
@@ -123,6 +124,14 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
       return;
     }
 
+    if (selectedCandidate && !selectedCandidate.mergeable) {
+      setPreviews([]);
+      setError(
+        `선택한 시리즈는 status가 ${selectedCandidate.status}입니다. 병합하려면 collected 또는 tagged 상태여야 합니다.`,
+      );
+      return;
+    }
+
     let cancelled = false;
     const loadPreviews = async () => {
       try {
@@ -151,7 +160,18 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
     return () => {
       cancelled = true;
     };
-  }, [selectedId, effectiveMode, childIdsForMerge, anchorSeries.id]);
+  }, [selectedId, effectiveMode, childIdsForMerge, anchorSeries.id, selectedCandidate]);
+
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter" || candidates.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    const exact = candidates.find(
+      (candidate) => candidate.series_tag.toLowerCase() === search.trim().toLowerCase(),
+    );
+    setSelectedId(exact?.id ?? candidates[0]?.id ?? null);
+  };
 
   useEffect(() => {
     if (!submitting) {
@@ -276,7 +296,8 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
               value={search}
               disabled={submitting}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="series tag / display name 입력 후 목록에서 선택"
+              onKeyDown={handleSearchKeyDown}
+              placeholder="series tag 입력 (예: fate_(series)) 후 Enter 또는 목록에서 선택"
               autoComplete="off"
             />
           </div>
@@ -292,21 +313,31 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
           {!loading ? (
             <div className="merge-candidate-list" role="listbox" aria-label="merge target candidates">
               {candidates.length === 0 ? (
-                <div className="empty-state">검색 조건에 맞는 시리즈가 없습니다.</div>
+                <div className="empty-state">
+                  검색 조건에 맞는 시리즈가 없습니다. series tag를 정확히 입력해 보세요.
+                </div>
               ) : (
                 candidates.map((candidate) => {
                   const isSelected = candidate.id === selectedId;
+                  const isExactMatch =
+                    search.trim().length > 0 &&
+                    candidate.series_tag.toLowerCase() === search.trim().toLowerCase();
                   return (
                     <button
                       key={candidate.id}
                       type="button"
                       role="option"
                       aria-selected={isSelected}
-                      className={`merge-candidate-item${isSelected ? " merge-candidate-item-selected" : ""}`}
+                      className={`merge-candidate-item${isSelected ? " merge-candidate-item-selected" : ""}${
+                        !candidate.mergeable ? " merge-candidate-item-disabled" : ""
+                      }`}
                       disabled={submitting}
                       onClick={() => setSelectedId(candidate.id)}
                     >
-                      <span className="merge-candidate-tag">{candidate.series_tag}</span>
+                      <span className="merge-candidate-tag">
+                        {candidate.series_tag}
+                        {isExactMatch ? " · exact" : ""}
+                      </span>
                       {candidate.display_name ? (
                         <span className="merge-candidate-meta">{candidate.display_name}</span>
                       ) : null}
@@ -314,6 +345,9 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
                         posts {candidate.post_count.toLocaleString()}
                         {" · "}
                         {candidate.character_count.toLocaleString()} chars
+                        {" · "}
+                        status {candidate.status}
+                        {!candidate.mergeable ? " · 병합 불가" : ""}
                         {candidate.similarity_score > 0
                           ? ` · match ${Math.round(candidate.similarity_score * 100)}%`
                           : ""}
@@ -405,7 +439,12 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
             <button
               className="btn btn-primary"
               type="button"
-              disabled={!selectedId || previews.length === 0 || submitting}
+              disabled={
+                !selectedId ||
+                previews.length === 0 ||
+                submitting ||
+                (selectedCandidate ? !selectedCandidate.mergeable : false)
+              }
               onClick={() => void handleSubmit()}
             >
               {submitting

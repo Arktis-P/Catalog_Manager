@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.integrations.danbooru.client import DanbooruClient
@@ -41,6 +42,14 @@ class UnmergeResult:
     child_series_tag: str
     moved_back_count: int
     child_character_count: int
+
+
+def _escape_like_pattern(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
 
 
 def _normalize_tag(value: str) -> str:
@@ -99,15 +108,115 @@ class SeriesMergeService:
             raise ValueError("Series with sub-series cannot be merged into another series.")
 
     @staticmethod
-    def _rank_candidates(anchor: Series, candidates: list[Series], *, search: str | None, limit: int) -> list[Series]:
-        def sort_key(item: Series) -> tuple[float, int, float]:
-            return (-item.post_count, -similarity_score(anchor, item), item.series_tag.lower())
+    def _rank_recommendations(anchor: Series, candidates: list[Series], *, limit: int) -> list[Series]:
+        def sort_key(item: Series) -> tuple[float, int, str]:
+            sim = similarity_score(anchor, item)
+            return (-sim, -item.post_count, item.series_tag.lower())
 
         ranked = sorted(candidates, key=sort_key)
-        if search:
-            return ranked[:limit]
         similar = [item for item in ranked if similarity_score(anchor, item) > 0]
         return similar[:limit] if similar else ranked[:limit]
+
+    @staticmethod
+    def _rank_search_results(candidates: list[Series], *, limit: int) -> list[Series]:
+        ranked = sorted(candidates, key=lambda item: (-item.post_count, item.series_tag.lower()))
+        return ranked[:limit]
+
+    def candidate_is_mergeable(self, series: Series) -> bool:
+        if series.status not in MERGEABLE_STATUSES:
+            return False
+        return series_job_manager.get_active_job_for_series(series.id) is None
+
+    def _base_candidate_query(
+        self,
+        anchor: Series,
+        *,
+        exclude_ids: set[int] | None = None,
+        mergeable_only: bool,
+    ):
+        query = self.db.query(Series).filter(
+            Series.id != anchor.id,
+            Series.parent_series_id.is_(None),
+        )
+        if mergeable_only:
+            query = query.filter(Series.status.in_(MERGEABLE_STATUSES))
+        if exclude_ids:
+            query = query.filter(~Series.id.in_(exclude_ids))
+        return query
+
+    def _find_exact_tag_match(self, search: str) -> Series | None:
+        term = search.strip()
+        if not term:
+            return None
+        return (
+            self.db.query(Series)
+            .filter(func.lower(Series.series_tag) == term.lower())
+            .first()
+        )
+
+    @staticmethod
+    def _inject_exact_match(candidates: list[Series], exact: Series | None, *, limit: int) -> list[Series]:
+        if not exact:
+            return candidates[:limit]
+        merged = [exact, *[item for item in candidates if item.id != exact.id]]
+        return merged[:limit]
+
+    def _search_candidates(
+        self,
+        query,
+        *,
+        search: str,
+        limit: int,
+        exact: Series | None,
+    ) -> list[Series]:
+        pattern = f"%{_escape_like_pattern(search.strip())}%"
+        filtered = query.filter(
+            or_(
+                Series.series_tag.ilike(pattern, escape="\\"),
+                Series.display_name.ilike(pattern, escape="\\"),
+            )
+        ).order_by(Series.post_count.desc(), Series.series_tag.asc())
+        ranked = self._rank_search_results(filtered.limit(limit).all(), limit=limit)
+        return self._inject_exact_match(ranked, exact, limit=limit)
+
+    def _list_candidates(
+        self,
+        anchor: Series,
+        *,
+        role: str,
+        search: str | None = None,
+        limit: int = 50,
+        exclude_ids: set[int] | None = None,
+    ) -> list[Series]:
+        mergeable_only = role == "child"
+        query = self._base_candidate_query(anchor, exclude_ids=exclude_ids, mergeable_only=mergeable_only)
+
+        if search:
+            exact = self._find_exact_tag_match(search)
+            if exact and (
+                exact.id == anchor.id
+                or exact.parent_series_id is not None
+                or (exclude_ids and exact.id in exclude_ids)
+            ):
+                exact = None
+            return self._search_candidates(query, search=search, limit=limit, exact=exact)
+
+        ordered = query.order_by(Series.post_count.desc(), Series.series_tag.asc())
+        pool_size = max(limit * 8, 200)
+        candidates = ordered.limit(pool_size).all()
+
+        if role == "child":
+            series_with_children = {
+                row[0]
+                for row in self.db.query(Series.parent_series_id)
+                .filter(Series.parent_series_id.isnot(None))
+                .distinct()
+                .all()
+                if row[0] is not None
+            }
+            candidates = [item for item in candidates if item.id not in series_with_children]
+
+        return self._rank_recommendations(anchor, candidates, limit=limit)
 
     def list_parent_candidates(
         self,
@@ -117,20 +226,13 @@ class SeriesMergeService:
         limit: int = 50,
         exclude_ids: set[int] | None = None,
     ) -> list[Series]:
-        query = self.db.query(Series).filter(
-            Series.id != child.id,
-            Series.parent_series_id.is_(None),
-            Series.status.in_(MERGEABLE_STATUSES),
+        return self._list_candidates(
+            child,
+            role="parent",
+            search=search,
+            limit=limit,
+            exclude_ids=exclude_ids,
         )
-        if exclude_ids:
-            query = query.filter(~Series.id.in_(exclude_ids))
-        if search:
-            pattern = f"%{search.strip()}%"
-            query = query.filter(
-                (Series.series_tag.ilike(pattern)) | (Series.display_name.ilike(pattern))
-            )
-        candidates = query.limit(max(limit * 4, 100)).all()
-        return self._rank_candidates(child, candidates, search=search, limit=limit)
 
     def list_child_candidates(
         self,
@@ -140,29 +242,13 @@ class SeriesMergeService:
         limit: int = 50,
         exclude_ids: set[int] | None = None,
     ) -> list[Series]:
-        query = self.db.query(Series).filter(
-            Series.id != parent.id,
-            Series.parent_series_id.is_(None),
-            Series.status.in_(MERGEABLE_STATUSES),
+        return self._list_candidates(
+            parent,
+            role="child",
+            search=search,
+            limit=limit,
+            exclude_ids=exclude_ids,
         )
-        if exclude_ids:
-            query = query.filter(~Series.id.in_(exclude_ids))
-        if search:
-            pattern = f"%{search.strip()}%"
-            query = query.filter(
-                (Series.series_tag.ilike(pattern)) | (Series.display_name.ilike(pattern))
-            )
-        candidates = query.limit(max(limit * 4, 100)).all()
-        series_with_children = {
-            row[0]
-            for row in self.db.query(Series.parent_series_id)
-            .filter(Series.parent_series_id.isnot(None))
-            .distinct()
-            .all()
-            if row[0] is not None
-        }
-        filtered = [item for item in candidates if item.id not in series_with_children]
-        return self._rank_candidates(parent, filtered, search=search, limit=limit)
 
     def preview_merge(self, child_id: int, parent_id: int) -> MergePreview:
         child = self._get_series(child_id)

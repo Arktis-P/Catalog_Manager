@@ -67,6 +67,7 @@ class SeriesMergeCandidate(BaseModel):
     post_count: int = 0
     character_count: int = 0
     similarity_score: float = 0.0
+    mergeable: bool = True
 
 
 class SeriesMergeCandidateListResponse(BaseModel):

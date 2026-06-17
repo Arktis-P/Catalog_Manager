@@ -65,6 +65,7 @@ def list_merge_candidates(
     series_id: int,
     mode: str = Query(default="parent", pattern="^(parent|child)$"),
     search: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
     exclude_ids: str | None = Query(
         default=None,
         description="Comma-separated series IDs to exclude from candidates",
@@ -84,10 +85,20 @@ def list_merge_candidates(
                 excluded.add(int(part))
 
     if mode == "parent":
-        candidates = merge_service.list_parent_candidates(series, search=search, exclude_ids=excluded or None)
+        candidates = merge_service.list_parent_candidates(
+            series,
+            search=search,
+            limit=limit,
+            exclude_ids=excluded or None,
+        )
         anchor = series
     else:
-        candidates = merge_service.list_child_candidates(series, search=search, exclude_ids=excluded or None)
+        candidates = merge_service.list_child_candidates(
+            series,
+            search=search,
+            limit=limit,
+            exclude_ids=excluded or None,
+        )
         anchor = series
 
     counts = service.get_character_counts([item.id for item in candidates])
@@ -101,6 +112,7 @@ def list_merge_candidates(
                 post_count=item.post_count,
                 character_count=counts.get(item.id, 0),
                 similarity_score=similarity_score(anchor, item),
+                mergeable=merge_service.candidate_is_mergeable(item),
             )
             for item in candidates
         ]

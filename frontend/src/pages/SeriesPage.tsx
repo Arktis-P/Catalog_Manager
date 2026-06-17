@@ -42,6 +42,7 @@ export function SeriesPage() {
   const [viewingSeries, setViewingSeries] = useState<Series | null>(null);
   const [mergingSeriesList, setMergingSeriesList] = useState<Series[] | null>(null);
   const [selectedMergeIds, setSelectedMergeIds] = useState<Set<number>>(() => new Set());
+  const [expandedParentIds, setExpandedParentIds] = useState<Set<number>>(() => new Set());
   const [exportingCharacters, setExportingCharacters] = useState(false);
 
   const mergeEligibleItems = useMemo(
@@ -49,7 +50,32 @@ export function SeriesPage() {
     [items],
   );
 
-  const filteredCount = useMemo(() => items.length, [items]);
+  const hiddenChildCount = useMemo(
+    () =>
+      items.filter(
+        (series) =>
+          series.is_merged_child &&
+          series.parent_series_id !== null &&
+          !expandedParentIds.has(series.parent_series_id),
+      ).length,
+    [items, expandedParentIds],
+  );
+
+  const visibleItems = useMemo(() => {
+    const visible: Series[] = [];
+    for (const series of items) {
+      if (series.is_merged_child) {
+        if (series.parent_series_id && expandedParentIds.has(series.parent_series_id)) {
+          visible.push(series);
+        }
+        continue;
+      }
+      visible.push(series);
+    }
+    return visible;
+  }, [items, expandedParentIds]);
+
+  const filteredCount = useMemo(() => visibleItems.length, [visibleItems]);
 
   const loadSeries = async () => {
     setLoading(true);
@@ -78,6 +104,32 @@ export function SeriesPage() {
   useEffect(() => {
     void loadSeries();
   }, [search, statusFilter]);
+
+  useEffect(() => {
+    if (!search.trim()) {
+      return;
+    }
+    const parentsToExpand = new Set<number>();
+    for (const series of items) {
+      if (series.is_merged_child && series.parent_series_id) {
+        parentsToExpand.add(series.parent_series_id);
+      }
+    }
+    if (parentsToExpand.size === 0) {
+      return;
+    }
+    setExpandedParentIds((current) => {
+      const next = new Set(current);
+      let changed = false;
+      for (const parentId of parentsToExpand) {
+        if (!next.has(parentId)) {
+          next.add(parentId);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [search, items]);
 
   useEffect(() => {
     void api
@@ -252,6 +304,18 @@ export function SeriesPage() {
     );
   };
 
+  const toggleExpandedChildren = (parentId: number) => {
+    setExpandedParentIds((current) => {
+      const next = new Set(current);
+      if (next.has(parentId)) {
+        next.delete(parentId);
+      } else {
+        next.add(parentId);
+      }
+      return next;
+    });
+  };
+
   const openMergeModal = (series: Series) => {
     const selected = mergeEligibleItems.filter((item) => selectedMergeIds.has(item.id));
     if (selectedMergeIds.has(series.id) && selected.length > 1) {
@@ -366,7 +430,8 @@ export function SeriesPage() {
         {!loading ? (
           <>
             <div className="catalog-card-subtitle" style={{ marginBottom: 12 }}>
-              Total: {filteredCount}
+              표시: {filteredCount.toLocaleString()}
+              {hiddenChildCount > 0 ? ` · 하위 시리즈 ${hiddenChildCount.toLocaleString()}개 숨김` : null}
             </div>
             <div className="series-table-scroll">
               <table className="data-table series-table">
@@ -409,7 +474,7 @@ export function SeriesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((series) => (
+                  {visibleItems.map((series) => (
                     <tr key={series.id} className={series.is_merged_child ? "series-child-row" : undefined}>
                       <td className="col-checkbox">
                         {isSeriesMergeEligible(series) ? (
@@ -422,9 +487,34 @@ export function SeriesPage() {
                         ) : null}
                       </td>
                       <td className="col-series-tag cell-ellipsis" title={series.series_tag}>
-                        <span className={series.is_merged_child ? "series-child-tag" : undefined}>
-                          {series.is_merged_child ? `└ ${series.series_tag}` : series.series_tag}
-                        </span>
+                        <div className="series-tag-cell">
+                          {!series.is_merged_child && series.child_count > 0 ? (
+                            <button
+                              type="button"
+                              className="series-children-toggle"
+                              aria-expanded={expandedParentIds.has(series.id)}
+                              aria-label={
+                                expandedParentIds.has(series.id)
+                                  ? `Hide ${series.child_count} merged sub-series`
+                                  : `Show ${series.child_count} merged sub-series`
+                              }
+                              title={
+                                expandedParentIds.has(series.id)
+                                  ? "하위 시리즈 숨기기"
+                                  : "하위 시리즈 보기"
+                              }
+                              onClick={() => toggleExpandedChildren(series.id)}
+                            >
+                              <span className="series-children-toggle-icon" aria-hidden="true">
+                                {expandedParentIds.has(series.id) ? "▼" : "▶"}
+                              </span>
+                              <span className="series-children-toggle-count">{series.child_count}</span>
+                            </button>
+                          ) : null}
+                          <span className={series.is_merged_child ? "series-child-tag" : undefined}>
+                            {series.is_merged_child ? `└ ${series.series_tag}` : series.series_tag}
+                          </span>
+                        </div>
                       </td>
                       <td className="col-display-name cell-ellipsis" title={series.display_name}>
                         {series.display_name}
