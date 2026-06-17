@@ -127,7 +127,9 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
     if (selectedCandidate && !selectedCandidate.mergeable) {
       setPreviews([]);
       setError(
-        `선택한 시리즈는 status가 ${selectedCandidate.status}입니다. 병합하려면 collected 또는 tagged 상태여야 합니다.`,
+        selectedCandidate.status === "pending"
+          ? `선택한 시리즈에 수집된 캐릭터가 없어 병합 상위로 사용할 수 없습니다. Collect 후 다시 시도하세요.`
+          : `선택한 시리즈는 status가 ${selectedCandidate.status}입니다. 병합하려면 collected 또는 tagged 상태여야 합니다.`,
       );
       return;
     }

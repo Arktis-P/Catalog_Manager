@@ -102,6 +102,7 @@ def list_merge_candidates(
         anchor = series
 
     counts = service.get_character_counts([item.id for item in candidates])
+    candidate_role = "parent" if mode == "parent" else "child"
     return SeriesMergeCandidateListResponse(
         items=[
             SeriesMergeCandidate(
@@ -112,7 +113,11 @@ def list_merge_candidates(
                 post_count=item.post_count,
                 character_count=counts.get(item.id, 0),
                 similarity_score=similarity_score(anchor, item),
-                mergeable=merge_service.candidate_is_mergeable(item),
+                mergeable=merge_service.candidate_is_mergeable(
+                    item,
+                    role=candidate_role,
+                    character_count=counts.get(item.id, 0),
+                ),
             )
             for item in candidates
         ]

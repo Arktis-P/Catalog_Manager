@@ -90,8 +90,20 @@ class SeriesMergeService:
     def _get_series(self, series_id: int) -> Series | None:
         return self.db.query(Series).filter(Series.id == series_id).first()
 
+    def _parent_has_catalog(self, series: Series) -> bool:
+        character_count = self.db.query(Character.id).filter(Character.series_id == series.id).count()
+        if character_count > 0:
+            return True
+        child_count = self.db.query(Series.id).filter(Series.parent_series_id == series.id).count()
+        return child_count > 0
+
     def _ensure_mergeable(self, series: Series, *, role: str) -> None:
-        if series.status not in MERGEABLE_STATUSES:
+        role_key = role.lower()
+        if series.status in MERGEABLE_STATUSES:
+            pass
+        elif role_key == "parent" and series.status == "pending" and self._parent_has_catalog(series):
+            pass
+        else:
             raise ValueError(f"{role} series must be collected or tagged before merging.")
         if series_job_manager.get_active_job_for_series(series.id):
             raise ValueError(f"{role} series has an active collect/appearance job.")
@@ -122,10 +134,22 @@ class SeriesMergeService:
         ranked = sorted(candidates, key=lambda item: (-item.post_count, item.series_tag.lower()))
         return ranked[:limit]
 
-    def candidate_is_mergeable(self, series: Series) -> bool:
-        if series.status not in MERGEABLE_STATUSES:
+    def candidate_is_mergeable(
+        self,
+        series: Series,
+        *,
+        role: str,
+        character_count: int = 0,
+    ) -> bool:
+        if series_job_manager.get_active_job_for_series(series.id):
             return False
-        return series_job_manager.get_active_job_for_series(series.id) is None
+        if series.status in MERGEABLE_STATUSES:
+            return True
+        if role == "parent" and series.status == "pending":
+            if character_count > 0:
+                return True
+            return self._parent_has_catalog(series)
+        return False
 
     def _base_candidate_query(
         self,
@@ -333,12 +357,15 @@ class SeriesMergeService:
         merge_note = f"Merged into {parent.series_tag}"
         child.note = f"{child.note} | {merge_note}" if child.note else merge_note
 
-        self.db.commit()
-        self.db.refresh(parent)
-
         parent_character_count = (
             self.db.query(Character.id).filter(Character.series_id == parent.id).count()
         )
+        if parent.status == "pending" and parent_character_count > 0:
+            parent.status = "collected"
+
+        self.db.commit()
+        self.db.refresh(parent)
+
         return MergeResult(
             child_series_id=child.id,
             child_series_tag=child.series_tag,

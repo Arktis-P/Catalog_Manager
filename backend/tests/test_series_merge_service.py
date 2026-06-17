@@ -36,6 +36,15 @@ def test_escape_like_pattern_escapes_underscore() -> None:
     assert _escape_like_pattern("fate_(series)") == "fate\\_(series)"
 
 
+def test_pending_hub_parent_with_characters_is_mergeable() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    service = SeriesMergeService(MagicMock())
+    parent = SimpleNamespace(id=1, series_tag="fate_(series)", status="pending")
+    assert service.candidate_is_mergeable(parent, role="parent", character_count=2150) is True
+
+
 def test_recommendations_prioritize_similarity() -> None:
     anchor = _series("fate/type_redline")
     candidates = [
