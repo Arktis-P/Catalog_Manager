@@ -26,12 +26,17 @@ interface CatalogReviewRowProps {
   draft: CharacterDraft;
   thumbSize: number;
   quadLayout: boolean;
+  locked?: boolean;
+  regenerateMessage?: string;
+  regenerateProgress?: { current: number; total: number } | null;
   onDraftChange: (draft: CharacterDraft) => void;
   onToggleTag: (tagKey: string) => void;
   onRate: (value: number) => void;
   onDismissNeedsCheck?: () => void;
   onDeleteCharacter?: () => void;
   onMoveSeries?: () => void;
+  onRegenerate?: () => void;
+  regenerating?: boolean;
 }
 
 function autoStatusClass(status: string | null): string {
@@ -49,6 +54,7 @@ function renderImageSlot(
   draft: CharacterDraft,
   thumbSize: number,
   onDraftChange: (draft: CharacterDraft) => void,
+  locked: boolean,
 ) {
   if (!image) {
     return (
@@ -66,10 +72,10 @@ function renderImageSlot(
         imagePath={image.image_path}
         alt={`${item.character_tag} ${index + 1}`}
         active={focused}
-        selected={focused && draft.imageIndex === index}
+        selected={focused && !locked && draft.imageIndex === index}
         previewAnchor={focused && index === 0}
         thumbSize={thumbSize}
-        onClick={() => onDraftChange({ ...draft, imageIndex: index })}
+        onClick={locked ? undefined : () => onDraftChange({ ...draft, imageIndex: index })}
       />
       <div className="catalog-review-image-meta">
         <span className={autoStatusClass(image.auto_status)}>{image.auto_status || "unknown"}</span>
@@ -87,12 +93,17 @@ export function CatalogReviewRow({
   draft,
   thumbSize,
   quadLayout,
+  locked = false,
+  regenerateMessage,
+  regenerateProgress,
   onDraftChange,
   onToggleTag,
   onRate,
   onDismissNeedsCheck,
   onDeleteCharacter,
   onMoveSeries,
+  onRegenerate,
+  regenerating = false,
 }: CatalogReviewRowProps) {
   const chips = appearanceTagChips(item);
   const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
@@ -104,13 +115,24 @@ export function CatalogReviewRow({
 
   return (
     <article
-      className={`catalog-review-row${focused ? " catalog-review-row--focused" : ""}${quadLayout ? " catalog-review-row--quad" : ""}`}
+      className={`catalog-review-row${focused ? " catalog-review-row--focused" : ""}${quadLayout ? " catalog-review-row--quad" : ""}${locked ? " catalog-review-row--regenerating" : ""}`}
       data-row-index={rowIndex}
       data-character-id={item.id}
     >
+      {locked && regenerateMessage ? (
+        <div className="catalog-review-regenerate-banner">
+          <span>{regenerateMessage}</span>
+          {regenerateProgress && regenerateProgress.total > 0 ? (
+            <span className="catalog-review-regenerate-progress">
+              {regenerateProgress.current}/{regenerateProgress.total}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className={`catalog-review-images${quadLayout ? " catalog-review-images--quad" : ""}`}>
         {paddedSlots.slice(0, slotCount).map((image, index) =>
-          renderImageSlot(image, index, item, focused, draft, thumbSize, onDraftChange),
+          renderImageSlot(image, index, item, focused, draft, thumbSize, onDraftChange, locked),
         )}
       </div>
 
@@ -171,11 +193,11 @@ export function CatalogReviewRow({
           {item.type ? <span className="badge">{item.type}</span> : null}
         </div>
 
-        <ReviewRatingStars rating={draft.rating} onRate={onRate} />
+        <ReviewRatingStars rating={draft.rating} onRate={locked ? () => undefined : onRate} />
 
         <div className="catalog-review-tags">
           {displayGender ? (
-            <button type="button" className={genderChipClass(displayGender)}>
+            <button type="button" className={genderChipClass(displayGender)} disabled={locked}>
               {displayGender}
             </button>
           ) : (
@@ -189,6 +211,7 @@ export function CatalogReviewRow({
                 type="button"
                 className={`review-tag${enabledTags.has(chip.key) ? " review-tag--enabled" : ""}`}
                 onClick={() => onToggleTag(chip.key)}
+                disabled={locked}
               >
                 {chip.label}
               </button>
@@ -198,21 +221,33 @@ export function CatalogReviewRow({
         <div className="catalog-review-prompt-field">
           <div className="catalog-review-prompt-header">
             <label htmlFor={`review-prompt-${item.id}`}>Prompt</label>
-            {draft.promptEdited ? (
-              <button
-                type="button"
-                className="btn btn-small btn-ghost"
-                onClick={() =>
-                  onDraftChange({
-                    ...draft,
-                    customPrompt: null,
-                    promptEdited: false,
-                  })
-                }
-              >
-                Reset tags
-              </button>
-            ) : null}
+            <div className="catalog-review-prompt-actions">
+              {onRegenerate ? (
+                <button
+                  className="btn btn-small btn-primary"
+                  type="button"
+                  disabled={regenerating || !promptText.trim()}
+                  onClick={onRegenerate}
+                >
+                  {regenerating ? "재생성 중..." : "Regenerate"}
+                </button>
+              ) : null}
+              {draft.promptEdited ? (
+                <button
+                  type="button"
+                  className="btn btn-small btn-ghost"
+                  onClick={() =>
+                    onDraftChange({
+                      ...draft,
+                      customPrompt: null,
+                      promptEdited: false,
+                    })
+                  }
+                >
+                  Reset tags
+                </button>
+              ) : null}
+            </div>
           </div>
           <textarea
             id={`review-prompt-${item.id}`}
@@ -220,6 +255,7 @@ export function CatalogReviewRow({
             value={promptText}
             rows={2}
             spellCheck={false}
+            readOnly={locked}
             onChange={(event) =>
               onDraftChange({
                 ...draft,

@@ -17,6 +17,8 @@ import type {
   GenerationQueuePreview,
   GenerationStartPayload,
   NaiaStatus,
+  ReviewRegenerateJob,
+  ReviewRegenerateJobListResponse,
   Series,
   SeriesCreatePayload,
   SeriesListResponse,
@@ -229,10 +231,20 @@ export const api = {
       { method: "POST" },
     ),
 
-  regenerateCatalogCharacter: (characterId: number, promptLevel = 1) =>
-    request<CollectJob>(`/review/catalog/${characterId}/regenerate${buildQuery({ prompt_level: promptLevel })}`, {
+  regenerateCatalogCharacter: (
+    characterId: number,
+    payload: { prompt: string; gender?: string | null },
+  ) =>
+    request<ReviewRegenerateJob>(`/review/catalog/${characterId}/regenerate`, {
       method: "POST",
+      body: JSON.stringify(payload),
     }),
+
+  listReviewRegenerateJobs: () =>
+    request<ReviewRegenerateJobListResponse>("/review/catalog/regenerate/jobs"),
+
+  getReviewRegenerateJob: (jobId: string) =>
+    request<ReviewRegenerateJob>(`/review/catalog/regenerate/jobs/${jobId}`),
 
   dismissCatalogNeedsCheck: (characterId: number) =>
     request<{ id: number; character_status: string; needs_check_reason: string | null }>(

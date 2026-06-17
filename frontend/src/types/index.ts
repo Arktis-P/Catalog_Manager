@@ -310,6 +310,26 @@ export interface CatalogReviewCompletePayload {
   final_prompt?: string | null;
 }
 
+export interface ReviewRegenerateJob {
+  job_id: string;
+  character_id: number;
+  character_tag: string;
+  series_tag: string;
+  status: string;
+  phase: string;
+  message: string;
+  current: number;
+  total: number;
+  error: string | null;
+  result: CatalogReviewItem | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface ReviewRegenerateJobListResponse {
+  items: ReviewRegenerateJob[];
+}
+
 export interface DanbooruStatus {
   configured: boolean;
   ready: boolean;

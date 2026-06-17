@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.integrations.danbooru.appearance_extractor import normalize_gender
-from app.schemas.generation import GenerationJobState
 from app.schemas.review import (
     AppearanceReviewConfirmResponse,
     AppearanceReviewItemResponse,
@@ -12,12 +11,19 @@ from app.schemas.review import (
     CatalogReviewCompleteRequest,
     CatalogReviewCompleteResponse,
     CatalogReviewDismissNeedsCheckResponse,
-    CatalogReviewImageResponse,
     CatalogReviewItemResponse,
     CatalogReviewListResponse,
+    CatalogReviewRegenerateRequest,
+    CatalogReviewRegenerateResponse,
     CatalogReviewUndoResponse,
+    ReviewRegenerateJobListResponse,
+    ReviewRegenerateJobResponse,
 )
-from app.services.generation_job_manager import generation_job_manager
+from app.services.review_catalog_serializer import to_catalog_item
+from app.services.review_regenerate_job_manager import (
+    ReviewRegenerateJobState,
+    review_regenerate_job_manager,
+)
 from app.services.review_service import ReviewService
 
 router = APIRouter(prefix="/review", tags=["review"])
@@ -48,54 +54,26 @@ def _to_appearance_item(character) -> AppearanceReviewItemResponse:
     )
 
 
-def _visible_images(character) -> list:
-    return sorted(
-        [image for image in character.images if not image.is_rejected],
-        key=lambda image: image.created_at,
-    )[:4]
-
-
 def _to_catalog_item(character) -> CatalogReviewItemResponse:
-    series = character.series
-    review = character.review
-    images = _visible_images(character)
-    return CatalogReviewItemResponse(
-        id=character.id,
-        series_tag=series.series_tag,
-        series_display_name=series.display_name,
-        character_tag=character.character_tag,
-        display_name=character.display_name or character.character_tag,
-        post_count=character.post_count,
-        danbooru_url=character.danbooru_url,
-        danbooru_wiki_url=ReviewService.build_wiki_url(character.character_tag),
-        multi_color_hair=character.multi_color_hair,
-        hair_color=character.hair_color,
-        hair_shape=character.hair_shape,
-        eye_color=character.eye_color,
-        feature_tags=character.feature_tags,
-        gender=normalize_gender(character.gender),
-        generation_prompt=character.generation_prompt,
-        character_status=character.status,
-        needs_check_reason=character.needs_check_reason,
-        review_status=review.review_status if review else None,
-        rating=review.rating if review else None,
-        type=review.type if review else None,
-        final_prompt=review.final_prompt if review else None,
-        cover_image_id=review.cover_image_id if review else None,
-        images=[
-            CatalogReviewImageResponse(
-                id=image.id,
-                image_path=image.image_path,
-                auto_status=image.auto_status,
-                cover_score=image.cover_score,
-                hair_match=image.hair_match,
-                eye_match=image.eye_match,
-                gender_pred=image.gender_pred,
-                is_rejected=image.is_rejected,
-                is_cover=image.is_cover,
-            )
-            for image in images
-        ],
+    return to_catalog_item(character)
+
+
+def _job_to_response(job: ReviewRegenerateJobState) -> ReviewRegenerateJobResponse:
+    result = CatalogReviewItemResponse(**job.result) if job.result else None
+    return ReviewRegenerateJobResponse(
+        job_id=job.job_id,
+        character_id=job.character_id,
+        character_tag=job.character_tag,
+        series_tag=job.series_tag,
+        status=job.status,
+        phase=job.phase,
+        message=job.message,
+        current=job.current,
+        total=job.total,
+        error=job.error,
+        result=result,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
     )
 
 
@@ -244,42 +222,32 @@ def dismiss_catalog_needs_check(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/catalog/{character_id}/regenerate", response_model=GenerationJobState)
+@router.post("/catalog/{character_id}/regenerate", response_model=CatalogReviewRegenerateResponse)
 def regenerate_catalog_character(
     character_id: int,
-    prompt_level: int = Query(default=1, ge=1, le=5),
+    payload: CatalogReviewRegenerateRequest,
     service: ReviewService = Depends(get_review_service),
 ):
-    character = service.get_character(character_id)
-    if not character:
-        raise HTTPException(status_code=404, detail="Character not found")
+    try:
+        job = service.regenerate_catalog_images(
+            character_id,
+            prompt=payload.prompt.strip(),
+            gender=payload.gender,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _job_to_response(job)
 
-    job = generation_job_manager.start_generation(
-        character.series_id,
-        character_ids=[character.id],
-        prompt_level=prompt_level,
-        require_confirmed=False,
-    )
-    return GenerationJobState(
-        job_id=job.job_id,
-        series_id=job.series_id,
-        series_tag=job.series_tag,
-        queue_id=job.queue_id,
-        job_type=job.job_type,
-        status=job.status,
-        phase=job.phase,
-        message=job.message,
-        current=job.current,
-        total=job.total,
-        completed=job.completed,
-        failed=job.failed,
-        prompt_level=job.prompt_level,
-        current_character_tag=job.current_character_tag,
-        last_image_path=job.last_image_path,
-        auto_pass=job.auto_pass,
-        auto_warning=job.auto_warning,
-        auto_reject=job.auto_reject,
-        error=job.error,
-        started_at=job.started_at,
-        finished_at=job.finished_at,
-    )
+
+@router.get("/catalog/regenerate/jobs", response_model=ReviewRegenerateJobListResponse)
+def list_review_regenerate_jobs():
+    jobs = review_regenerate_job_manager.list_visible_jobs()
+    return ReviewRegenerateJobListResponse(items=[_job_to_response(job) for job in jobs])
+
+
+@router.get("/catalog/regenerate/jobs/{job_id}", response_model=ReviewRegenerateJobResponse)
+def get_review_regenerate_job(job_id: str):
+    job = review_regenerate_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Regenerate job not found")
+    return _job_to_response(job)

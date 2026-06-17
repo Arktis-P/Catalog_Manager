@@ -110,3 +110,32 @@ class CatalogReviewDismissNeedsCheckResponse(BaseModel):
     id: int
     character_status: str
     needs_check_reason: str | None = None
+
+
+class CatalogReviewRegenerateRequest(BaseModel):
+    prompt: str = Field(min_length=1)
+    gender: str | None = None
+
+
+class ReviewRegenerateJobResponse(BaseModel):
+    job_id: str
+    character_id: int
+    character_tag: str
+    series_tag: str = ""
+    status: str
+    phase: str
+    message: str
+    current: int = 0
+    total: int = 0
+    error: str | None = None
+    result: CatalogReviewItemResponse | None = None
+    started_at: str
+    finished_at: str | None = None
+
+
+class ReviewRegenerateJobListResponse(BaseModel):
+    items: list[ReviewRegenerateJobResponse]
+
+
+class CatalogReviewRegenerateResponse(ReviewRegenerateJobResponse):
+    pass

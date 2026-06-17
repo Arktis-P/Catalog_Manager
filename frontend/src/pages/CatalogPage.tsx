@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import { useReviewRegenerateJobs } from "../context/ReviewRegenerateContext";
 import type { CatalogFilters, CatalogItem, CatalogStats, Series } from "../types";
 import { CatalogEditModal } from "../components/CatalogEditModal";
 import { CatalogRandomPanel } from "../components/CatalogRandomPanel";
@@ -36,7 +37,13 @@ export function CatalogPage() {
   const [seriesChangeSearch, setSeriesChangeSearch] = useState("");
   const [seriesPickerItems, setSeriesPickerItems] = useState<Series[]>([]);
   const [seriesChangeSaving, setSeriesChangeSaving] = useState(false);
-  const [regeneratingId, setRegeneratingId] = useState<number | null>(null);
+  const { jobs, enqueueRegenerate, isCharacterRegenerating, lastCompletedJob, clearLastCompletedJob } =
+    useReviewRegenerateJobs();
+
+  const activeRegenerateJobs = useMemo(
+    () => jobs.filter((job) => job.status === "queued" || job.status === "running"),
+    [jobs],
+  );
 
   const listFilters = useMemo(() => filterQuery(filters), [filters]);
 
@@ -124,17 +131,37 @@ export function CatalogPage() {
   };
 
   const handleRegenerate = async (item: CatalogItem) => {
-    setRegeneratingId(item.id);
+    const prompt = item.final_prompt || item.generation_prompt;
+    if (!prompt?.trim()) {
+      setError("재생성할 프롬프트가 없습니다.");
+      return;
+    }
+    if (isCharacterRegenerating(item.id)) {
+      setExportMessage(`${item.character_tag} 재생성이 이미 진행 중입니다.`);
+      return;
+    }
     setError(null);
     try {
-      await api.regenerateCatalogCharacter(item.id);
-      setExportMessage(`${item.character_tag} 재생성 작업을 시작했습니다. Generation 탭에서 진행 상황을 확인하세요.`);
+      const job = await enqueueRegenerate(item.id, {
+        prompt,
+        gender: item.gender,
+      });
+      setExportMessage(job.message);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start regeneration");
-    } finally {
-      setRegeneratingId(null);
+      setError(err instanceof Error ? err.message : "Failed to regenerate images");
     }
   };
+
+  useEffect(() => {
+    if (!lastCompletedJob?.result) {
+      return;
+    }
+    setExportMessage(
+      `${lastCompletedJob.character_tag} 이미지 ${lastCompletedJob.result.images.length}장 재생성 완료`,
+    );
+    void loadInitial();
+    clearLastCompletedJob();
+  }, [clearLastCompletedJob, lastCompletedJob, loadInitial]);
 
   const handleExport = async () => {
     setError(null);
@@ -414,7 +441,11 @@ export function CatalogPage() {
 
         {error ? <div className="error-banner">{error}</div> : null}
         {exportMessage ? <div className="success-banner">{exportMessage}</div> : null}
-        {regeneratingId ? <div className="catalog-card-subtitle">재생성 요청 중...</div> : null}
+        {activeRegenerateJobs.length > 0 ? (
+          <div className="catalog-card-subtitle">
+            재생성 {activeRegenerateJobs.length}건 진행 중...
+          </div>
+        ) : null}
 
         <CatalogVirtualGrid
           items={items}

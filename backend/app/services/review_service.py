@@ -259,6 +259,21 @@ class ReviewService:
         self.db.refresh(character)
         return character
 
+    def regenerate_catalog_images(
+        self,
+        character_id: int,
+        *,
+        prompt: str,
+        gender: str | None = None,
+    ):
+        from app.services.review_regenerate_job_manager import review_regenerate_job_manager
+
+        return review_regenerate_job_manager.enqueue(
+            character_id,
+            prompt=prompt,
+            gender=gender,
+        )
+
     def undo_catalog_review(self, character_id: int) -> Character:
         character = (
             self.db.query(Character)

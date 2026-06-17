@@ -5,19 +5,28 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy.orm import Session
+from collections.abc import Callable
+
+from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
+from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.integrations.naia.client import NaiaClient, NaiaClientError
+from app.integrations.naia.generation_runner import (
+    generate_and_fetch_image,
+    wait_between_naia_generations,
+)
 from app.integrations.naia.wildcard_writer import write_character_wildcard
 from app.models.character import Character
 from app.models.generation_job import GenerationJob
 from app.models.image import Image
+from app.models.review import Review
 from app.models.series import Series
 from app.services.generation_prompt_builder import (
     GenerationPromptConfig,
     build_character_core,
     build_full_prompt,
+    build_prompt_from_character_core,
     build_queue_manifest,
     export_queue_manifest,
 )
@@ -396,3 +405,157 @@ class GenerationService:
     def mark_job_failed(self, generation_job: GenerationJob, error: str) -> None:
         generation_job.status = "failed"
         self.db.commit()
+
+    def _resolve_review_gender(self, character: Character, gender: str | None) -> str:
+        if gender:
+            normalized = normalize_gender(gender)
+            if normalized in {"1girl", "1boy", "no_humans"}:
+                return normalized
+        return normalize_gender(character.gender) or "1girl"
+
+    def _clear_character_review_images(self, character: Character) -> int:
+        removed = 0
+        images = (
+            self.db.query(Image)
+            .filter(Image.character_id == character.id, Image.is_rejected.is_(False))
+            .all()
+        )
+        for image in images:
+            file_path = settings.project_root / image.image_path
+            if file_path.is_file():
+                file_path.unlink()
+            self.db.delete(image)
+            removed += 1
+
+        review = character.review
+        if not review and removed:
+            review = Review(character_id=character.id)
+            self.db.add(review)
+            character.review = review
+        if review:
+            review.cover_image_id = None
+            review.review_status = "pending"
+
+        if removed:
+            self.db.flush()
+        return removed
+
+    def regenerate_review_images(
+        self,
+        character_id: int,
+        *,
+        prompt_core: str,
+        gender: str | None = None,
+        progress_callback: Callable[[dict[str, object]], None] | None = None,
+    ) -> Character:
+        character = (
+            self.db.query(Character)
+            .options(joinedload(Character.images), joinedload(Character.review))
+            .filter(Character.id == character_id)
+            .first()
+        )
+        if not character:
+            raise ValueError("Character not found")
+
+        status = self.naia_status()
+        if not status.get("ready"):
+            raise ValueError(str(status.get("message") or "NAIA가 준비되지 않았습니다."))
+
+        resolved_gender = self._resolve_review_gender(character, gender)
+        if gender:
+            character.gender = resolved_gender
+
+        prompt, negative_prompt = build_prompt_from_character_core(
+            prompt_core,
+            gender=resolved_gender,
+            prompt_config=self.get_prompt_config(),
+        )
+        image_count = self.get_images_per_character()
+        self._clear_character_review_images(character)
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "generating",
+                    "message": f"{character.character_tag} 기존 이미지 교체 · 생성 0/{image_count}",
+                    "current": 0,
+                    "total": image_count,
+                }
+            )
+
+        client = NaiaClient(self.get_naia_base_url())
+        known_history_ids = {
+            str(item.get("history_id") or "")
+            for item in client.list_history(page=0, per_page=20).get("images", [])
+            if isinstance(item, dict)
+        }
+        known_history_ids.discard("")
+
+        for index in range(image_count):
+            if index > 0:
+                wait_between_naia_generations()
+
+            if progress_callback:
+                progress_callback(
+                    {
+                        "phase": "generating",
+                        "message": f"{character.character_tag} NAIA 생성 {index + 1}/{image_count}",
+                        "current": index,
+                        "total": image_count,
+                    }
+                )
+
+            generation_job = GenerationJob(
+                character_id=character.id,
+                prompt_level=1,
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                count=1,
+                status="pending",
+            )
+            self.db.add(generation_job)
+            self.db.flush()
+
+            try:
+                image_bytes, _ = generate_and_fetch_image(
+                    client,
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    known_history_ids=known_history_ids,
+                )
+            except Exception as exc:
+                self.mark_job_failed(generation_job, str(exc))
+                raise ValueError(f"NAIA 이미지 생성 실패 ({index + 1}/{image_count}): {exc}") from exc
+
+            self.import_generated_image(
+                character=character,
+                generation_job=generation_job,
+                image_bytes=image_bytes,
+            )
+
+            if progress_callback:
+                progress_callback(
+                    {
+                        "phase": "generating",
+                        "message": f"{character.character_tag} 저장 완료 {index + 1}/{image_count}",
+                        "current": index + 1,
+                        "total": image_count,
+                    }
+                )
+
+        character.status = "generated"
+        self.db.commit()
+
+        refreshed = (
+            self.db.query(Character)
+            .options(
+                joinedload(Character.images),
+                joinedload(Character.review),
+                joinedload(Character.series),
+            )
+            .filter(Character.id == character_id)
+            .first()
+        )
+        if not refreshed:
+            raise ValueError("Character not found after regenerate")
+        return refreshed

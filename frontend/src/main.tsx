@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { CollectJobProvider } from "./context/CollectJobContext";
 import { GenerationJobProvider } from "./context/GenerationJobContext";
+import { ReviewRegenerateProvider } from "./context/ReviewRegenerateContext";
 import "./styles/global.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -11,7 +12,9 @@ createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <CollectJobProvider>
         <GenerationJobProvider>
-          <App />
+          <ReviewRegenerateProvider>
+            <App />
+          </ReviewRegenerateProvider>
         </GenerationJobProvider>
       </CollectJobProvider>
     </BrowserRouter>

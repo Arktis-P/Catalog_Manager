@@ -1694,6 +1694,34 @@ button,
   box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.18);
 }
 
+.catalog-review-row--regenerating {
+  position: relative;
+}
+
+.catalog-review-row--regenerating .catalog-review-images {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.catalog-review-regenerate-banner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(210, 153, 34, 0.14);
+  color: #e3b341;
+  font-size: 13px;
+}
+
+.catalog-review-regenerate-progress {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .catalog-review-images {
   display: contents;
 }
@@ -1809,6 +1837,13 @@ button,
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.catalog-review-prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .catalog-review-prompt-input {

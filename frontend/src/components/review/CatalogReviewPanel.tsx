@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
+import { useReviewRegenerateJobs } from "../../context/ReviewRegenerateContext";
 import type { CatalogReviewItem, Series } from "../../types";
 import { danbooruPostsUrl, danbooruWikiUrl, openExternal } from "../../utils/danbooruLinks";
 import { appearanceTagChips, defaultEnabledTagKeys, resolveFinalPrompt } from "../../utils/reviewPrompt";
@@ -59,6 +60,17 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
   const [moveTarget, setMoveTarget] = useState<CatalogReviewItem | null>(null);
   const [sessionCompleted, setSessionCompleted] = useState(0);
   const [pendingCharacterId, setPendingCharacterId] = useState<number | null>(initialCharacterId);
+  const appliedRegenerateJobIdsRef = useRef<Set<string>>(new Set());
+
+  const {
+    enqueueRegenerate,
+    isCharacterRegenerating,
+    getCharacterJob,
+    lastCompletedJob,
+    clearLastCompletedJob,
+    lastError: regenerateError,
+    clearLastError: clearRegenerateError,
+  } = useReviewRegenerateJobs();
 
   const quadLayout = imagesPerCharacter > 2;
   const rowHeight = quadLayout ? ROW_HEIGHT_QUAD : ROW_HEIGHT;
@@ -66,6 +78,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
 
   const focusedItem = items[focusIndex] ?? null;
   const focusedDraft = focusedItem ? drafts[focusedItem.id] ?? createDraftForItem(focusedItem) : null;
+  const focusedLocked = focusedItem ? isCharacterRegenerating(focusedItem.id) : false;
   const focusedImage = focusedItem?.images[focusedDraft?.imageIndex ?? 0] ?? null;
   const previewSrc = focusedImage
     ? pendingReviewImageUrl(focusedImage.image_path, { thumbnail: true, thumbSize: PREVIEW_SIZE })
@@ -276,8 +289,53 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
     [removeCharacterFromList],
   );
 
+  const mergeRegeneratedItem = useCallback((updated: CatalogReviewItem) => {
+    setItems((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
+    setDrafts((current) => {
+      const preserved = current[updated.id];
+      const nextDraft = createDraftForItem(updated);
+      if (preserved) {
+        nextDraft.rating = preserved.rating;
+        nextDraft.gender = preserved.gender;
+        nextDraft.enabledTags = preserved.enabledTags;
+        nextDraft.customPrompt = preserved.customPrompt;
+        nextDraft.promptEdited = preserved.promptEdited;
+      }
+      nextDraft.imageIndex = 0;
+      return { ...current, [updated.id]: nextDraft };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!lastCompletedJob?.result) {
+      return;
+    }
+    if (appliedRegenerateJobIdsRef.current.has(lastCompletedJob.job_id)) {
+      return;
+    }
+    appliedRegenerateJobIdsRef.current.add(lastCompletedJob.job_id);
+    mergeRegeneratedItem(lastCompletedJob.result);
+    setActionMessage(
+      `${lastCompletedJob.character_tag} 이미지 ${lastCompletedJob.result.images.length}장 재생성 완료 (기존 이미지 교체됨)`,
+    );
+    clearLastCompletedJob();
+  }, [clearLastCompletedJob, lastCompletedJob, mergeRegeneratedItem]);
+
+  useEffect(() => {
+    if (regenerateError) {
+      setError(regenerateError);
+      clearRegenerateError();
+    }
+  }, [clearRegenerateError, regenerateError]);
+
+  useEffect(() => {
+    if (focusedLocked) {
+      setPreviewOpen(false);
+    }
+  }, [focusedLocked]);
+
   const completeFocused = useCallback(async () => {
-    if (!focusedItem || !focusedDraft || submitting) {
+    if (!focusedItem || !focusedDraft || submitting || focusedLocked) {
       return;
     }
 
@@ -333,7 +391,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
     } finally {
       setSubmitting(false);
     }
-  }, [filterStatus, focusedDraft, focusedItem, submitting]);
+  }, [filterStatus, focusedDraft, focusedItem, focusedLocked, submitting]);
 
   const undoLast = useCallback(async () => {
     const characterId = undoStack[0];
@@ -371,21 +429,35 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
   );
 
   const regenerateFocused = useCallback(async () => {
-    if (!focusedItem || submitting) {
+    if (!focusedItem || !focusedDraft) {
       return;
     }
 
-    setSubmitting(true);
+    const chips = appearanceTagChips(focusedItem);
+    const enabledTags =
+      focusedDraft.enabledTags.size > 0 ? focusedDraft.enabledTags : defaultEnabledTagKeys(chips);
+    const finalPrompt = resolveFinalPrompt(focusedItem, {
+      ...focusedDraft,
+      enabledTags,
+    });
+    if (!finalPrompt?.trim()) {
+      setError("프롬프트가 비어 있어 재생성할 수 없습니다.");
+      return;
+    }
+
     setError(null);
     try {
-      await api.regenerateCatalogCharacter(focusedItem.id);
-      setActionMessage(`${focusedItem.character_tag} 재생성을 시작했습니다.`);
+      const job = await enqueueRegenerate(focusedItem.id, {
+        prompt: finalPrompt,
+        gender: focusedDraft.gender,
+      });
+      setPreviewOpen(false);
+      setActionMessage(job.message);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "재생성 요청에 실패했습니다.");
-    } finally {
-      setSubmitting(false);
+      setError(err instanceof Error ? err.message : "재생성에 실패했습니다.");
+      setActionMessage(null);
     }
-  }, [focusedItem, submitting]);
+  }, [enqueueRegenerate, focusedDraft, focusedItem]);
 
   useEffect(() => {
     if (!focusedItem || !previewSrc) {
@@ -443,6 +515,9 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
   }, [previewOpen, previewSrc, focusIndex, updatePreviewPosition]);
 
   const togglePreview = useCallback(() => {
+    if (focusedLocked) {
+      return;
+    }
     if (previewOpen) {
       setPreviewOpen(false);
       return;
@@ -450,18 +525,18 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
     if (previewSrc) {
       setPreviewOpen(true);
     }
-  }, [previewOpen, previewSrc]);
+  }, [focusedLocked, previewOpen, previewSrc]);
 
   const shiftFocusedImage = useCallback(
     (delta: -1 | 1) => {
-      if (!focusedItem || !focusedDraft) {
+      if (!focusedItem || !focusedDraft || focusedLocked) {
         return;
       }
       const maxIndex = Math.max(0, focusedItem.images.length - 1);
       const nextIndex = Math.min(maxIndex, Math.max(0, focusedDraft.imageIndex + delta));
       updateDraft(focusedItem.id, { ...focusedDraft, imageIndex: nextIndex });
     },
-    [focusedDraft, focusedItem, updateDraft],
+    [focusedDraft, focusedItem, focusedLocked, updateDraft],
   );
 
   useEffect(() => {
@@ -472,6 +547,20 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
     const onKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target) || !focusedItem || !focusedDraft) {
         return;
+      }
+
+      if (focusedLocked) {
+        const key = event.key.toLowerCase();
+        const allowed =
+          event.key === "ArrowUp" ||
+          event.key === "ArrowDown" ||
+          key === "q" ||
+          key === "w" ||
+          (event.ctrlKey && key === "z");
+        if (!allowed) {
+          event.preventDefault();
+          return;
+        }
       }
 
       if (event.key === " " || event.code === "Space") {
@@ -567,6 +656,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
     completeFocused,
     focusedDraft,
     focusedItem,
+    focusedLocked,
     items.length,
     regenerateFocused,
     setRating,
@@ -641,7 +731,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
         <span>0-6 / - 레이팅 (재입력 시 해제)</span>
         <span>Enter 완료</span>
         <span>g/b/n 성별</span>
-        <span>r 재생성</span>
+        <span>r 재생성 (NAIA · 기존 이미지 교체)</span>
         <span>Ctrl+Z 취소</span>
         <span>q/w Danbooru</span>
         <span>Space 확대</span>
@@ -675,6 +765,8 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
               {items.slice(virtualRange.start, virtualRange.end).map((item, offset) => {
                 const rowIndex = virtualRange.start + offset;
                 const draft = drafts[item.id] ?? createDraftForItem(item);
+                const locked = isCharacterRegenerating(item.id);
+                const regenerateJob = getCharacterJob(item.id);
                 return (
                   <CatalogReviewRow
                     key={item.id}
@@ -684,6 +776,13 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
                     draft={draft}
                     thumbSize={thumbSize}
                     quadLayout={quadLayout}
+                    locked={locked}
+                    regenerateMessage={regenerateJob?.message}
+                    regenerateProgress={
+                      regenerateJob && regenerateJob.total > 0
+                        ? { current: regenerateJob.current, total: regenerateJob.total }
+                        : null
+                    }
                     onDraftChange={(next) => updateDraft(item.id, next)}
                     onToggleTag={(tagKey) => toggleTag(item.id, tagKey)}
                     onRate={(value) => setRating(item.id, value)}
@@ -696,6 +795,10 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
                     onMoveSeries={
                       item.character_status === "needs_check" ? () => setMoveTarget(item) : undefined
                     }
+                    onRegenerate={
+                      rowIndex === focusIndex ? () => void regenerateFocused() : undefined
+                    }
+                    regenerating={locked}
                   />
                 );
               })}

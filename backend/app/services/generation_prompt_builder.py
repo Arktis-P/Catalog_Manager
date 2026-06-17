@@ -114,9 +114,26 @@ def build_full_prompt(
             raise ValueError(f"{character.character_tag}: generation_prompt가 없습니다.")
         character_part = character_core
 
-    prefix = _apply_placeholders(config.prefix, gender=gender).strip()
-    suffix = _apply_placeholders(config.suffix, gender=gender).strip()
+    return build_prompt_from_character_core(character_part, gender=gender, prompt_config=config)
 
+
+def build_prompt_from_character_core(
+    character_core: str,
+    *,
+    gender: str,
+    prompt_config: GenerationPromptConfig | None = None,
+) -> tuple[str, str]:
+    config = prompt_config or default_generation_prompt_config()
+    character_part = character_core.strip()
+    if not character_part:
+        raise ValueError("prompt가 비어 있습니다.")
+
+    normalized_gender = normalize_gender(gender)
+    if normalized_gender not in {"1girl", "1boy", "no_humans"}:
+        normalized_gender = "1girl"
+
+    prefix = _apply_placeholders(config.prefix, gender=normalized_gender).strip()
+    suffix = _apply_placeholders(config.suffix, gender=normalized_gender).strip()
     sections = [section for section in (prefix, character_part, suffix) if section]
     prompt = ",\n\n".join(sections)
     return prompt, config.negative_prompt
