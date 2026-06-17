@@ -151,6 +151,9 @@ export const api = {
 
   getCollectJob: (jobId: string) => request<CollectJob>(`/characters/collect/jobs/${jobId}`),
 
+  cancelCollectJob: (jobId: string) =>
+    request<CollectJob>(`/characters/collect/jobs/${jobId}/cancel`, { method: "POST" }),
+
   listCollectJobs: () => request<{ items: CollectJob[] }>("/characters/collect/jobs"),
 
   getSettings: () => request<AppSettings>("/settings"),

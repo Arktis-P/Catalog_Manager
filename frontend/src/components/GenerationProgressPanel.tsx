@@ -75,7 +75,18 @@ export function GenerationProgressPanel({ job, onDismiss, onCancel }: Generation
           </div>
         ) : null}
         {metaParts.length > 0 ? <span className="progress-panel-meta">{metaParts.join(" · ")}</span> : null}
-        {isRunning && onCancel ? (
+        {job.status === "queued" && onCancel ? (
+          <button
+            className="btn btn-small btn-ghost"
+            type="button"
+            aria-label="대기 취소"
+            title="대기 취소"
+            onClick={onCancel}
+          >
+            ×
+          </button>
+        ) : null}
+        {job.status === "running" && onCancel ? (
           <button className="btn btn-small btn-ghost" type="button" onClick={onCancel}>
             Cancel
           </button>

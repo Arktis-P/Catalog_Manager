@@ -19,7 +19,7 @@ function jobSortRank(job: CollectJob): number {
 }
 
 export function GlobalTaskBar() {
-  const { jobs: collectJobs, dismissJob: dismissCollectJob, lastError: collectError, clearLastError: clearCollectError } =
+  const { jobs: collectJobs, cancelJob: cancelCollectJob, dismissJob: dismissCollectJob, lastError: collectError, clearLastError: clearCollectError } =
     useCollectJobs();
   const {
     jobs: generationJobs,
@@ -37,7 +37,8 @@ export function GlobalTaskBar() {
             job.status === "queued" ||
             job.status === "running" ||
             job.status === "completed" ||
-            job.status === "failed",
+            job.status === "failed" ||
+            job.status === "cancelled",
         )
         .sort((a, b) => jobSortRank(a) - jobSortRank(b) || b.started_at.localeCompare(a.started_at)),
     [collectJobs, generationJobs],
@@ -67,34 +68,39 @@ export function GlobalTaskBar() {
             </button>
           </div>
         ) : null}
-        {activeJobs.map((job) =>
-          job.job_type === "image_generation" ? (
-            <GenerationProgressPanel
-              key={job.job_id}
-              job={job}
-              onCancel={
-                job.status === "queued" || job.status === "running"
-                  ? () => void cancelJob(job.job_id)
-                  : undefined
-              }
-              onDismiss={
-                job.status === "completed" || job.status === "failed" || job.status === "cancelled"
-                  ? () => dismissGenerationJob(job.job_id)
-                  : undefined
-              }
-            />
-          ) : (
-            <CollectProgressPanel
-              key={job.job_id}
-              job={job}
-              onDismiss={
-                job.status === "completed" || job.status === "failed"
-                  ? () => dismissCollectJob(job.job_id)
-                  : undefined
-              }
-            />
-          ),
-        )}
+        {activeJobs.length > 0 ? (
+          <div className="global-task-bar-jobs">
+            {activeJobs.map((job) =>
+              job.job_type === "image_generation" ? (
+                <GenerationProgressPanel
+                  key={job.job_id}
+                  job={job}
+                  onCancel={
+                    job.status === "queued" || job.status === "running"
+                      ? () => void cancelJob(job.job_id)
+                      : undefined
+                  }
+                  onDismiss={
+                    job.status === "completed" || job.status === "failed" || job.status === "cancelled"
+                      ? () => dismissGenerationJob(job.job_id)
+                      : undefined
+                  }
+                />
+              ) : (
+                <CollectProgressPanel
+                  key={job.job_id}
+                  job={job}
+                  onCancel={job.status === "queued" ? () => void cancelCollectJob(job.job_id) : undefined}
+                  onDismiss={
+                    job.status === "completed" || job.status === "failed" || job.status === "cancelled"
+                      ? () => dismissCollectJob(job.job_id)
+                      : undefined
+                  }
+                />
+              ),
+            )}
+          </div>
+        ) : null}
       </div>
     </section>
   );

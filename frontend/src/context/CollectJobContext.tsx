@@ -16,6 +16,7 @@ interface CollectJobContextValue {
   jobs: CollectJob[];
   startCollect: (seriesId: number) => Promise<CollectJob>;
   startAppearanceExtract: (seriesId: number) => Promise<CollectJob>;
+  cancelJob: (jobId: string) => Promise<void>;
   dismissJob: (jobId: string) => void;
   isProcessingSeries: (seriesId: number) => boolean;
   isCollectingSeries: (seriesId: number) => boolean;
@@ -178,6 +179,16 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
     setDismissedJobIds((current) => new Set(current).add(jobId));
   }, []);
 
+  const cancelJob = useCallback(async (jobId: string) => {
+    try {
+      setLastError(null);
+      const job = await api.cancelCollectJob(jobId);
+      setJobs((current) => upsertJob(current, job));
+    } catch (err) {
+      setLastError(err instanceof Error ? err.message : "Failed to cancel background job");
+    }
+  }, []);
+
   const isActiveJobForSeries = useCallback(
     (seriesId: number, jobType?: CollectJob["job_type"]) =>
       visibleJobs.some(
@@ -209,6 +220,7 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
       jobs: visibleJobs,
       startCollect,
       startAppearanceExtract,
+      cancelJob,
       dismissJob,
       isProcessingSeries,
       isCollectingSeries,
@@ -222,6 +234,7 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
       visibleJobs,
       startCollect,
       startAppearanceExtract,
+      cancelJob,
       dismissJob,
       isProcessingSeries,
       isCollectingSeries,

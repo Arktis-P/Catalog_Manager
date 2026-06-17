@@ -1101,6 +1101,26 @@ button,
   gap: 4px;
 }
 
+.global-task-bar-jobs {
+  --global-task-row-height: 34px;
+  --global-task-row-gap: 4px;
+  --global-task-visible-rows: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--global-task-row-gap);
+  max-height: calc(
+    var(--global-task-visible-rows) * var(--global-task-row-height) +
+      (var(--global-task-visible-rows) - 1) * var(--global-task-row-gap)
+  );
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.global-task-bar-jobs .progress-panel-compact {
+  flex-shrink: 0;
+}
+
 .global-task-error {
   display: flex;
   align-items: center;

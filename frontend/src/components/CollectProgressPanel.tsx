@@ -3,6 +3,7 @@ import type { CollectJob } from "../types";
 interface CollectProgressPanelProps {
   job: CollectJob;
   onDismiss?: () => void;
+  onCancel?: () => void;
 }
 
 function getProgressPercent(job: CollectJob): number | null {
@@ -43,6 +44,8 @@ function phaseLabel(phase: string): string {
       return "시작";
     case "queued":
       return "대기";
+    case "cancelled":
+      return "취소";
     default:
       return "준비";
   }
@@ -105,7 +108,7 @@ function jobTypeLabel(job: CollectJob): string {
   return job.job_type === "appearance_extract" ? "Appearance" : "Collect";
 }
 
-export function CollectProgressPanel({ job, onDismiss }: CollectProgressPanelProps) {
+export function CollectProgressPanel({ job, onDismiss, onCancel }: CollectProgressPanelProps) {
   const percent = getProgressPercent(job);
   const isRunning = job.status === "queued" || job.status === "running";
   const meta = formatMeta(job, percent);
@@ -138,6 +141,17 @@ export function CollectProgressPanel({ job, onDismiss }: CollectProgressPanelPro
           </div>
         ) : null}
         {meta ? <span className="progress-panel-meta">{meta}</span> : null}
+        {job.status === "queued" && onCancel ? (
+          <button
+            className="btn btn-small btn-ghost"
+            type="button"
+            aria-label="대기 취소"
+            title="대기 취소"
+            onClick={onCancel}
+          >
+            ×
+          </button>
+        ) : null}
         {onDismiss ? (
           <button className="btn btn-small btn-ghost" type="button" onClick={onDismiss}>
             ×

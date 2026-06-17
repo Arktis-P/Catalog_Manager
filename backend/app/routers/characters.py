@@ -163,6 +163,23 @@ def get_collect_job(job_id: str):
     return CollectJobResponse.from_state(job)
 
 
+@router.post("/collect/jobs/{job_id}/cancel", response_model=CollectJobResponse)
+def cancel_collect_job(job_id: str):
+    job = series_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Collect job not found")
+    if job.status == "cancelled":
+        return CollectJobResponse.from_state(job)
+    if job.status != "queued":
+        raise HTTPException(status_code=400, detail="Only queued jobs can be cancelled")
+    if not series_job_manager.cancel_job(job_id):
+        raise HTTPException(status_code=409, detail="Job could not be cancelled")
+    job = series_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Collect job not found")
+    return CollectJobResponse.from_state(job)
+
+
 @router.get("/series/{series_id}/collect/active", response_model=CollectJobResponse)
 def get_active_collect_job_for_series(series_id: int):
     job = series_job_manager.get_active_job_for_series(series_id)

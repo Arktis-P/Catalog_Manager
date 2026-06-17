@@ -86,6 +86,28 @@ class SeriesJobManager:
     def start_appearance_extract(self, series_id: int) -> SeriesJobState:
         return self._enqueue(series_id, JOB_TYPE_APPEARANCE_EXTRACT)
 
+    def cancel_job(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status != "queued":
+                return False
+
+            self._job_queue = deque(queued_id for queued_id in self._job_queue if queued_id != job_id)
+
+            task_label = "수집" if job.job_type == JOB_TYPE_CHARACTER_COLLECT else "외형 추출"
+            job.status = "cancelled"
+            job.phase = "cancelled"
+            job.message = f"{task_label} 대기 취소됨"
+            job.finished_at = _utc_now()
+
+            if self._active_by_series.get(job.series_id) == job_id:
+                self._active_by_series.pop(job.series_id, None)
+
+            self._refresh_queue_messages()
+
+        self._dispatch_next()
+        return True
+
     def _enqueue(self, series_id: int, job_type: str) -> SeriesJobState:
         with self._lock:
             existing_job_id = self._active_by_series.get(series_id)
