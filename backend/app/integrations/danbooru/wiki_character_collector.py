@@ -67,7 +67,12 @@ class WikiCharacterCollector:
         body = page.get("body")
         return body if isinstance(body, str) else None
 
-    def _discover_list_page_titles(self, series_tag: str) -> list[str]:
+    def _discover_list_page_titles(
+        self,
+        series_tag: str,
+        *,
+        progress_callback: CollectProgressCallback | None = None,
+    ) -> list[str]:
         normalized_series = normalize_wiki_title(series_tag)
         candidates: list[str] = []
 
@@ -84,11 +89,24 @@ class WikiCharacterCollector:
 
         found: list[str] = []
         seen: set[str] = set()
+        unique_candidates: list[str] = []
         for title in candidates:
             normalized_title = normalize_wiki_title(title)
             if normalized_title in seen:
                 continue
             seen.add(normalized_title)
+            unique_candidates.append(normalized_title)
+
+        total_checks = len(unique_candidates)
+        for index, normalized_title in enumerate(unique_candidates, start=1):
+            self._emit(
+                progress_callback,
+                phase="discovering_wiki",
+                message=f"list 페이지 검색 {index}/{total_checks} · {normalized_title}",
+                current=index,
+                total=total_checks,
+                discovered=0,
+            )
             if self._fetch_wiki_body(normalized_title):
                 found.append(normalized_title)
 
@@ -96,6 +114,7 @@ class WikiCharacterCollector:
             f"list_of*{normalized_series}*characters*",
             f"list_of*{compact}*characters*" if compact else None,
         )
+        search_titles: list[str] = []
         for pattern in search_patterns:
             if not pattern:
                 continue
@@ -107,7 +126,19 @@ class WikiCharacterCollector:
                 if normalized_title in seen:
                     continue
                 seen.add(normalized_title)
-                found.append(normalized_title)
+                search_titles.append(normalized_title)
+
+        search_total = len(search_titles)
+        for index, normalized_title in enumerate(search_titles, start=1):
+            self._emit(
+                progress_callback,
+                phase="discovering_wiki",
+                message=f"list 검색 결과 확인 {index}/{search_total} · {normalized_title}",
+                current=index,
+                total=max(search_total, 1),
+                discovered=0,
+            )
+            found.append(normalized_title)
 
         return found
 
@@ -187,16 +218,16 @@ class WikiCharacterCollector:
         wiki_title: str,
         from_list_page: bool,
         visited: set[str],
-    ) -> None:
+    ) -> str | None:
         normalized_title = normalize_wiki_title(wiki_title)
         if normalized_title in visited:
-            return
+            return None
         visited.add(normalized_title)
         result.visited_wiki_titles.append(normalized_title)
 
         body = self._fetch_wiki_body(normalized_title)
         if not body:
-            return
+            return None
 
         self._classify_raw_wiki_links(
             result,
@@ -209,6 +240,7 @@ class WikiCharacterCollector:
         if from_list_page or is_list_of_characters_page(normalized_title):
             if normalized_title not in result.list_page_titles:
                 result.list_page_titles.append(normalized_title)
+        return body
 
     def discover(
         self,
@@ -218,55 +250,48 @@ class WikiCharacterCollector:
     ) -> WikiDiscoveryResult:
         result = WikiDiscoveryResult(series_tag=series_tag)
         visited: set[str] = set()
+        normalized_series = normalize_wiki_title(series_tag)
 
-        self._emit(
-            progress_callback,
-            phase="discovering_wiki",
-            message=f"위키 탐색: {series_tag}",
-            current=0,
-            total=1,
-            discovered=0,
-        )
+        list_titles = self._discover_list_page_titles(series_tag, progress_callback=progress_callback)
+        work_queue: list[tuple[str, bool]] = [(title, True) for title in list_titles]
+        if not any(title == normalized_series for title, _ in work_queue):
+            work_queue.append((normalized_series, False))
 
-        list_titles = self._discover_list_page_titles(series_tag)
-        for index, title in enumerate(list_titles, start=1):
-            self._parse_wiki_page(
-                result,
-                series_tag=series_tag,
-                wiki_title=title,
-                from_list_page=True,
-                visited=visited,
-            )
+        processed = 0
+        queue_index = 0
+        while queue_index < len(work_queue):
+            wiki_title, from_list_page = work_queue[queue_index]
+            queue_index += 1
+            processed += 1
+            total_pages = len(work_queue)
+
             self._emit(
                 progress_callback,
                 phase="discovering_wiki",
-                message=f"list 페이지 파싱 {index}/{len(list_titles)} · {title}",
-                current=index,
-                total=max(len(list_titles), 1),
+                message=f"위키 파싱 {processed}/{total_pages} · {wiki_title}",
+                current=processed,
+                total=total_pages,
                 discovered=len(result.characters),
             )
 
-        main_wiki_titles = [normalize_wiki_title(series_tag)]
-        for title in main_wiki_titles:
-            self._parse_wiki_page(
+            body = self._parse_wiki_page(
                 result,
                 series_tag=series_tag,
-                wiki_title=title,
-                from_list_page=False,
+                wiki_title=wiki_title,
+                from_list_page=from_list_page,
                 visited=visited,
             )
 
-        main_body = self._fetch_wiki_body(normalize_wiki_title(series_tag))
-        if main_body:
-            for link in extract_wiki_links(main_body):
-                if is_list_of_characters_page(link) and link not in visited:
-                    self._parse_wiki_page(
-                        result,
-                        series_tag=series_tag,
-                        wiki_title=link,
-                        from_list_page=True,
-                        visited=visited,
-                    )
+            if wiki_title == normalized_series and body:
+                for link in extract_wiki_links(body):
+                    if not is_list_of_characters_page(link):
+                        continue
+                    linked_title = normalize_wiki_title(link)
+                    if linked_title in visited:
+                        continue
+                    if any(existing_title == linked_title for existing_title, _ in work_queue):
+                        continue
+                    work_queue.append((linked_title, True))
 
         if result.characters:
             result.sub_series_tags = []
@@ -275,11 +300,11 @@ class WikiCharacterCollector:
             progress_callback,
             phase="discovering_wiki",
             message=(
-                f"위키 발견 완료 · 캐릭터 {len(result.characters)} · "
-                f"하위 시리즈 {len(result.sub_series_tags)}"
+                f"위키 발견 완료 · 페이지 {len(result.visited_wiki_titles)} · "
+                f"캐릭터 {len(result.characters)} · 하위 시리즈 {len(result.sub_series_tags)}"
             ),
-            current=len(result.characters),
-            total=max(len(result.characters), 1),
+            current=len(result.visited_wiki_titles),
+            total=max(len(result.visited_wiki_titles), 1),
             discovered=len(result.characters),
         )
         return result

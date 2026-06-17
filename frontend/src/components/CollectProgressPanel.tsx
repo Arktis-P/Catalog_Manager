@@ -17,6 +17,10 @@ function getProgressPercent(job: CollectJob): number | null {
 
 function phaseLabel(phase: string): string {
   switch (phase) {
+    case "discovering_wiki":
+      return "위키";
+    case "discovering_wiki_subseries":
+      return "하위";
     case "discovering_pattern":
       return "패턴";
     case "discovering_posts_scan":
@@ -78,6 +82,12 @@ function formatMeta(job: CollectJob, percent: number | null): string | null {
     }
   } else if (job.total > 0) {
     parts.push(`${job.current}/${job.total}${percent !== null ? ` ${percent}%` : ""}`);
+    if (
+      (job.phase === "discovering_wiki" || job.phase === "discovering_wiki_subseries") &&
+      job.discovered > 0
+    ) {
+      parts.push(`캐릭터 ${job.discovered}`);
+    }
   } else if (job.discovered > 0) {
     parts.push(`discovered ${job.discovered}`);
   }
