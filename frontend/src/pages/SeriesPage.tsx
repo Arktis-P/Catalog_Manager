@@ -9,6 +9,17 @@ import { resolveSeriesStatus, seriesStatusBadgeClass } from "../utils/seriesStat
 
 type ModalMode = "create" | "edit";
 
+function isSeriesSelectable(series: Series): boolean {
+  return !series.is_merged_child;
+}
+
+function sortSeriesByPriority(seriesList: Series[]): Series[] {
+  return [...seriesList].sort(
+    (left, right) =>
+      right.priority - left.priority || right.post_count - left.post_count || left.id - right.id,
+  );
+}
+
 const emptyForm: SeriesCreatePayload = {
   series_tag: "",
   display_name: "",
@@ -21,6 +32,7 @@ const emptyForm: SeriesCreatePayload = {
 export function SeriesPage() {
   const {
     startCollect,
+    startCollectMany,
     startAppearanceExtract,
     isProcessingSeries,
     isCollectingSeries,
@@ -42,13 +54,20 @@ export function SeriesPage() {
   const [danbooruStatus, setDanbooruStatus] = useState<DanbooruStatus | null>(null);
   const [viewingSeries, setViewingSeries] = useState<Series | null>(null);
   const [mergingSeriesList, setMergingSeriesList] = useState<Series[] | null>(null);
-  const [selectedMergeIds, setSelectedMergeIds] = useState<Set<number>>(() => new Set());
+  const [selectedSeriesIds, setSelectedSeriesIds] = useState<Set<number>>(() => new Set());
   const [expandedParentIds, setExpandedParentIds] = useState<Set<number>>(() => new Set());
   const [exportingCharacters, setExportingCharacters] = useState(false);
 
   const mergeEligibleItems = useMemo(
     () => items.filter((series) => isSeriesMergeEligible(series)),
     [items],
+  );
+
+  const selectableItems = useMemo(() => items.filter((series) => isSeriesSelectable(series)), [items]);
+
+  const selectedCollectTargets = useMemo(
+    () => sortSeriesByPriority(selectableItems.filter((item) => selectedSeriesIds.has(item.id))),
+    [selectableItems, selectedSeriesIds],
   );
 
   const hiddenChildCount = useMemo(
@@ -204,6 +223,10 @@ export function SeriesPage() {
   const handleCollectCharacters = async (series: Series) => {
     setError(null);
     try {
+      if (selectedSeriesIds.has(series.id) && selectedCollectTargets.length > 1) {
+        await startCollectMany(selectedCollectTargets.map((item) => item.id));
+        return;
+      }
       await startCollect(series.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to collect characters");
@@ -298,8 +321,8 @@ export function SeriesPage() {
     }
   };
 
-  const toggleMergeSelection = (seriesId: number) => {
-    setSelectedMergeIds((current) => {
+  const toggleSeriesSelection = (seriesId: number) => {
+    setSelectedSeriesIds((current) => {
       const next = new Set(current);
       if (next.has(seriesId)) {
         next.delete(seriesId);
@@ -310,11 +333,11 @@ export function SeriesPage() {
     });
   };
 
-  const toggleAllMergeSelection = () => {
-    setSelectedMergeIds((current) =>
-      current.size === mergeEligibleItems.length
+  const toggleAllSeriesSelection = () => {
+    setSelectedSeriesIds((current) =>
+      current.size === selectableItems.length
         ? new Set()
-        : new Set(mergeEligibleItems.map((item) => item.id)),
+        : new Set(selectableItems.map((item) => item.id)),
     );
   };
 
@@ -331,8 +354,8 @@ export function SeriesPage() {
   };
 
   const openMergeModal = (series: Series) => {
-    const selected = mergeEligibleItems.filter((item) => selectedMergeIds.has(item.id));
-    if (selectedMergeIds.has(series.id) && selected.length > 1) {
+    const selected = mergeEligibleItems.filter((item) => selectedSeriesIds.has(item.id));
+    if (selectedSeriesIds.has(series.id) && selected.length > 1) {
       setMergingSeriesList(selected);
       return;
     }
@@ -464,15 +487,15 @@ export function SeriesPage() {
                 <thead>
                   <tr>
                     <th className="col-checkbox">
-                      {mergeEligibleItems.length > 0 ? (
+                      {selectableItems.length > 0 ? (
                         <input
                           type="checkbox"
-                          aria-label="Select all merge-eligible series"
+                          aria-label="Select all series"
                           checked={
-                            mergeEligibleItems.length > 0 &&
-                            selectedMergeIds.size === mergeEligibleItems.length
+                            selectableItems.length > 0 &&
+                            selectedSeriesIds.size === selectableItems.length
                           }
-                          onChange={toggleAllMergeSelection}
+                          onChange={toggleAllSeriesSelection}
                         />
                       ) : null}
                     </th>
@@ -491,12 +514,12 @@ export function SeriesPage() {
                   {visibleItems.map((series) => (
                     <tr key={series.id} className={series.is_merged_child ? "series-child-row" : undefined}>
                       <td className="col-checkbox">
-                        {isSeriesMergeEligible(series) ? (
+                        {isSeriesSelectable(series) ? (
                           <input
                             type="checkbox"
-                            aria-label={`Select ${series.series_tag} for merge`}
-                            checked={selectedMergeIds.has(series.id)}
-                            onChange={() => toggleMergeSelection(series.id)}
+                            aria-label={`Select ${series.series_tag}`}
+                            checked={selectedSeriesIds.has(series.id)}
+                            onChange={() => toggleSeriesSelection(series.id)}
                           />
                         ) : null}
                       </td>
@@ -587,6 +610,11 @@ export function SeriesPage() {
                                 type="button"
                                 disabled={
                                   isProcessingSeries(series.id) || danbooruStatus?.ready === false
+                                }
+                                title={
+                                  selectedSeriesIds.has(series.id) && selectedCollectTargets.length > 1
+                                    ? `선택한 ${selectedCollectTargets.length}개 시리즈 수집 (priority 순)`
+                                    : undefined
                                 }
                                 onClick={() => void handleCollectCharacters(series)}
                               >
@@ -748,7 +776,7 @@ export function SeriesPage() {
           seriesList={mergingSeriesList}
           onClose={() => setMergingSeriesList(null)}
           onMerged={() => {
-            setSelectedMergeIds(new Set());
+            setSelectedSeriesIds(new Set());
             void loadSeries();
           }}
         />

@@ -146,6 +146,12 @@ export const api = {
   startCollectCharactersJob: (seriesId: number) =>
     request<CollectJob>(`/characters/series/${seriesId}/collect/start`, { method: "POST" }),
 
+  startCollectCharactersJobs: (seriesIds: number[]) =>
+    request<{ items: CollectJob[] }>("/characters/collect/start-batch", {
+      method: "POST",
+      body: JSON.stringify({ series_ids: seriesIds }),
+    }),
+
   startAppearanceExtractJob: (seriesId: number) =>
     request<CollectJob>(`/characters/series/${seriesId}/appearance/start`, { method: "POST" }),
 

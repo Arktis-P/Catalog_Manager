@@ -15,6 +15,7 @@ import { ensureNotificationPermission, showTaskCompleteNotification } from "../u
 interface CollectJobContextValue {
   jobs: CollectJob[];
   startCollect: (seriesId: number) => Promise<CollectJob>;
+  startCollectMany: (seriesIds: number[]) => Promise<CollectJob[]>;
   startAppearanceExtract: (seriesId: number) => Promise<CollectJob>;
   cancelJob: (jobId: string) => Promise<void>;
   dismissJob: (jobId: string) => void;
@@ -168,6 +169,23 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
     return job;
   }, [registerStartedJob]);
 
+  const startCollectMany = useCallback(async (seriesIds: number[]) => {
+    if (seriesIds.length === 0) {
+      return [];
+    }
+    setLastError(null);
+    if (seriesIds.length === 1) {
+      const job = await api.startCollectCharactersJob(seriesIds[0]);
+      registerStartedJob(job);
+      return [job];
+    }
+    const response = await api.startCollectCharactersJobs(seriesIds);
+    for (const job of response.items) {
+      registerStartedJob(job);
+    }
+    return response.items;
+  }, [registerStartedJob]);
+
   const startAppearanceExtract = useCallback(async (seriesId: number) => {
     setLastError(null);
     const job = await api.startAppearanceExtractJob(seriesId);
@@ -219,6 +237,7 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
     () => ({
       jobs: visibleJobs,
       startCollect,
+      startCollectMany,
       startAppearanceExtract,
       cancelJob,
       dismissJob,
@@ -233,6 +252,7 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
     [
       visibleJobs,
       startCollect,
+      startCollectMany,
       startAppearanceExtract,
       cancelJob,
       dismissJob,

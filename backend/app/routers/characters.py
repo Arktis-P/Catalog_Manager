@@ -13,6 +13,7 @@ from app.schemas.character_collect import (
     CharacterCollectRequest,
     CharacterCollectResultResponse,
     CharacterCollectSummaryResponse,
+    CollectBatchStartRequest,
     CollectJobListResponse,
     CollectJobResponse,
 )
@@ -130,6 +131,23 @@ def start_collect_characters_for_series(series_id: int, db: Session = Depends(ge
         raise HTTPException(status_code=400, detail="Configure Danbooru credentials in input/danbooru.env first.")
     job = series_job_manager.start_series_collect(series_id)
     return CollectJobResponse.from_state(job)
+
+
+@router.post("/collect/start-batch", response_model=CollectJobListResponse)
+def start_collect_characters_batch(payload: CollectBatchStartRequest, db: Session = Depends(get_db)):
+    if not settings.danbooru_configured:
+        raise HTTPException(status_code=400, detail="Configure Danbooru credentials in input/danbooru.env first.")
+
+    unique_ids = list(dict.fromkeys(payload.series_ids))
+    series_list = db.query(Series).filter(Series.id.in_(unique_ids)).all()
+    if len(series_list) != len(unique_ids):
+        found_ids = {series.id for series in series_list}
+        missing = [series_id for series_id in unique_ids if series_id not in found_ids]
+        raise HTTPException(status_code=404, detail=f"Series not found: {missing[0]}")
+
+    series_list.sort(key=lambda series: (-series.priority, -series.post_count, series.id))
+    jobs = [series_job_manager.start_series_collect(series.id) for series in series_list]
+    return CollectJobListResponse(items=[CollectJobResponse.from_state(job) for job in jobs])
 
 
 @router.post("/series/{series_id}/appearance/start", response_model=CollectJobResponse)
