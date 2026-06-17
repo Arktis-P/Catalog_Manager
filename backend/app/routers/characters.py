@@ -145,7 +145,7 @@ def start_collect_characters_batch(payload: CollectBatchStartRequest, db: Sessio
         missing = [series_id for series_id in unique_ids if series_id not in found_ids]
         raise HTTPException(status_code=404, detail=f"Series not found: {missing[0]}")
 
-    series_list.sort(key=lambda series: (-series.priority, -series.post_count, series.id))
+    series_list.sort(key=lambda series: (series.priority, -series.post_count, series.id))
     jobs = [series_job_manager.start_series_collect(series.id) for series in series_list]
     return CollectJobListResponse(items=[CollectJobResponse.from_state(job) for job in jobs])
 

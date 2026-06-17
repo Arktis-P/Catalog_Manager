@@ -16,7 +16,7 @@ function isSeriesSelectable(series: Series): boolean {
 function sortSeriesByPriority(seriesList: Series[]): Series[] {
   return [...seriesList].sort(
     (left, right) =>
-      right.priority - left.priority || right.post_count - left.post_count || left.id - right.id,
+      left.priority - right.priority || right.post_count - left.post_count || left.id - right.id,
   );
 }
 
