@@ -47,7 +47,19 @@ def _hidden_subprocess_kwargs() -> dict:
 
 
 def ensure_frontend_build() -> None:
-    if (DIST_DIR / "index.html").exists():
+    dist_index = DIST_DIR / "index.html"
+    src_dir = FRONTEND_DIR / "src"
+
+    def build_is_stale() -> bool:
+        if not dist_index.is_file():
+            return True
+        dist_mtime = dist_index.stat().st_mtime
+        for path in src_dir.rglob("*"):
+            if path.is_file() and path.stat().st_mtime > dist_mtime:
+                return True
+        return False
+
+    if not build_is_stale():
         return
 
     print("[desktop] Building frontend...")

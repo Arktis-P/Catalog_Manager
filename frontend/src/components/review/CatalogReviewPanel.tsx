@@ -473,6 +473,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
 
       if (event.key === " " || event.code === "Space") {
         event.preventDefault();
+        event.stopPropagation();
         togglePreview();
         return;
       }
@@ -557,8 +558,8 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
       }
     };
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
   }, [
     completeFocused,
     focusedDraft,
@@ -629,6 +630,9 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
       </div>
 
       <div className="review-shortcut-bar">
+        <span className="review-rating-guide-inline">
+          평점: -1 대상 아님 · 0 생성 불가 · 1~2 보통 · 3 잠재 · 4 검증 · 5~6 선호
+        </span>
         <span>←→ 이미지</span>
         <span>↑↓ 캐릭터</span>
         <span>0-6 / - 레이팅 (재입력 시 해제)</span>
