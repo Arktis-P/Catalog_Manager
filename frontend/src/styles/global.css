@@ -1705,9 +1705,9 @@ button,
 
 .catalog-review-row {
   display: grid;
-  grid-template-columns: 200px 200px minmax(280px, 1fr);
+  grid-template-columns: 260px 260px minmax(280px, 1fr);
   gap: 12px;
-  min-height: 296px;
+  min-height: 360px;
   margin-bottom: 12px;
   padding: 12px;
   border: 1px solid transparent;
@@ -1757,15 +1757,15 @@ button,
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  width: 200px;
+  width: 260px;
 }
 
 .review-image-slot {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 200px;
-  height: 200px;
+  width: 260px;
+  height: 260px;
   border: 2px solid var(--border);
   border-radius: 10px;
   background: #111;
@@ -1836,7 +1836,18 @@ button,
   flex-shrink: 0;
 }
 
-.catalog-review-meta,
+.catalog-review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.catalog-review-tags-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .catalog-review-tags {
   display: flex;
   flex-wrap: wrap;
@@ -2008,13 +2019,13 @@ button,
 
 .catalog-review-images--quad {
   display: grid;
-  grid-template-columns: repeat(2, 200px);
+  grid-template-columns: repeat(2, 260px);
   gap: 12px;
 }
 
 .catalog-review-row--quad {
-  grid-template-columns: 412px minmax(280px, 1fr);
-  min-height: 456px;
+  grid-template-columns: 532px minmax(280px, 1fr);
+  min-height: 608px;
 }
 
 .review-needs-check-block {

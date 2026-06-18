@@ -36,10 +36,11 @@ export function appearanceTagChips(item: {
   gender: string | null;
   multi_color_hair: string | null;
   hair_color: string | null;
+  hair_shape: string | null;
   eye_color: string | null;
   feature_tags: string | null;
-}): Array<{ key: string; label: string; group: "gender" | "hair" | "multi" | "eyes" | "features" }> {
-  const chips: Array<{ key: string; label: string; group: "gender" | "hair" | "multi" | "eyes" | "features" }> = [];
+}): Array<{ key: string; label: string; group: "gender" | "hair" | "multi" | "shape" | "eyes" | "features" }> {
+  const chips: Array<{ key: string; label: string; group: "gender" | "hair" | "multi" | "shape" | "eyes" | "features" }> = [];
 
   if (item.gender) {
     chips.push({ key: `gender:${item.gender}`, label: item.gender, group: "gender" });
@@ -54,6 +55,10 @@ export function appearanceTagChips(item: {
       continue;
     }
     chips.push({ key: `multi:${tag}`, label: tagToPromptText(tag), group: "multi" });
+  }
+
+  for (const tag of splitTags(item.hair_shape)) {
+    chips.push({ key: `shape:${tag}`, label: tagToPromptText(tag), group: "shape" });
   }
 
   for (const tag of splitTags(item.eye_color)) {
@@ -98,11 +103,21 @@ export function buildFinalPrompt(
 
 export function defaultEnabledTagKeys(chips: ReturnType<typeof appearanceTagChips>): Set<string> {
   const enabled = new Set<string>();
+  let primaryHairEnabled = false;
+
   for (const chip of chips) {
-    if (chip.group === "hair" || chip.group === "multi") {
+    if (chip.group === "hair") {
+      if (!primaryHairEnabled) {
+        enabled.add(chip.key);
+        primaryHairEnabled = true;
+      }
+      continue;
+    }
+    if (chip.group === "multi") {
       enabled.add(chip.key);
     }
   }
+
   return enabled;
 }
 
@@ -125,6 +140,7 @@ export function resolveFinalPrompt(
     generation_prompt: string | null;
     multi_color_hair: string | null;
     hair_color: string | null;
+    hair_shape: string | null;
     eye_color: string | null;
     feature_tags: string | null;
     gender: string | null;

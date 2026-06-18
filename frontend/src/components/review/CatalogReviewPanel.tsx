@@ -11,8 +11,8 @@ import { ReviewImagePreview } from "./ReviewImagePreview";
 import { ReviewMoveSeriesModal } from "./ReviewMoveSeriesModal";
 import { toggleRating } from "./ReviewRatingStars";
 
-const ROW_HEIGHT = 296;
-const ROW_HEIGHT_QUAD = 448;
+const ROW_HEIGHT = 360;
+const ROW_HEIGHT_QUAD = 608;
 const ROW_GAP = 12;
 const PAGE_SIZE = 50;
 const PREVIEW_SIZE = 600;

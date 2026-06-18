@@ -109,6 +109,8 @@ export function CatalogReviewRow({
   const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
   const promptText = resolveFinalPrompt(item, draft) ?? "";
   const displayGender = draft.gender ?? item.gender;
+  const hairRowChips = chips.filter((chip) => chip.group === "hair" || chip.group === "multi" || chip.group === "shape");
+  const featureRowChips = chips.filter((chip) => chip.group === "eyes" || chip.group === "features");
   const imageSlots = item.images.slice(0, 4);
   const slotCount = quadLayout ? 4 : 2;
   const paddedSlots = [...imageSlots, ...Array(Math.max(0, slotCount - imageSlots.length)).fill(null)];
@@ -195,17 +197,16 @@ export function CatalogReviewRow({
 
         <ReviewRatingStars rating={draft.rating} onRate={locked ? () => undefined : onRate} />
 
-        <div className="catalog-review-tags">
-          {displayGender ? (
-            <button type="button" className={genderChipClass(displayGender)} disabled={locked}>
-              {displayGender}
-            </button>
-          ) : (
-            <span className="review-tag review-tag--muted">gender ?</span>
-          )}
-          {chips
-            .filter((chip) => chip.group !== "gender")
-            .map((chip) => (
+        <div className="catalog-review-tags-stack">
+          <div className="catalog-review-tags catalog-review-tags--hair">
+            {displayGender ? (
+              <button type="button" className={genderChipClass(displayGender)} disabled={locked}>
+                {displayGender}
+              </button>
+            ) : (
+              <span className="review-tag review-tag--muted">gender ?</span>
+            )}
+            {hairRowChips.map((chip) => (
               <button
                 key={chip.key}
                 type="button"
@@ -216,6 +217,22 @@ export function CatalogReviewRow({
                 {chip.label}
               </button>
             ))}
+          </div>
+          {featureRowChips.length > 0 ? (
+            <div className="catalog-review-tags catalog-review-tags--features">
+              {featureRowChips.map((chip) => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  className={`review-tag${enabledTags.has(chip.key) ? " review-tag--enabled" : ""}`}
+                  onClick={() => onToggleTag(chip.key)}
+                  disabled={locked}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="catalog-review-prompt-field">
