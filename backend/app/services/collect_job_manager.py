@@ -12,6 +12,7 @@ from app.models.character import Character
 from app.models.series import Series
 from app.services.appearance_service import AppearanceService
 from app.services.character_service import CharacterService
+from app.services.db_write_queue import job_write_context
 from app.services.settings_service import SettingsService
 
 JOB_TYPE_CHARACTER_COLLECT = "character_collect"
@@ -183,6 +184,14 @@ class SeriesJobManager:
     def _run_series_collect(self, job_id: str, series_id: int) -> None:
         db = SessionLocal()
         try:
+            with job_write_context(job_id):
+                self._run_series_collect_inner(job_id, series_id, db)
+        finally:
+            db.close()
+            self._finish_job(job_id, series_id)
+
+    def _run_series_collect_inner(self, job_id: str, series_id: int, db) -> None:
+        try:
             series = db.query(Series).filter(Series.id == series_id).first()
             if not series:
                 self._update_job(
@@ -251,12 +260,17 @@ class SeriesJobManager:
                 error=str(exc),
                 finished_at=_utc_now(),
             )
+
+    def _run_appearance_extract(self, job_id: str, series_id: int) -> None:
+        db = SessionLocal()
+        try:
+            with job_write_context(job_id):
+                self._run_appearance_extract_inner(job_id, series_id, db)
         finally:
             db.close()
             self._finish_job(job_id, series_id)
 
-    def _run_appearance_extract(self, job_id: str, series_id: int) -> None:
-        db = SessionLocal()
+    def _run_appearance_extract_inner(self, job_id: str, series_id: int, db) -> None:
         try:
             series = db.query(Series).filter(Series.id == series_id).first()
             if not series:
@@ -332,9 +346,6 @@ class SeriesJobManager:
                 error=str(exc),
                 finished_at=_utc_now(),
             )
-        finally:
-            db.close()
-            self._finish_job(job_id, series_id)
 
     def _finish_job(self, job_id: str, series_id: int) -> None:
         with self._lock:

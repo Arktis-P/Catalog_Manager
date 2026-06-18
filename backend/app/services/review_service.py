@@ -12,6 +12,7 @@ from app.models.image import Image
 from app.models.review import Review
 from app.models.series import Series
 from app.services.character_image_service import purge_character_images
+from app.services.db_write_queue import commit_db_session
 from app.services.prompt_service import build_generation_prompt
 
 
@@ -78,7 +79,7 @@ class ReviewService:
         character.appearance_confirmed = True
         if character.status == "needs_check":
             character.status = "confirmed"
-        self.db.commit()
+        commit_db_session(self.db)
         self.db.refresh(character)
         return character
 
@@ -113,7 +114,7 @@ class ReviewService:
             character.gender = gender or None
 
         character.generation_prompt = build_generation_prompt(character)
-        self.db.commit()
+        commit_db_session(self.db)
         self.db.refresh(character)
         return character
 
@@ -247,7 +248,7 @@ class ReviewService:
         review.final_prompt = final_prompt or character.generation_prompt
         review.review_status = "completed"
 
-        self.db.commit()
+        commit_db_session(self.db)
         self.db.refresh(character)
         return character
 
@@ -265,7 +266,7 @@ class ReviewService:
 
         character.status = "confirmed"
         character.needs_check_reason = None
-        self.db.commit()
+        commit_db_session(self.db)
         self.db.refresh(character)
         return character
 
@@ -301,6 +302,6 @@ class ReviewService:
         for image in character.images:
             image.is_cover = False
 
-        self.db.commit()
+        commit_db_session(self.db)
         self.db.refresh(character)
         return character

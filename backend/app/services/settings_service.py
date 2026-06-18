@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.setting import Setting
+from app.services.db_write_queue import commit_db_session
 from app.services.generation_prompt_builder import (
     GenerationPromptConfig,
     default_generation_prompt_config,
@@ -48,7 +49,7 @@ class SettingsService:
             row.value = value
         else:
             self.db.add(Setting(key=key, value=value))
-        self.db.commit()
+        commit_db_session(self.db)
 
     def get_collect_max_concurrent(self) -> int:
         row = self.db.query(Setting).filter(Setting.key == SETTING_COLLECT_MAX_CONCURRENT).first()
@@ -67,7 +68,7 @@ class SettingsService:
             row.value = str(clamped)
         else:
             self.db.add(Setting(key=SETTING_COLLECT_MAX_CONCURRENT, value=str(clamped)))
-        self.db.commit()
+        commit_db_session(self.db)
         return clamped
 
     def get_naia_base_url(self) -> str:

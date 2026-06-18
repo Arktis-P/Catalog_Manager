@@ -10,6 +10,7 @@ from app.integrations.danbooru.client import DanbooruClient
 from app.models.character import Character
 from app.models.series import Series
 from app.services.collect_job_manager import series_job_manager
+from app.services.db_write_queue import commit_db_session
 
 MERGEABLE_STATUSES = frozenset({"collected", "tagged"})
 
@@ -363,7 +364,7 @@ class SeriesMergeService:
         if parent.status == "pending" and parent_character_count > 0:
             parent.status = "collected"
 
-        self.db.commit()
+        commit_db_session(self.db)
         self.db.refresh(parent)
 
         return MergeResult(
@@ -408,7 +409,7 @@ class SeriesMergeService:
         if child.status == "disabled":
             child.status = "collected"
 
-        self.db.commit()
+        commit_db_session(self.db)
         child_character_count = self.db.query(Character.id).filter(Character.series_id == child.id).count()
         return UnmergeResult(
             child_series_id=child.id,

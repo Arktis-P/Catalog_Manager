@@ -14,6 +14,7 @@ from app.integrations.danbooru.client import DanbooruClient
 from app.integrations.danbooru.wiki_character_collector import WikiCharacterCollector, WikiCharacterCandidate
 from app.models.character import Character
 from app.models.series import Series
+from app.services.db_write_queue import commit_db_session
 
 CollectProgressCallback = Callable[[dict[str, object]], None]
 
@@ -178,7 +179,7 @@ class CharacterService:
 
         target_series = series
         series.status = "collecting"
-        self.db.commit()
+        commit_db_session(self.db)
 
         discovery = self.wiki_collector.discover(series.series_tag, progress_callback=progress_callback)
         skipped_sub_series: list[str] = list(discovery.skipped_sub_series)
@@ -252,7 +253,7 @@ class CharacterService:
             target_series.last_collect_created = total_created
             target_series.last_collect_skipped = total_skipped
             self._finalize_collect_status(target_series)
-            self.db.commit()
+            commit_db_session(self.db)
             result = CharacterCollectResult(
                 series_tag=target_series.series_tag,
                 discovered=total_discovered,
@@ -292,7 +293,7 @@ class CharacterService:
         self._finalize_collect_status(target_series)
         target_series.last_collect_created = created
         target_series.last_collect_skipped = skipped_existing
-        self.db.commit()
+        commit_db_session(self.db)
         result = CharacterCollectResult(
             series_tag=target_series.series_tag,
             discovered=total_discovered,
@@ -363,7 +364,7 @@ class CharacterService:
     ) -> CharacterCollectResult:
         if manage_status:
             series.status = "collecting"
-            self.db.commit()
+            commit_db_session(self.db)
 
         existing_tags = self.get_existing_tags(series.id)
         discover_limit = None
@@ -429,7 +430,7 @@ class CharacterService:
         series.last_collect_created = created
         series.last_collect_skipped = skipped_existing
 
-        self.db.commit()
+        commit_db_session(self.db)
         return CharacterCollectResult(
             series_tag=series.series_tag,
             discovered=len(candidates_map),
@@ -490,7 +491,7 @@ class CharacterService:
         )
         character.status = "needs_check"
         character.needs_check_reason = f"Moved to series '{series.series_tag}'"
-        self.db.commit()
+        commit_db_session(self.db)
         self.db.refresh(character)
         return character
 
@@ -500,7 +501,7 @@ class CharacterService:
             raise ValueError("Character not found")
         tag = character.character_tag
         self.db.delete(character)
-        self.db.commit()
+        commit_db_session(self.db)
         return tag
 
     def collect_batch(

@@ -14,6 +14,7 @@ from app.models.review import Review
 from app.models.series import Series
 from app.schemas.character import CATALOG_EXPORT_COLUMNS
 from app.services.character_image_service import purge_character_images
+from app.services.db_write_queue import commit_db_session
 from app.services.prompt_service import build_generation_prompt, mask_appearance_for_catalog
 
 
@@ -270,7 +271,7 @@ class CatalogService:
                 purge_character_images(self.db, character)
                 purged_any = True
         if purged_any:
-            self.db.commit()
+            commit_db_session(self.db)
             rows = (
                 query.order_by(Series.post_count.desc(), Character.post_count.desc(), Character.id.asc())
                 .offset(skip)
@@ -431,7 +432,7 @@ class CatalogService:
             if final_prompt is not None:
                 review.final_prompt = final_prompt or None
 
-        self.db.commit()
+        commit_db_session(self.db)
         self.db.refresh(character)
 
         cover_image = self._cover_map([character.id]).get(character.id)

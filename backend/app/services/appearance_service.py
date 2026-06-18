@@ -18,6 +18,7 @@ from app.integrations.danbooru.series_membership import (
 )
 from app.models.character import Character
 from app.models.series import Series
+from app.services.db_write_queue import commit_db_session
 from app.services.prompt_service import build_generation_prompt
 
 AppearanceProgressCallback = Callable[[dict[str, object]], None]
@@ -136,7 +137,7 @@ class AppearanceService:
         if total > 0 and updated == total and series.status in {"pending", "collecting", "collected"}:
             series.status = "tagged"
 
-        self.db.commit()
+        commit_db_session(self.db)
         return AppearanceExtractResult(
             series_tag=series.series_tag,
             processed=total,
