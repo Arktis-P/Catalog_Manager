@@ -244,18 +244,24 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
 
   return (
     <div className="modal-backdrop" onClick={handleClose}>
-      <div className="modal modal-wide" onClick={(event) => event.stopPropagation()}>
+      <div className="modal modal-wide modal-merge" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header-row">
-          <div>
+          <div className="modal-header-copy">
             <h2 className="modal-title">{title}</h2>
             <p className="catalog-card-subtitle">
               collected/tagged 시리즈끼리 병합합니다. 중복 캐릭터는 상위 시리즈 쪽을 유지합니다.
             </p>
             {isBulkMerge ? (
-              <p className="catalog-card-subtitle" style={{ marginTop: 6 }}>
-                병합 대상:{" "}
-                {mergeableSeries.map((item) => item.series_tag).join(", ")}
-              </p>
+              <div className="merge-target-panel">
+                <div className="merge-target-label">병합 대상 ({mergeableSeries.length})</div>
+                <div className="merge-target-list">
+                  {mergeableSeries.map((item) => (
+                    <div key={item.id} className="merge-target-item">
+                      {item.series_tag}
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : null}
           </div>
           <button className="btn btn-small" type="button" disabled={submitting} onClick={handleClose}>
@@ -263,6 +269,7 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
           </button>
         </div>
 
+        <div className="modal-body-scroll">
         {!isBulkMerge ? (
           <div className="merge-mode-toggle">
             <label>
@@ -407,6 +414,7 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
             {selectedCandidate.post_count.toLocaleString()}
           </div>
         ) : null}
+        </div>
 
         <div className="modal-actions merge-modal-actions">
           <div className="merge-progress-area">
