@@ -219,6 +219,8 @@ class ReviewService:
             character.review = review
 
         normalized_gender = normalize_gender(gender) if gender else None
+        if not normalized_gender and character.gender:
+            normalized_gender = normalize_gender(character.gender)
         if normalized_gender:
             character.gender = normalized_gender
             review.gender = normalized_gender

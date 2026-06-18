@@ -458,12 +458,22 @@ button,
   font-size: 0.9rem;
   position: relative;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .catalog-card-image img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: top center;
+}
+
+.catalog-card-image-failed {
+  padding: 16px;
+  text-align: center;
+  line-height: 1.4;
+  color: var(--text-muted);
+  font-size: 0.9rem;
 }
 
 .catalog-card-body {
@@ -1979,6 +1989,16 @@ button,
   border-color: #6cb4ee;
   background: rgba(108, 180, 238, 0.18);
   color: #d8ecff;
+}
+
+.review-tag--nonhuman {
+  border-color: #9ca3af;
+  background: rgba(156, 163, 175, 0.16);
+  color: #e5e7eb;
+}
+
+.catalog-card-gender-tag {
+  cursor: default;
 }
 
 .review-tag--muted {

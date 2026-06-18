@@ -31,7 +31,7 @@ def to_catalog_item(character: Character) -> CatalogReviewItemResponse:
         hair_shape=character.hair_shape,
         eye_color=character.eye_color,
         feature_tags=character.feature_tags,
-        gender=normalize_gender(character.gender),
+        gender=normalize_gender(review.gender if review and review.gender else character.gender),
         generation_prompt=character.generation_prompt,
         character_status=character.status,
         needs_check_reason=character.needs_check_reason,

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import type { CatalogItem } from "../types";
 import { catalogCoverImageUrl } from "../utils/reviewImages";
+import { genderChipClass } from "../utils/reviewPrompt";
 
 interface CatalogCardProps {
   item: CatalogItem;
@@ -31,11 +32,19 @@ function formatAppearance(item: CatalogItem): string {
     .join(", ");
 }
 
+function genderTagLabel(gender: string): string {
+  if (gender === "1girl") return "girl";
+  if (gender === "1boy") return "boy";
+  if (gender === "no_humans") return "non-human";
+  return gender;
+}
+
 export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: CatalogCardProps) {
   const appearance = formatAppearance(item);
   const ratingText = ratingLabel(item.rating);
   const promptToCopy = item.final_prompt || item.generation_prompt;
-  const coverUrl = catalogCoverImageUrl(item.cover_image);
+  const isRatingZero = item.rating === 0;
+  const coverUrl = isRatingZero ? null : catalogCoverImageUrl(item.cover_image);
 
   const copyPrompt = async () => {
     if (!promptToCopy) return;
@@ -47,6 +56,8 @@ export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: Cata
       <div className="catalog-card-image">
         {coverUrl ? (
           <img src={coverUrl} alt={item.display_name} loading="lazy" decoding="async" />
+        ) : isRatingZero ? (
+          <span className="catalog-card-image-failed">Image generation failed</span>
         ) : (
           <span>No cover image</span>
         )}
@@ -58,6 +69,11 @@ export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: Cata
         </div>
 
         <div className="tag-row">
+          {item.gender ? (
+            <span className={`${genderChipClass(item.gender)} catalog-card-gender-tag`} title={item.gender}>
+              {genderTagLabel(item.gender)}
+            </span>
+          ) : null}
           <span className={statusBadgeClass(item.catalog_status)}>{item.catalog_status}</span>
           {item.needs_regen ? <span className="badge badge-warning">needs_regen</span> : null}
           {item.needs_review ? <span className="badge">needs_review</span> : null}
@@ -66,12 +82,6 @@ export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: Cata
         </div>
 
         <dl className="catalog-card-details">
-          {item.gender ? (
-            <>
-              <dt>Gender</dt>
-              <dd>{item.gender}</dd>
-            </>
-          ) : null}
           {item.type ? (
             <>
               <dt>Type</dt>

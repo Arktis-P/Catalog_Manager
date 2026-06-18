@@ -113,6 +113,9 @@ export function genderChipClass(gender: string | null | undefined): string {
   if (gender === "1boy") {
     return "review-tag review-tag--boy";
   }
+  if (gender === "no_humans") {
+    return "review-tag review-tag--nonhuman";
+  }
   return "review-tag";
 }
 

@@ -166,6 +166,16 @@ class CatalogService:
         return query
 
     @staticmethod
+    def _resolve_catalog_gender(character: Character) -> str | None:
+        review = character.review
+        raw = None
+        if review and review.gender:
+            raw = review.gender
+        elif character.gender:
+            raw = character.gender
+        return normalize_gender(raw) if raw else None
+
+    @staticmethod
     def _build_catalog_item(character: Character, catalog_status: str, has_cover: bool, cover_image: Image | None) -> dict:
         review = character.review
         rating = review.rating if review else None
@@ -187,6 +197,7 @@ class CatalogService:
             "type": review.type if review else None,
             "rating": review.rating if review else None,
             **appearance,
+            "gender": CatalogService._resolve_catalog_gender(character),
             "final_prompt": review.final_prompt if review else None,
             "character_status": character.status,
             "catalog_status": catalog_status,
