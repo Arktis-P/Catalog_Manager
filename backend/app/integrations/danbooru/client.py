@@ -4,6 +4,7 @@ import time
 from typing import Any
 from urllib.parse import quote
 
+import requests.exceptions
 from pybooru import Danbooru
 from pybooru.exceptions import PybooruHTTPError
 
@@ -71,7 +72,7 @@ class DanbooruClient:
         raise exc
 
     def _get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        last_exc: PybooruHTTPError | None = None
+        last_exc: Exception | None = None
         max_retries = max(1, settings.danbooru_request_retries)
 
         for attempt in range(max_retries):
@@ -88,9 +89,16 @@ class DanbooruClient:
                     last_exc = exc
                     continue
                 self._handle_http_error(exc)
+            except requests.exceptions.ConnectionError as exc:
+                if attempt < max_retries - 1:
+                    last_exc = exc
+                    continue
+                raise
 
-        if last_exc:
+        if isinstance(last_exc, PybooruHTTPError):
             self._handle_http_error(last_exc)
+        if last_exc:
+            raise last_exc
         raise RuntimeError("Danbooru request failed after retries")
 
     @staticmethod
@@ -217,7 +225,7 @@ class DanbooruClient:
         return int(payload.get("counts", {}).get("posts", 0))
 
     def get_related_tags(self, query: str, *, category: int | None = 0) -> dict[str, object]:
-        last_exc: PybooruHTTPError | None = None
+        last_exc: Exception | None = None
         max_retries = max(1, settings.danbooru_request_retries)
 
         for attempt in range(max_retries):
@@ -234,13 +242,20 @@ class DanbooruClient:
                     last_exc = exc
                     continue
                 self._handle_http_error(exc)
+            except requests.exceptions.ConnectionError as exc:
+                if attempt < max_retries - 1:
+                    last_exc = exc
+                    continue
+                raise
             else:
                 if not isinstance(payload, dict):
                     raise RuntimeError(f"Unexpected Danbooru related_tag response: {payload}")
                 return payload
 
-        if last_exc:
+        if isinstance(last_exc, PybooruHTTPError):
             self._handle_http_error(last_exc)
+        if last_exc:
+            raise last_exc
         raise RuntimeError(f"Danbooru related_tag failed for '{query}' after retries")
 
     @staticmethod

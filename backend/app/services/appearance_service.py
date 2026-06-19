@@ -11,6 +11,7 @@ from app.integrations.danbooru.appearance_extractor import (
     normalize_gender,
     parse_related_tags,
 )
+from app.integrations.danbooru.client import DanbooruAuthError
 from app.integrations.danbooru.series_membership import (
     MEMBERSHIP_MISMATCH_PREFIX,
     evaluate_series_membership,
@@ -98,30 +99,40 @@ class AppearanceService:
         for index, character in enumerate(characters, start=1):
             try:
                 payload = self.extractor.client.get_related_tags(character.character_tag, category=0)
+                related = parse_related_tags(payload)
+                appearance = extract_appearance_tags(related)
+                character.multi_color_hair = appearance.multi_color_hair
+                character.hair_color = appearance.hair_color
+                character.hair_shape = appearance.hair_shape
+                character.eye_color = appearance.eye_color
+                character.feature_tags = appearance.feature_tags
+                character.gender = normalize_gender(appearance.gender)
+                character.from_related = True
+                character.appearance_confirmed = False
+                character.generation_prompt = build_generation_prompt(character)
+
+                membership = evaluate_series_membership(
+                    fetch_copyright_related_tags(self.extractor.client, character.character_tag),
+                    expected_series_tag=series.series_tag,
+                    extra_series_tags=self._extra_series_tags(series, character),
+                )
+                if self._apply_membership_result(character, membership):
+                    membership_flagged += 1
+
+                updated += 1
+            except DanbooruAuthError:
+                raise
             except Exception as exc:
-                raise RuntimeError(f"{character.character_tag}: {exc}") from exc
-
-            related = parse_related_tags(payload)
-            appearance = extract_appearance_tags(related)
-            character.multi_color_hair = appearance.multi_color_hair
-            character.hair_color = appearance.hair_color
-            character.hair_shape = appearance.hair_shape
-            character.eye_color = appearance.eye_color
-            character.feature_tags = appearance.feature_tags
-            character.gender = normalize_gender(appearance.gender)
-            character.from_related = True
-            character.appearance_confirmed = False
-            character.generation_prompt = build_generation_prompt(character)
-
-            membership = evaluate_series_membership(
-                fetch_copyright_related_tags(self.extractor.client, character.character_tag),
-                expected_series_tag=series.series_tag,
-                extra_series_tags=self._extra_series_tags(series, character),
-            )
-            if self._apply_membership_result(character, membership):
-                membership_flagged += 1
-
-            updated += 1
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "phase": "extracting",
+                            "message": f"외형 태그 추출 실패 (건너뜀) {index}/{total} · {character.character_tag} · {exc}",
+                            "current": index,
+                            "total": total,
+                        }
+                    )
+                continue
 
             if progress_callback:
                 progress_callback(
