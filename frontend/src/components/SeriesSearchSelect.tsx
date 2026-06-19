@@ -77,11 +77,14 @@ export function SeriesSearchSelect({ value, onChange, disabled = false }: Series
           }
         }}
         onChange={(event) => {
-          setSeriesSearch(event.target.value);
-          setOpen(true);
-          if (!event.target.value.trim()) {
+          const nextValue = event.target.value;
+          setSeriesSearch(nextValue);
+          if (!nextValue.trim()) {
             onChange("", null);
+            setOpen(false);
+            return;
           }
+          setOpen(true);
         }}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
