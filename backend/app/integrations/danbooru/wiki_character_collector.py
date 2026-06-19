@@ -265,8 +265,27 @@ class WikiCharacterCollector:
 
         list_titles = self._discover_list_page_titles(series_tag, progress_callback=progress_callback)
         work_queue: list[tuple[str, bool]] = [(title, True) for title in list_titles[:MAX_WIKI_PARSE_PAGES]]
-        if not any(title == normalized_series for title, _ in work_queue):
-            work_queue.append((normalized_series, False))
+
+        series_in_queue = any(title == normalized_series for title, _ in work_queue)
+        if not series_in_queue:
+            if list_titles:
+                # List pages found: fetch the main series page only to discover additional
+                # list page links — skip the expensive per-link tag-category API lookups
+                # that would fire for every mecha/unit/location entry on the main page.
+                body = self._fetch_wiki_body(normalized_series)
+                if body:
+                    for link in extract_wiki_links(body):
+                        if len(work_queue) >= MAX_WIKI_PARSE_PAGES:
+                            break
+                        if not is_list_of_characters_page(link):
+                            continue
+                        linked_title = normalize_wiki_title(link)
+                        if linked_title in visited or any(t == linked_title for t, _ in work_queue):
+                            continue
+                        work_queue.append((linked_title, True))
+            else:
+                # No list pages found: fall back to full character parsing of the main series page.
+                work_queue.append((normalized_series, False))
 
         processed = 0
         queue_index = 0
@@ -287,26 +306,13 @@ class WikiCharacterCollector:
                 discovered=len(result.characters),
             )
 
-            body = self._parse_wiki_page(
+            self._parse_wiki_page(
                 result,
                 series_tag=series_tag,
                 wiki_title=wiki_title,
                 from_list_page=from_list_page,
                 visited=visited,
             )
-
-            if wiki_title == normalized_series and body:
-                for link in extract_wiki_links(body):
-                    if len(work_queue) >= MAX_WIKI_PARSE_PAGES:
-                        break
-                    if not is_list_of_characters_page(link):
-                        continue
-                    linked_title = normalize_wiki_title(link)
-                    if linked_title in visited:
-                        continue
-                    if any(existing_title == linked_title for existing_title, _ in work_queue):
-                        continue
-                    work_queue.append((linked_title, True))
 
         if result.characters:
             result.sub_series_tags = []

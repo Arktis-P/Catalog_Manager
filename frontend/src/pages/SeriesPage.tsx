@@ -66,8 +66,8 @@ export function SeriesPage() {
   const selectableItems = useMemo(() => items.filter((series) => isSeriesSelectable(series)), [items]);
 
   const selectedCollectTargets = useMemo(
-    () => sortSeriesByPriority(selectableItems.filter((item) => selectedSeriesIds.has(item.id))),
-    [selectableItems, selectedSeriesIds],
+    () => sortSeriesByPriority(items.filter((item) => selectedSeriesIds.has(item.id))),
+    [items, selectedSeriesIds],
   );
 
   const hiddenChildCount = useMemo(
@@ -335,7 +335,7 @@ export function SeriesPage() {
 
   const toggleAllSeriesSelection = () => {
     setSelectedSeriesIds((current) =>
-      current.size === selectableItems.length
+      selectableItems.every((item) => current.has(item.id))
         ? new Set()
         : new Set(selectableItems.map((item) => item.id)),
     );
@@ -349,6 +349,17 @@ export function SeriesPage() {
       } else {
         next.add(parentId);
       }
+      return next;
+    });
+  };
+
+  const selectAllChildren = (parentId: number) => {
+    const childIds = items
+      .filter((item) => item.is_merged_child && item.parent_series_id === parentId)
+      .map((item) => item.id);
+    setSelectedSeriesIds((current) => {
+      const next = new Set(current);
+      for (const id of childIds) next.add(id);
       return next;
     });
   };
@@ -493,7 +504,7 @@ export function SeriesPage() {
                           aria-label="Select all series"
                           checked={
                             selectableItems.length > 0 &&
-                            selectedSeriesIds.size === selectableItems.length
+                            selectableItems.every((item) => selectedSeriesIds.has(item.id))
                           }
                           onChange={toggleAllSeriesSelection}
                         />
@@ -514,39 +525,49 @@ export function SeriesPage() {
                   {visibleItems.map((series) => (
                     <tr key={series.id} className={series.is_merged_child ? "series-child-row" : undefined}>
                       <td className="col-checkbox">
-                        {isSeriesSelectable(series) ? (
-                          <input
-                            type="checkbox"
-                            aria-label={`Select ${series.series_tag}`}
-                            checked={selectedSeriesIds.has(series.id)}
-                            onChange={() => toggleSeriesSelection(series.id)}
-                          />
-                        ) : null}
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${series.series_tag}`}
+                          checked={selectedSeriesIds.has(series.id)}
+                          onChange={() => toggleSeriesSelection(series.id)}
+                        />
                       </td>
                       <td className="col-series-tag cell-ellipsis" title={series.series_tag}>
                         <div className="series-tag-cell">
                           {!series.is_merged_child && series.child_count > 0 ? (
-                            <button
-                              type="button"
-                              className="series-children-toggle"
-                              aria-expanded={expandedParentIds.has(series.id)}
-                              aria-label={
-                                expandedParentIds.has(series.id)
-                                  ? `Hide ${series.child_count} merged sub-series`
-                                  : `Show ${series.child_count} merged sub-series`
-                              }
-                              title={
-                                expandedParentIds.has(series.id)
-                                  ? "하위 시리즈 숨기기"
-                                  : "하위 시리즈 보기"
-                              }
-                              onClick={() => toggleExpandedChildren(series.id)}
-                            >
-                              <span className="series-children-toggle-icon" aria-hidden="true">
-                                {expandedParentIds.has(series.id) ? "▼" : "▶"}
-                              </span>
-                              <span className="series-children-toggle-count">{series.child_count}</span>
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className="series-children-toggle"
+                                aria-expanded={expandedParentIds.has(series.id)}
+                                aria-label={
+                                  expandedParentIds.has(series.id)
+                                    ? `Hide ${series.child_count} merged sub-series`
+                                    : `Show ${series.child_count} merged sub-series`
+                                }
+                                title={
+                                  expandedParentIds.has(series.id)
+                                    ? "하위 시리즈 숨기기"
+                                    : "하위 시리즈 보기"
+                                }
+                                onClick={() => toggleExpandedChildren(series.id)}
+                              >
+                                <span className="series-children-toggle-icon" aria-hidden="true">
+                                  {expandedParentIds.has(series.id) ? "▼" : "▶"}
+                                </span>
+                                <span className="series-children-toggle-count">{series.child_count}</span>
+                              </button>
+                              {expandedParentIds.has(series.id) ? (
+                                <button
+                                  type="button"
+                                  className="series-children-toggle"
+                                  title="하위 시리즈 전체 선택"
+                                  onClick={() => selectAllChildren(series.id)}
+                                >
+                                  <span aria-hidden="true">☑</span>
+                                </button>
+                              ) : null}
+                            </>
                           ) : null}
                           <span className={series.is_merged_child ? "series-child-tag" : undefined}>
                             {series.is_merged_child ? `└ ${series.series_tag}` : series.series_tag}
@@ -592,6 +613,19 @@ export function SeriesPage() {
                         <div className="table-actions">
                           {series.is_merged_child ? (
                             <>
+                              <button
+                                className="btn btn-small btn-primary"
+                                type="button"
+                                disabled={isProcessingSeries(series.id) || danbooruStatus?.ready === false}
+                                title={
+                                  selectedSeriesIds.has(series.id) && selectedCollectTargets.length > 1
+                                    ? `선택한 ${selectedCollectTargets.length}개 시리즈 수집 (priority 순)`
+                                    : undefined
+                                }
+                                onClick={() => void handleCollectCharacters(series)}
+                              >
+                                {isCollectingSeries(series.id) ? "Collecting..." : "Collect"}
+                              </button>
                               <button
                                 className="btn btn-small"
                                 type="button"
