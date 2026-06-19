@@ -107,7 +107,11 @@ export function SeriesSearchSelect({ value, onChange, disabled = false }: Series
                   type="button"
                   className={`series-search-option${
                     value === series.id ? " series-search-option-active" : ""
-                  }${series.generation_pipeline_done ? " series-search-option-done" : ""}`}
+                  }${
+                    series.generation_pipeline_done || series.status === "generated"
+                      ? " series-search-option-done"
+                      : ""
+                  }`}
                   role="option"
                   aria-selected={value === series.id}
                   onClick={() => {
@@ -123,7 +127,9 @@ export function SeriesSearchSelect({ value, onChange, disabled = false }: Series
                     </span>
                   </span>
                   {series.generation_pipeline_done ? (
-                    <span className="badge badge-compact badge-success">done</span>
+                    <span className="badge badge-compact badge-success">catalog</span>
+                  ) : series.status === "generated" ? (
+                    <span className="badge badge-compact badge-success">generated</span>
                   ) : null}
                 </button>
               ))
@@ -131,7 +137,9 @@ export function SeriesSearchSelect({ value, onChange, disabled = false }: Series
         </div>
       ) : null}
       {selectedSeries?.generation_pipeline_done ? (
-        <p className="field-help">이 시리즈는 생성·리뷰가 완료된 항목입니다.</p>
+        <p className="field-help">이 시리즈는 Catalog 리뷰까지 완료되었습니다.</p>
+      ) : selectedSeries?.status === "generated" ? (
+        <p className="field-help">리뷰용 1차 이미지 생성이 완료된 시리즈입니다.</p>
       ) : null}
     </div>
   );

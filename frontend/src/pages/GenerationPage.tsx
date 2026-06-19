@@ -145,7 +145,7 @@ export function GenerationPage() {
   const handleSeriesChange = (seriesId: number | "", series?: Series | null) => {
     setSelectedSeriesId(seriesId);
     setSelectedSeries(series ?? null);
-    if (series && (series.status === "tagged" || series.all_appearance_collected)) {
+    if (series && (series.status === "tagged" || series.status === "generated" || series.all_appearance_collected)) {
       setRequireConfirmed(false);
     }
   };

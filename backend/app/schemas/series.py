@@ -9,6 +9,7 @@ SERIES_STATUSES = [
     "collected",
     "tagged",
     "generating",
+    "generated",
     "reviewing",
     "completed",
     "disabled",

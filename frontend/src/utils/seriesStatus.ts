@@ -1,6 +1,12 @@
 import type { Series } from "../types";
 
-const WORKFLOW_STATUSES = new Set(["disabled", "completed", "reviewing", "generating"]);
+const WORKFLOW_STATUSES = new Set([
+  "disabled",
+  "completed",
+  "reviewing",
+  "generating",
+  "generated",
+]);
 
 export type SeriesStatusTone = "success" | "warning" | "muted";
 
@@ -10,7 +16,12 @@ export function resolveSeriesStatus(series: Series): { label: string; tone: Seri
   if (WORKFLOW_STATUSES.has(status)) {
     return {
       label: status,
-      tone: status === "completed" ? "success" : "muted",
+      tone:
+        status === "completed" || status === "generated"
+          ? "success"
+          : status === "generating"
+            ? "warning"
+            : "muted",
     };
   }
 

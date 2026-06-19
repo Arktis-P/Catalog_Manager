@@ -15,6 +15,12 @@ from app.models.character import Character
 from app.models.generation_job import GenerationJob
 from app.models.series import Series
 from app.services.generation_service import GenerationService
+from app.services.series_generation_status import (
+    finalize_series_after_batch,
+    mark_series_generating,
+    queue_covers_all_eligible_characters,
+    restore_series_status,
+)
 
 JOB_TYPE_IMAGE_GENERATION = "image_generation"
 
@@ -44,6 +50,8 @@ class GenerationBatchState:
     auto_warning: int = 0
     auto_reject: int = 0
     error: str | None = None
+    status_before_generation: str = ""
+    marks_series_generated: bool = False
     started_at: str = field(default_factory=_utc_now)
     finished_at: str | None = None
 
@@ -82,8 +90,19 @@ class GenerationJobManager:
             job.phase = "cancelled"
             job.message = "사용자가 취소했습니다."
             job.finished_at = _utc_now()
-            self._active_by_series.pop(job.series_id, None)
-            return True
+            series_id = job.series_id
+            status_before = job.status_before_generation
+            self._active_by_series.pop(series_id, None)
+
+        if status_before:
+            db = SessionLocal()
+            try:
+                series = db.query(Series).filter(Series.id == series_id).first()
+                if series:
+                    restore_series_status(db, series, status_before)
+            finally:
+                db.close()
+        return True
 
     def start_generation(
         self,
@@ -140,6 +159,9 @@ class GenerationJobManager:
         require_confirmed: bool,
     ) -> None:
         db = SessionLocal()
+        series: Series | None = None
+        status_before_generation = ""
+        marks_series_generated = False
         try:
             series = db.query(Series).filter(Series.id == series_id).first()
             if not series:
@@ -180,6 +202,14 @@ class GenerationJobManager:
                 prompt_level=prompt_level,
                 require_confirmed=require_confirmed,
             )
+            marks_series_generated = queue_covers_all_eligible_characters(character_ids, queue_payload)
+            status_before_generation = mark_series_generating(db, series)
+            self._update_job(
+                job_id,
+                status_before_generation=status_before_generation,
+                marks_series_generated=marks_series_generated,
+            )
+
             images_per_character = service.get_images_per_character()
             jobs = service.create_generation_jobs(queue_payload, images_per_character=images_per_character)
             if not jobs:
@@ -191,6 +221,7 @@ class GenerationJobManager:
                     error="No generation jobs created",
                     finished_at=_utc_now(),
                 )
+                restore_series_status(db, series, status_before_generation)
                 return
 
             client = NaiaClient(str(status.get("base_url") or service.get_naia_base_url()))
@@ -218,6 +249,7 @@ class GenerationJobManager:
             auto_reject = 0
             for index, generation_job in enumerate(jobs, start=1):
                 if self._is_cancelled(job_id):
+                    restore_series_status(db, series, status_before_generation)
                     return
 
                 if index > 1:
@@ -290,11 +322,19 @@ class GenerationJobManager:
             summary = f"완료: {completed}장 저장 · 실패 {failed}"
             if completed:
                 summary += f" · 자동검사 pass {auto_pass} / warning {auto_warning} / reject {auto_reject}"
-            final_status = "completed" if failed == 0 else ("failed" if completed == 0 else "completed")
+            batch_success = failed == 0 and completed == len(jobs) and len(jobs) > 0
+            final_status = "completed" if batch_success else ("failed" if completed == 0 else "completed")
+            finalize_series_after_batch(
+                db,
+                series,
+                previous_status=status_before_generation,
+                batch_success=batch_success,
+                marks_series_generated=marks_series_generated,
+            )
             self._update_job(
                 job_id,
                 status=final_status,
-                phase="completed" if completed else "failed",
+                phase="completed" if batch_success else ("failed" if completed == 0 else "completed"),
                 message=summary,
                 completed=completed,
                 failed=failed,
@@ -305,6 +345,8 @@ class GenerationJobManager:
                 finished_at=_utc_now(),
             )
         except Exception as exc:
+            if series is not None and status_before_generation:
+                restore_series_status(db, series, status_before_generation)
             self._update_job(
                 job_id,
                 status="failed",
