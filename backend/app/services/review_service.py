@@ -164,18 +164,40 @@ class ReviewService:
             .filter(self._character_has_images())
         )
 
-        if filter_status == "pending":
-            query = query.filter(
-                or_(
-                    Review.id.is_(None),
-                    Review.review_status != "completed",
-                    ~self._character_has_cover(),
-                )
+        _pending_condition = or_(
+            Review.id.is_(None),
+            Review.review_status != "completed",
+            ~self._character_has_cover(),
+        )
+        _pass_img_exists = exists(
+            select(1).where(
+                Image.character_id == Character.id,
+                Image.auto_status == "pass",
+                Image.is_rejected.is_(False),
             )
+        )
+        _non_reject_img_exists = exists(
+            select(1).where(
+                Image.character_id == Character.id,
+                Image.auto_status != "reject_candidate",
+                Image.is_rejected.is_(False),
+            )
+        )
+        if filter_status == "pending":
+            query = query.filter(_pending_condition)
         elif filter_status == "completed":
             query = query.filter(Review.review_status == "completed")
         elif filter_status == "needs_check":
             query = query.filter(Character.status == "needs_check")
+        elif filter_status == "triage_fast":
+            # WD pass 이미지가 하나라도 있고 아직 미완료
+            query = query.filter(_pending_condition, _pass_img_exists)
+        elif filter_status == "triage_check":
+            # 비-reject 이미지는 있지만 pass 이미지가 없음 + 미완료
+            query = query.filter(_pending_condition, _non_reject_img_exists, ~_pass_img_exists)
+        elif filter_status == "triage_regen":
+            # 모든 이미지가 reject_candidate (비-reject 없음) + 미완료
+            query = query.filter(_pending_condition, ~_non_reject_img_exists)
 
         if search:
             pattern = f"%{search.strip()}%"

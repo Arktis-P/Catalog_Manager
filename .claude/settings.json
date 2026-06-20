@@ -8,7 +8,11 @@
       "Bash(python -m py_compile app/routers/characters.py)",
       "Read(//c/Users/cwson/.claude/projects/c--Users-cwson-OneDrive-Desktop-Projects-Catalogue-Manager/memory/**)",
       "Bash(python -m py_compile app/services/settings_service.py app/schemas/settings.py app/routers/settings.py app/services/character_service.py app/services/appearance_service.py app/services/pipeline_manager.py)",
-      "Bash(grep -E \"\\\\.\\(ts|tsx|js|jsx|json\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js|jsx|json\\)$\")",
+      "Bash(../.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/pip.exe list *)",
+      "Bash(python -c ' *)",
+      "Bash(npx tsc *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\cwson\\.claude\\projects\\c--Users-cwson-OneDrive-Desktop-Projects-Catalogue-Manager\\memory"

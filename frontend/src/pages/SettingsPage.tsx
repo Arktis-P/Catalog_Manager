@@ -14,6 +14,8 @@ export function SettingsPage() {
   const [reviewThumbnailSize, setReviewThumbnailSize] = useState(384);
   const [reviewMaxLoadedImages, setReviewMaxLoadedImages] = useState(30);
   const [minCharacterPostCount, setMinCharacterPostCount] = useState(20);
+  const [hfToken, setHfToken] = useState("");
+  const [hfWdModel, setHfWdModel] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +38,8 @@ export function SettingsPage() {
         setReviewThumbnailSize(response.review_thumbnail_size);
         setReviewMaxLoadedImages(response.review_max_loaded_images);
         setMinCharacterPostCount(response.min_character_post_count);
+        setHfToken(response.hf_token ?? "");
+        setHfWdModel(response.hf_wd_model ?? "");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load settings");
       } finally {
@@ -61,6 +65,8 @@ export function SettingsPage() {
         review_thumbnail_size: reviewThumbnailSize,
         review_max_loaded_images: reviewMaxLoadedImages,
         min_character_post_count: minCharacterPostCount,
+        hf_token: hfToken,
+        hf_wd_model: hfWdModel,
       });
       setSettings(response);
       setMaxConcurrent(response.danbooru_collect_max_concurrent);
@@ -73,6 +79,8 @@ export function SettingsPage() {
       setReviewThumbnailSize(response.review_thumbnail_size);
       setReviewMaxLoadedImages(response.review_max_loaded_images);
       setMinCharacterPostCount(response.min_character_post_count);
+      setHfToken(response.hf_token ?? "");
+      setHfWdModel(response.hf_wd_model ?? "");
       setSavedMessage("설정을 저장했습니다.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
@@ -257,6 +265,41 @@ export function SettingsPage() {
                 value={negativePrompt}
                 onChange={(event) => setNegativePrompt(event.target.value)}
               />
+            </div>
+
+            <div className="field full-width">
+              <label htmlFor="hf-token">Hugging Face Token (WD 자동 태깅)</label>
+              <input
+                id="hf-token"
+                type="password"
+                placeholder="hf_..."
+                value={hfToken}
+                onChange={(event) => setHfToken(event.target.value)}
+              />
+              <p className="field-help">
+                설정하면 이미지 생성 후 HF Inference API로 WD 태그를 추출해 캐릭터·머리색·눈색·성별을
+                자동 검증합니다. 비워두면 선명도 기반 품질 검사만 수행합니다.{" "}
+                <a
+                  href="https://huggingface.co/settings/tokens"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  HF 토큰 발급
+                </a>
+              </p>
+            </div>
+
+            <div className="field full-width">
+              <label htmlFor="hf-wd-model">HF WD Model ID</label>
+              <input
+                id="hf-wd-model"
+                placeholder="SmilingWolf/wd-eva02-large-tagger-v3"
+                value={hfWdModel}
+                onChange={(event) => setHfWdModel(event.target.value)}
+              />
+              <p className="field-help">
+                비워두면 기본값 <code>SmilingWolf/wd-eva02-large-tagger-v3</code>를 사용합니다.
+              </p>
             </div>
           </div>
           <div className="modal-actions">

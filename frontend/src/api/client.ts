@@ -7,6 +7,7 @@ import type {
   CatalogItemUpdatePayload,
   CatalogListResponse,
   CatalogReviewCompletePayload,
+  CatalogReviewFilterStatus,
   CatalogReviewListResponse,
   CatalogStats,
   CharacterCollectResult,
@@ -27,6 +28,7 @@ import type {
   SeriesMergePreview,
   SeriesMergeResult,
   SeriesUpdatePayload,
+  SuggestLevelResponse,
 } from "../types";
 
 const API_BASE = "/api";
@@ -181,6 +183,8 @@ export const api = {
         | "review_thumbnail_size"
         | "review_max_loaded_images"
         | "min_character_post_count"
+        | "hf_token"
+        | "hf_wd_model"
       >
     >,
   ) => request<AppSettings>("/settings", { method: "PATCH", body: JSON.stringify(payload) }),
@@ -208,11 +212,20 @@ export const api = {
 
   listCatalogReviews: (params: {
     series_id: number;
-    filter_status?: "pending" | "completed" | "all" | "needs_check";
+    filter_status?: CatalogReviewFilterStatus;
     search?: string;
     skip?: number;
     limit?: number;
   }) => request<CatalogReviewListResponse>(`/review/catalog${buildQuery(params)}`),
+
+  suggestPromptLevel: (seriesId: number, characterIds?: number[]) =>
+    request<SuggestLevelResponse>(
+      `/generation/series/${seriesId}/suggest-level${
+        characterIds && characterIds.length > 0
+          ? `?character_ids=${characterIds.join(",")}`
+          : ""
+      }`,
+    ),
 
   completeCatalogReview: (characterId: number, payload: CatalogReviewCompletePayload) =>
     request<{

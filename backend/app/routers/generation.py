@@ -13,6 +13,7 @@ from app.schemas.generation import (
     GenerationQueuePreviewResponse,
     GenerationStartRequest,
     NaiaStatusResponse,
+    SuggestLevelResponse,
 )
 from app.services.generation_job_manager import generation_job_manager
 from app.services.generation_service import GenerationService
@@ -174,3 +175,23 @@ def cancel_generation_job(job_id: str):
     if not cancelled and job.status in {"queued", "running"}:
         raise HTTPException(status_code=409, detail="Job could not be cancelled")
     return _job_to_schema(job)
+
+
+@router.get("/series/{series_id}/suggest-level", response_model=SuggestLevelResponse)
+def suggest_prompt_level(
+    series_id: int,
+    character_ids: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    service = GenerationService(db)
+    char_ids: list[int] | None = None
+    if character_ids:
+        try:
+            char_ids = [int(x) for x in character_ids.split(",") if x.strip()]
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="character_ids는 쉼표 구분 정수여야 합니다.") from exc
+    result = service.suggest_batch_level(series_id=series_id, character_ids=char_ids)
+    return SuggestLevelResponse(
+        suggested_level=int(result["suggested_level"]),
+        breakdown={int(k): v for k, v in result["breakdown"].items()},
+    )

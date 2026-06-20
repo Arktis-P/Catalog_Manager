@@ -222,6 +222,11 @@ export interface GenerationStartPayload {
   require_confirmed?: boolean;
 }
 
+export interface SuggestLevelResponse {
+  suggested_level: number;
+  breakdown: Record<number, number>;
+}
+
 export interface AppSettings {
   danbooru_collect_max_concurrent: number;
   danbooru_request_delay: number;
@@ -234,6 +239,8 @@ export interface AppSettings {
   review_thumbnail_size: number;
   review_max_loaded_images: number;
   min_character_post_count: number;
+  hf_token: string;
+  hf_wd_model: string;
 }
 
 export interface AppearanceReviewItem {
@@ -296,6 +303,15 @@ export interface CatalogReviewItem {
   cover_image_id: number | null;
   images: CatalogReviewImage[];
 }
+
+export type CatalogReviewFilterStatus =
+  | "pending"
+  | "completed"
+  | "all"
+  | "needs_check"
+  | "triage_fast"
+  | "triage_check"
+  | "triage_regen";
 
 export interface CatalogReviewListResponse {
   items: CatalogReviewItem[];

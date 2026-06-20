@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
 import { useReviewRegenerateJobs } from "../../context/ReviewRegenerateContext";
-import type { CatalogReviewItem, Series } from "../../types";
+import type { CatalogReviewFilterStatus, CatalogReviewItem, Series } from "../../types";
 import { danbooruPostsUrl, danbooruWikiUrl, openExternal } from "../../utils/danbooruLinks";
 import { appearanceTagChips, defaultEnabledTagKeys, resolveFinalPrompt } from "../../utils/reviewPrompt";
 import { pendingReviewImageUrl } from "../../utils/reviewImages";
@@ -41,7 +41,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
   const [selectedSeries, setSelectedSeries] = useState<Series | null>(null);
   const [items, setItems] = useState<CatalogReviewItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [filterStatus, setFilterStatus] = useState<"pending" | "completed" | "all" | "needs_check">("pending");
+  const [filterStatus, setFilterStatus] = useState<CatalogReviewFilterStatus>("pending");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -699,12 +699,15 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
           <select
             id="catalog-review-filter"
             value={filterStatus}
-            onChange={(event) => setFilterStatus(event.target.value as typeof filterStatus)}
+            onChange={(event) => setFilterStatus(event.target.value as CatalogReviewFilterStatus)}
           >
             <option value="pending">Pending</option>
+            <option value="triage_fast">⚡ 자동 통과 (WD pass)</option>
+            <option value="triage_check">🔍 확인 필요 (warning)</option>
+            <option value="triage_regen">🔄 재생성 필요 (all reject)</option>
+            <option value="needs_check">needs_check</option>
             <option value="completed">Completed</option>
             <option value="all">All with images</option>
-            <option value="needs_check">needs_check</option>
           </select>
         </div>
         <div className="field">

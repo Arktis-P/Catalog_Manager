@@ -49,5 +49,9 @@ def update_settings(
         service.set_review_max_loaded_images(payload.review_max_loaded_images)
     if payload.min_character_post_count is not None:
         service.set_min_character_post_count(payload.min_character_post_count)
+    if payload.hf_token is not None:
+        service.set_hf_token(payload.hf_token)
+    if payload.hf_wd_model is not None:
+        service.set_hf_wd_model(payload.hf_wd_model)
     data = service.get_public_settings()
     return SettingsResponse(**data)

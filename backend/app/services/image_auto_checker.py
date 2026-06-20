@@ -5,13 +5,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageFilter, ImageStat
+from PIL import Image, ImageChops, ImageFilter, ImageStat
 
 from app.models.character import Character
 from app.models.series import Series
-
-# WD14 캐릭터 태그 confidence 검사는 모델 별도 설치 후 활성화 예정.
-CHARACTER_TAG_CHECK_ENABLED = False
 
 
 @dataclass
@@ -22,6 +19,12 @@ class DetailCheckResult:
     hand_score: float | None
     eye_score: float | None
     full_score: float
+    # 이목구비 균일성
+    eye_symmetry: float | None = None       # 눈 영역 좌우 대칭성 (0~1)
+    eye_local_contrast: float | None = None # 눈 영역 로컬 고대비 수준 (0~255)
+    # 손가락 주기성
+    finger_periodicity: float | None = None # FFT 기반 손가락 패턴 점수 (0~1)
+    finger_count_est: int | None = None     # 추정 손가락 개수
 
 
 @dataclass
@@ -38,6 +41,13 @@ def _normalize_tag(value: str) -> str:
     return re.sub(r"\s+", "_", value.strip().lower())
 
 
+def _parse_appearance_tags(value: str | None) -> list[str]:
+    """콤마로 구분된 태그 문자열을 정규화된 태그 리스트로 변환합니다."""
+    if not value:
+        return []
+    return [_normalize_tag(t) for t in value.split(",") if t.strip()]
+
+
 def _region_sharpness(image: Image.Image, box: tuple[int, int, int, int]) -> float:
     crop = image.crop(box).convert("L")
     edges = crop.filter(ImageFilter.FIND_EDGES)
@@ -49,22 +59,181 @@ def _region_mean(image: Image.Image, box: tuple[int, int, int, int]) -> float:
     return float(ImageStat.Stat(crop).mean[0])
 
 
+def _face_symmetry_score(image: Image.Image, box: tuple[int, int, int, int]) -> float:
+    """눈 영역 좌우 대칭성 점수 (0~1).
+
+    두 눈이 비슷한 형태로 생성되었을수록 1에 가깝습니다.
+    기울어진 얼굴·머리·액세서리로 인한 자연스러운 비대칭을 고려해 임계값은 느슨하게 설정합니다.
+    """
+    crop = image.crop(box).convert("L")
+    w, h = crop.size
+    if w < 8:
+        return 1.0
+
+    mid = w // 2
+    left = crop.crop((0, 0, mid, h))
+    right = crop.crop((w - mid, 0, w, h)).transpose(Image.FLIP_LEFT_RIGHT)
+
+    if left.size != right.size:
+        right = right.resize(left.size, Image.LANCZOS)
+
+    diff = ImageChops.difference(left, right)
+    mean_diff = ImageStat.Stat(diff).mean[0]
+    return max(0.0, 1.0 - mean_diff / 255.0)
+
+
+def _eye_local_contrast(image: Image.Image, box: tuple[int, int, int, int], patch: int = 21) -> float:
+    """눈 영역 내 최대 로컬 대비 (0~255).
+
+    MaxFilter - MinFilter 차이의 최대값을 반환합니다.
+    눈·홍채·동공·하이라이트처럼 고대비 특성이 영역 내 어딘가에 존재하는지 확인합니다.
+    균일한 배경이 넓어도 눈이 제대로 그려졌다면 최대값이 충분히 높게 나옵니다.
+    """
+    size = patch if patch % 2 == 1 else patch + 1
+    crop = image.crop(box).convert("L")
+
+    local_max = crop.filter(ImageFilter.MaxFilter(size=size))
+    local_min = crop.filter(ImageFilter.MinFilter(size=size))
+    contrast_img = ImageChops.difference(local_max, local_min)
+
+    # 최대 로컬 대비값 반환 (extrema → (min, max))
+    return float(contrast_img.getextrema()[1])
+
+
+def _finger_periodicity(
+    image: Image.Image, box: tuple[int, int, int, int]
+) -> tuple[float, int]:
+    """PIL 기반 손가락 주기성 분석.
+
+    손가락이 규칙적으로 배열되면 엣지 밀도의 가로 프로파일에 주기적 피크가 나타납니다.
+    이미지를 1픽셀 높이로 리사이즈(BOX = 박스 평균)하면 각 열의 평균 엣지 강도를 얻을 수 있고,
+    그 프로파일에서 피크 개수를 세어 손가락 개수를 추정합니다.
+
+    Returns:
+        (periodicity_score 0~1, estimated_finger_count)
+    """
+    crop = image.crop(box).convert("L")
+    w, h = crop.size
+    if w < 20 or h < 20:
+        return 0.0, 0
+
+    # 손가락 끝이 모이는 상단 45%에 집중
+    tip_h = max(h * 45 // 100, 10)
+    tip = crop.crop((0, 0, w, tip_h))
+    edges = tip.filter(ImageFilter.FIND_EDGES)
+
+    # 1행으로 리사이즈(BOX 평균) → 각 열의 평균 엣지 강도
+    col_profile_img = edges.resize((w, 1), Image.BOX)
+    col_profile: list[int] = list(col_profile_img.getdata())
+
+    if max(col_profile) < 1:
+        return 0.0, 0
+
+    # 이동 평균 스무딩 (윈도우 = 이미지 폭의 약 5%)
+    window = max(w // 20, 3)
+    smoothed: list[float] = []
+    for i in range(w):
+        lo = max(0, i - window // 2)
+        hi = min(w, i + window // 2 + 1)
+        smoothed.append(sum(col_profile[lo:hi]) / (hi - lo))
+
+    mean_val = sum(smoothed) / len(smoothed)
+    # 피크 임계값: 평균보다 20% 높은 값
+    peak_threshold = mean_val * 1.2
+
+    # 최소 손가락 폭 = 전체 폭 / 9 (최대 8개 손가락 기준 여유)
+    min_gap = max(w // 9, 5)
+
+    peaks = 0
+    in_peak = False
+    last_peak_pos = -min_gap
+
+    for i, val in enumerate(smoothed):
+        if val >= peak_threshold and not in_peak:
+            if i - last_peak_pos >= min_gap:
+                in_peak = True
+                peaks += 1
+                last_peak_pos = i
+        elif val < peak_threshold:
+            in_peak = False
+
+    # 점수: 3~8개면 정상 범위 (0.6~0.8), 벗어나면 낮음
+    if 4 <= peaks <= 6:
+        score = 0.75
+    elif 3 <= peaks <= 8:
+        score = 0.55
+    elif peaks == 2 or peaks == 9:
+        score = 0.30
+    elif peaks == 0:
+        score = 0.0
+    else:
+        score = 0.10  # 1 or 10+
+
+    return score, peaks
+
+
 def check_detail_quality(image_path: Path) -> DetailCheckResult:
+    """이미지 품질을 검사합니다.
+
+    - 눈/이목구비: 영역 선명도 + 좌우 대칭성 + 로컬 고대비 확인
+    - 손가락: 선명도 + FFT 주기성 분석으로 손가락 수·분리 상태 추정
+    """
     with Image.open(image_path) as image:
         rgb = image.convert("RGB")
         width, height = rgb.size
+
         full_box = (0, 0, width, height)
-        eye_box = (int(width * 0.2), int(height * 0.05), int(width * 0.8), int(height * 0.42))
-        hand_box = (int(width * 0.12), int(height * 0.52), int(width * 0.88), int(height * 0.96))
+        # 눈·이목구비 영역: 상단 8%~40%, 좌우 10% 여백
+        eye_box = (
+            int(width * 0.10), int(height * 0.08),
+            int(width * 0.90), int(height * 0.40),
+        )
+        # 손·손가락 영역: 하단 52%~96%
+        hand_box = (
+            int(width * 0.08), int(height * 0.52),
+            int(width * 0.92), int(height * 0.96),
+        )
 
         full_score = _region_sharpness(rgb, full_box)
         eye_score = _region_sharpness(rgb, eye_box)
         hand_score = _region_sharpness(rgb, hand_box)
         hand_mean = _region_mean(rgb, hand_box)
 
+        # ── 눈/이목구비 품질 ──────────────────────────────────────────
+        eye_symmetry = _face_symmetry_score(rgb, eye_box)
+        eye_local_contrast = _eye_local_contrast(rgb, eye_box)
+
+        # 기준 (AND 조건 — 세 가지 모두 통과해야 eye_ok):
+        #  1. 선명도: 눈 영역이 전체 대비 18% 이상 선명
+        #  2. 좌우 대칭성: 55% 이상 (헤어·액세서리 비대칭 감안해 느슨하게)
+        #  3. 로컬 고대비: 최대값 30 이상 (눈·동공·하이라이트 명암차 존재)
+        eye_ok = (
+            eye_score >= full_score * 0.18
+            and eye_symmetry >= 0.55
+            and eye_local_contrast >= 30.0
+        )
+
+        # ── 손/손가락 품질 ────────────────────────────────────────────
+        # 손 영역이 어둡고 엣지가 거의 없으면 손이 프레임에 없는 것으로 판단 → skip
         hand_check_skipped = hand_score < full_score * 0.08 and hand_mean < 48
-        hand_ok = None if hand_check_skipped else hand_score >= full_score * 0.22
-        eye_ok = eye_score >= full_score * 0.18
+
+        finger_periodicity: float | None = None
+        finger_count_est: int | None = None
+        hand_ok: bool | None = None
+
+        if not hand_check_skipped:
+            sharpness_ok = hand_score >= full_score * 0.22
+            finger_periodicity, finger_count_est = _finger_periodicity(rgb, hand_box)
+
+            # 손가락 OK 판정:
+            #   - 주기성이 명확히 낮고(< 0.12) 추정 개수도 비정상(< 3 또는 > 8)이면 경고
+            #   - 나머지는 선명도 기준만 적용 (분석 불확실한 경우 보수적으로 패스)
+            clearly_bad_fingers = (
+                finger_periodicity < 0.12
+                and finger_count_est is not None
+                and not (3 <= finger_count_est <= 8)
+            )
+            hand_ok = sharpness_ok and not clearly_bad_fingers
 
         return DetailCheckResult(
             hand_check_skipped=hand_check_skipped,
@@ -73,37 +242,169 @@ def check_detail_quality(image_path: Path) -> DetailCheckResult:
             hand_score=hand_score,
             eye_score=eye_score,
             full_score=full_score,
+            eye_symmetry=eye_symmetry,
+            eye_local_contrast=eye_local_contrast,
+            finger_periodicity=finger_periodicity,
+            finger_count_est=finger_count_est,
         )
 
 
-def _character_tag_confidence(
-    predictions: list,
-    character: Character,
-    series: Series | None,
-) -> tuple[float | None, str | None]:
-    if not predictions:
-        return None, None
-
-    targets = {_normalize_tag(character.character_tag)}
-    if series and series.series_tag:
-        targets.add(_normalize_tag(series.series_tag))
-
-    best = 0.0
-    best_tag = None
-    for item in predictions:
-        normalized = _normalize_tag(item.tag)
-        if normalized in targets and item.confidence > best:
-            best = item.confidence
-            best_tag = normalized
-    return (best if best > 0 else None), best_tag
-
-
-def _gender_from_predictions(predictions: list) -> str | None:
-    scores = {_normalize_tag(item.tag): item.confidence for item in predictions}
+def _gender_from_predictions(tag_scores: dict[str, float]) -> str | None:
     for tag in ("1girl", "1boy", "no_humans"):
-        if tag in scores:
+        if tag in tag_scores:
             return tag
     return None
+
+
+def _check_hair_match(
+    tag_scores: dict[str, float],
+    character: Character,
+    *,
+    threshold: float,
+) -> bool | None:
+    """머리색/머리 스타일 태그가 예측에 포함되는지 확인합니다."""
+    hair_tags = _parse_appearance_tags(character.hair_color)
+    if character.multi_color_hair:
+        # multi_color_hair는 "streaked_hair, white_hair" 등 기본 태그도 포함
+        hair_tags += _parse_appearance_tags(character.multi_color_hair)
+
+    if not hair_tags:
+        return None  # 비교 불가
+
+    return any(
+        tag_scores.get(t, 0.0) >= threshold
+        for t in hair_tags
+    )
+
+
+def _check_eye_match(
+    tag_scores: dict[str, float],
+    character: Character,
+    *,
+    threshold: float,
+) -> bool | None:
+    """눈색 태그가 예측에 포함되는지 확인합니다."""
+    eye_tags = _parse_appearance_tags(character.eye_color)
+    if not eye_tags:
+        return None
+
+    # 이색동공의 경우 둘 중 하나가 있으면 매칭
+    return any(
+        tag_scores.get(t, 0.0) >= threshold
+        for t in eye_tags
+    )
+
+
+def _check_character_tag(
+    tag_scores: dict[str, float],
+    character: Character,
+    *,
+    threshold: float,
+) -> float | None:
+    """캐릭터 태그의 confidence를 반환합니다. 없으면 None."""
+    char_tag = _normalize_tag(character.character_tag)
+    score = tag_scores.get(char_tag)
+    if score is not None and score >= threshold:
+        return score
+    return None
+
+
+def _determine_auto_status(
+    *,
+    character_confidence: float | None,
+    hair_match: bool | None,
+    eye_match: bool | None,
+    gender_match: bool | None,
+    detail: DetailCheckResult,
+    tagger_active: bool,
+) -> str:
+    """auto_status를 결정합니다.
+
+    Returns:
+        "pass" / "warning" / "reject_candidate"
+    """
+    if not tagger_active:
+        # WD 태거 없음: 품질 지표만 사용 (기존 동작)
+        if detail.eye_ok is False or detail.hand_ok is False:
+            return "reject_candidate"
+        return "pass"
+
+    # 캐릭터 태그 직접 감지됨 → pass (품질이 심각하게 나쁘지 않으면)
+    if character_confidence is not None:
+        if detail.eye_ok is False:
+            return "warning"
+        return "pass"
+
+    # 캐릭터 태그 미감지 → 외형 태그로 판단
+    match_count = sum(1 for v in (hair_match, eye_match, gender_match) if v is True)
+    none_count = sum(1 for v in (hair_match, eye_match, gender_match) if v is None)
+    # 비교 불가 태그가 많으면 판단 보류 → warning
+    if none_count >= 2:
+        return "warning"
+
+    if match_count >= 2:
+        return "pass" if detail.eye_ok is not False else "warning"
+    if match_count == 1:
+        return "warning"
+    return "reject_candidate"
+
+
+def _calculate_cover_score(
+    *,
+    character_confidence: float | None,
+    hair_match: bool | None,
+    eye_match: bool | None,
+    gender_match: bool | None,
+    detail: DetailCheckResult,
+    tagger_active: bool,
+) -> float:
+    """커버 이미지 자동 선택에 사용할 점수 (0~1)를 계산합니다."""
+    if not tagger_active:
+        # 태거 없음: 품질 기반 점수
+        score = 0.5
+        if detail.eye_ok:
+            score += 0.15
+        if detail.hand_ok:
+            score += 0.15
+        elif detail.hand_check_skipped:
+            score += 0.05
+        return round(min(score, 1.0), 4)
+
+    # 태거 활성: 캐릭터 인식 + 외형 매칭 + 품질
+    score = 0.0
+
+    # 캐릭터 태그 인식 (0~0.5)
+    if character_confidence is not None:
+        score += character_confidence * 0.5
+    else:
+        score += 0.15  # 미감지 기본값
+
+    # 외형 매칭 (0~0.3)
+    if hair_match is True:
+        score += 0.15
+    elif hair_match is None:
+        score += 0.07
+
+    if eye_match is True:
+        score += 0.15
+    elif eye_match is None:
+        score += 0.07
+
+    # 성별 (0~0.1)
+    if gender_match is True:
+        score += 0.10
+    elif gender_match is None:
+        score += 0.05
+
+    # 이미지 품질 (0~0.10)
+    if detail.eye_ok:
+        score += 0.05
+    if detail.hand_ok:
+        score += 0.05
+    elif detail.hand_check_skipped:
+        score += 0.02
+
+    return round(min(score, 1.0), 4)
 
 
 def check_generated_image(
@@ -112,80 +413,112 @@ def check_generated_image(
     character: Character,
     series: Series | None = None,
     character_confidence_threshold: float = 0.35,
+    appearance_threshold: float = 0.30,
+    hf_token: str | None = None,
+    hf_wd_model: str | None = None,
 ) -> ImageAutoCheckResult:
+    """생성된 이미지를 자동 검사합니다.
+
+    HF Token이 설정되어 있으면 WD 태거로 캐릭터 태그·외형·성별을 확인합니다.
+    없으면 이미지 품질(선명도) 기반 검사만 수행합니다.
+    """
+    from app.integrations.image_tagger.hf_wd_tagger import (
+        DEFAULT_HF_WD_MODEL,
+        predict_tags_via_hf,
+    )
+
     detail = check_detail_quality(image_path)
 
-    predictions: list = []
-    tagger_available = False
-    confidence = None
-    matched_tag = None
+    tagger_active = False
+    tag_scores: dict[str, float] = {}
+    predictions_summary: list[dict[str, object]] = []
+    tagger_error: str | None = None
 
-    if CHARACTER_TAG_CHECK_ENABLED:
-        from app.integrations.image_tagger.wd14_tagger import TagPrediction, predict_danbooru_tags
+    character_confidence: float | None = None
+    hair_match: bool | None = None
+    eye_match: bool | None = None
+    gender_pred: str | None = None
+    gender_match: bool | None = None
 
-        predictions, tagger_available = predict_danbooru_tags(image_path)
-        confidence, matched_tag = _character_tag_confidence(predictions, character, series)
+    if hf_token:
+        model = hf_wd_model or DEFAULT_HF_WD_MODEL
+        preds, tagger_error = predict_tags_via_hf(
+            image_path,
+            hf_token=hf_token,
+            model=model,
+            threshold=min(appearance_threshold, character_confidence_threshold),
+        )
 
-    issues: list[str] = []
-    if CHARACTER_TAG_CHECK_ENABLED and tagger_available:
-        if confidence is None or confidence < character_confidence_threshold:
-            issues.append("character_tag_low_confidence")
+        if preds:
+            tagger_active = True
+            tag_scores = {p.tag: p.confidence for p in preds}
+            predictions_summary = [
+                {"tag": p.tag, "confidence": round(p.confidence, 4)}
+                for p in preds[:32]
+            ]
 
-    if detail.eye_ok is False:
-        issues.append("eye_detail_weak")
-    if detail.hand_ok is False:
-        issues.append("hand_detail_weak")
+            character_confidence = _check_character_tag(
+                tag_scores, character, threshold=character_confidence_threshold
+            )
+            hair_match = _check_hair_match(
+                tag_scores, character, threshold=appearance_threshold
+            )
+            eye_match = _check_eye_match(
+                tag_scores, character, threshold=appearance_threshold
+            )
+            gender_pred = _gender_from_predictions(tag_scores)
+            expected_gender = _normalize_tag(character.gender) if character.gender else None
+            if expected_gender and gender_pred:
+                gender_match = gender_pred == expected_gender
 
-    if any(issue in issues for issue in ("eye_detail_weak", "hand_detail_weak", "character_tag_low_confidence")):
-        auto_status = "reject_candidate"
-    else:
-        auto_status = "pass"
+    auto_status = _determine_auto_status(
+        character_confidence=character_confidence,
+        hair_match=hair_match,
+        eye_match=eye_match,
+        gender_match=gender_match,
+        detail=detail,
+        tagger_active=tagger_active,
+    )
+
+    cover_score = _calculate_cover_score(
+        character_confidence=character_confidence,
+        hair_match=hair_match,
+        eye_match=eye_match,
+        gender_match=gender_match,
+        detail=detail,
+        tagger_active=tagger_active,
+    )
 
     payload = {
-        "character_tag_check_enabled": CHARACTER_TAG_CHECK_ENABLED,
-        "tagger_available": tagger_available,
+        "tagger_active": tagger_active,
+        "tagger_error": tagger_error,
         "character_tag": character.character_tag,
-        "matched_tag": matched_tag,
-        "character_confidence": confidence,
+        "character_confidence": round(character_confidence, 4) if character_confidence else None,
+        "hair_match": hair_match,
+        "eye_match": eye_match,
+        "gender_pred": gender_pred,
+        "gender_match": gender_match,
         "detail": {
             "hand_check_skipped": detail.hand_check_skipped,
             "hand_ok": detail.hand_ok,
             "eye_ok": detail.eye_ok,
-            "hand_score": detail.hand_score,
-            "eye_score": detail.eye_score,
-            "full_score": detail.full_score,
+            "hand_score": round(detail.hand_score, 2) if detail.hand_score is not None else None,
+            "eye_score": round(detail.eye_score, 2) if detail.eye_score is not None else None,
+            "full_score": round(detail.full_score, 2),
+            "eye_symmetry": round(detail.eye_symmetry, 3) if detail.eye_symmetry is not None else None,
+            "eye_local_contrast": round(detail.eye_local_contrast, 1) if detail.eye_local_contrast is not None else None,
+            "finger_periodicity": round(detail.finger_periodicity, 3) if detail.finger_periodicity is not None else None,
+            "finger_count_est": detail.finger_count_est,
         },
-        "predicted_tags": [
-            {"tag": item.tag, "confidence": round(item.confidence, 4)} for item in predictions[:24]
-        ],
-        "issues": issues,
+        "predicted_tags": predictions_summary,
+        "auto_status": auto_status,
     }
-
-    cover_score = 0.5
-    if detail.eye_ok:
-        cover_score += 0.15
-    if detail.hand_ok:
-        cover_score += 0.15
-    elif detail.hand_check_skipped:
-        cover_score += 0.05
-    if confidence is not None:
-        cover_score = confidence
-        if detail.eye_ok:
-            cover_score += 0.05
-        if detail.hand_ok:
-            cover_score += 0.05
-        elif detail.hand_check_skipped:
-            cover_score += 0.02
-
-    gender_pred = None
-    if CHARACTER_TAG_CHECK_ENABLED and predictions:
-        gender_pred = _gender_from_predictions(predictions)
 
     return ImageAutoCheckResult(
         auto_status=auto_status,
         auto_tags=json.dumps(payload, ensure_ascii=False),
-        hair_match=None,
-        eye_match=detail.eye_ok,
+        hair_match=hair_match,
+        eye_match=eye_match,
         gender_pred=gender_pred,
-        cover_score=round(cover_score, 4),
+        cover_score=cover_score,
     )

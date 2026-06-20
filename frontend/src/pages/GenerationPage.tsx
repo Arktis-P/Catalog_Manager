@@ -8,7 +8,7 @@ import {
 } from "../components/GenerationPromptPipeline";
 import { SeriesSearchSelect } from "../components/SeriesSearchSelect";
 import { useGenerationJobs } from "../context/GenerationJobContext";
-import type { AppSettings, GenerationCandidate, GenerationQueuePreview, NaiaStatus, Series } from "../types";
+import type { AppSettings, GenerationCandidate, GenerationQueuePreview, NaiaStatus, Series, SuggestLevelResponse } from "../types";
 
 function pendingReviewImageUrl(imagePath: string | null | undefined): string | null {
   if (!imagePath) {
@@ -41,6 +41,7 @@ export function GenerationPage() {
   const [promptSuffix, setPromptSuffix] = useState("");
   const [savingPrompts, setSavingPrompts] = useState(false);
   const [queuePreview, setQueuePreview] = useState<GenerationQueuePreview | null>(null);
+  const [levelSuggestion, setLevelSuggestion] = useState<SuggestLevelResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -91,6 +92,7 @@ export function GenerationPage() {
       setCandidates([]);
       setSelectedIds(new Set());
       setQueuePreview(null);
+      setLevelSuggestion(null);
       setCandidateStats({
         total_characters: 0,
         with_prompt: 0,
@@ -119,9 +121,18 @@ export function GenerationPage() {
           unconfirmed_with_prompt: response.unconfirmed_with_prompt,
           needs_check_with_prompt: response.needs_check_with_prompt,
         });
-        setSelectedIds(
-          new Set(showNeedsCheckOnly ? [] : response.items.map((item) => item.id)),
-        );
+        const ids = showNeedsCheckOnly ? [] : response.items.map((item) => item.id);
+        setSelectedIds(new Set(ids));
+        if (typeof selectedSeriesId === "number" && ids.length > 0) {
+          try {
+            const suggestion = await api.suggestPromptLevel(selectedSeriesId, ids);
+            setLevelSuggestion(suggestion);
+          } catch {
+            setLevelSuggestion(null);
+          }
+        } else {
+          setLevelSuggestion(null);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "캐릭터 목록을 불러오지 못했습니다.");
       } finally {
@@ -278,7 +289,19 @@ export function GenerationPage() {
             </div>
 
             <div className="field">
-              <label htmlFor="generation-level">Prompt Level</label>
+              <label htmlFor="generation-level">
+                Prompt Level
+                {levelSuggestion ? (
+                  <span
+                    className="badge badge-info"
+                    style={{ marginLeft: 8, cursor: "pointer" }}
+                    title={`분포: ${Object.entries(levelSuggestion.breakdown).map(([lv, cnt]) => `Lv${lv}:${cnt}명`).join(", ")}`}
+                    onClick={() => setPromptLevel(levelSuggestion.suggested_level)}
+                  >
+                    추천 Lv{levelSuggestion.suggested_level}
+                  </span>
+                ) : null}
+              </label>
               <select
                 id="generation-level"
                 value={promptLevel}

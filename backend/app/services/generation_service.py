@@ -382,6 +382,8 @@ class GenerationService:
             output_path,
             character=character,
             series=series,
+            hf_token=self._settings.get_hf_token() or None,
+            hf_wd_model=self._settings.get_hf_wd_model() or None,
         )
         image = Image(
             character_id=character.id,
@@ -405,6 +407,65 @@ class GenerationService:
     def mark_job_failed(self, generation_job: GenerationJob, error: str) -> None:
         generation_job.status = "failed"
         self.db.commit()
+
+    @staticmethod
+    def suggest_prompt_level(character: Character) -> int:
+        """캐릭터 인지도·태그 풍부도 기반 추천 레벨 (1~3)."""
+        if character.post_count >= 1000:
+            return 1
+        if character.post_count >= 300:
+            return 2
+        tag_count = (
+            len([t for t in (character.hair_color or "").split(",") if t.strip()])
+            + len([t for t in (character.eye_color or "").split(",") if t.strip()])
+            + len([t for t in (character.feature_tags or "").split(",") if t.strip()])
+            + (1 if character.multi_color_hair else 0)
+        )
+        if tag_count >= 4:
+            return 3
+        if tag_count >= 2:
+            return 2
+        return 1
+
+    def suggest_batch_level(
+        self,
+        *,
+        series_id: int,
+        character_ids: list[int] | None = None,
+    ) -> dict[str, object]:
+        """배치 캐릭터들의 추천 레벨 (최댓값 + 분포 반환)."""
+        if character_ids:
+            characters = (
+                self.db.query(Character)
+                .filter(Character.series_id == series_id, Character.id.in_(character_ids))
+                .all()
+            )
+        else:
+            characters = self.list_generation_candidates(series_id)
+        if not characters:
+            return {"suggested_level": 1, "breakdown": {}}
+        breakdown: dict[int, int] = {}
+        for char in characters:
+            lv = self.suggest_prompt_level(char)
+            breakdown[lv] = breakdown.get(lv, 0) + 1
+        suggested = max(breakdown.keys())
+        return {"suggested_level": suggested, "breakdown": breakdown}
+
+    def auto_select_cover(self, character_id: int, images: list[Image]) -> Image | None:
+        """생성된 이미지 중 최고 cover_score 이미지를 커버로 자동 설정합니다."""
+        non_rejected = [img for img in images if not img.is_rejected]
+        if not non_rejected:
+            return None
+        pass_images = [img for img in non_rejected if img.auto_status == "pass"]
+        candidates = pass_images if pass_images else non_rejected
+        best = max(candidates, key=lambda img: img.cover_score or 0.0)
+        review = self.db.query(Review).filter(Review.character_id == character_id).first()
+        if not review:
+            review = Review(character_id=character_id)
+            self.db.add(review)
+        review.cover_image_id = best.id
+        self.db.commit()
+        return best
 
     def _resolve_review_gender(self, character: Character, gender: str | None) -> str:
         if gender:

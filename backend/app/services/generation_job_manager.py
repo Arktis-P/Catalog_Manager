@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -14,6 +15,7 @@ from app.integrations.naia.generation_runner import (
 from app.models.character import Character
 from app.models.generation_job import GenerationJob
 from app.models.series import Series
+from app.services.generation_prompt_builder import build_full_prompt
 from app.services.generation_service import GenerationService
 from app.services.series_generation_status import (
     finalize_series_after_batch,
@@ -21,6 +23,9 @@ from app.services.series_generation_status import (
     queue_covers_all_eligible_characters,
     restore_series_status,
 )
+
+_MAX_PROMPT_LEVEL = 5
+_MAX_ESCALATIONS = 2
 
 JOB_TYPE_IMAGE_GENERATION = "image_generation"
 
@@ -247,6 +252,7 @@ class GenerationJobManager:
             auto_pass = 0
             auto_warning = 0
             auto_reject = 0
+            char_batch_images: dict[int, list] = defaultdict(list)
             for index, generation_job in enumerate(jobs, start=1):
                 if self._is_cancelled(job_id):
                     restore_series_status(db, series, status_before_generation)
@@ -290,6 +296,7 @@ class GenerationJobManager:
                         generation_job=generation_job,
                         image_bytes=image_bytes,
                     )
+                    char_batch_images[generation_job.character_id].append(image)
                     completed += 1
                     if image.auto_status == "pass":
                         auto_pass += 1
@@ -318,6 +325,110 @@ class GenerationJobManager:
                         current=index,
                         message=f"{character.character_tag} 실패: {exc}",
                     )
+
+            # ── 자동 레벨 에스컬레이션 ──────────────────────────────────────
+            escalation_chars = [
+                char_id
+                for char_id, imgs in char_batch_images.items()
+                if imgs and all(img.auto_status == "reject_candidate" for img in imgs)
+            ]
+            if escalation_chars and not self._is_cancelled(job_id):
+                self._update_job(
+                    job_id,
+                    phase="escalating",
+                    message=f"자동 레벨 상승 · {len(escalation_chars)}명 재시도 중...",
+                )
+                for char_id in escalation_chars:
+                    if self._is_cancelled(job_id):
+                        break
+                    character = db.query(Character).filter(Character.id == char_id).first()
+                    if not character:
+                        continue
+                    current_level = prompt_level
+                    char_imgs = list(char_batch_images[char_id])
+                    for attempt in range(_MAX_ESCALATIONS):
+                        if any(img.auto_status != "reject_candidate" for img in char_imgs):
+                            break
+                        if current_level >= _MAX_PROMPT_LEVEL:
+                            break
+                        current_level += 1
+                        esc_job = None
+                        try:
+                            config = service.get_prompt_config()
+                            esc_prompt, esc_negative = build_full_prompt(
+                                character,
+                                prompt_level=current_level,
+                                prompt_config=config,
+                            )
+                            esc_job = GenerationJob(
+                                character_id=character.id,
+                                prompt_level=current_level,
+                                prompt=esc_prompt,
+                                negative_prompt=esc_negative,
+                                count=1,
+                                status="pending",
+                            )
+                            db.add(esc_job)
+                            db.flush()
+                            db.refresh(esc_job)
+                            self._update_job(
+                                job_id,
+                                message=(
+                                    f"{character.character_tag} "
+                                    f"Level {current_level} 재생성 "
+                                    f"({attempt + 1}/{_MAX_ESCALATIONS})"
+                                ),
+                            )
+                            wait_between_naia_generations()
+                            image_bytes, _ = generate_and_fetch_image(
+                                client,
+                                prompt=esc_prompt,
+                                negative_prompt=esc_negative,
+                                known_history_ids=known_history_ids,
+                            )
+                            new_img = service.import_generated_image(
+                                character=character,
+                                generation_job=esc_job,
+                                image_bytes=image_bytes,
+                            )
+                            char_imgs.append(new_img)
+                            char_batch_images[char_id].append(new_img)
+                            completed += 1
+                            if new_img.auto_status == "pass":
+                                auto_pass += 1
+                            elif new_img.auto_status == "warning":
+                                auto_warning += 1
+                            else:
+                                auto_reject += 1
+                            self._update_job(
+                                job_id,
+                                completed=completed,
+                                auto_pass=auto_pass,
+                                auto_warning=auto_warning,
+                                auto_reject=auto_reject,
+                                last_image_path=new_img.image_path,
+                                message=(
+                                    f"{character.character_tag} "
+                                    f"Level {current_level} → {new_img.auto_status}"
+                                ),
+                            )
+                        except Exception as exc:
+                            failed += 1
+                            if esc_job is not None:
+                                service.mark_job_failed(esc_job, str(exc))
+                            self._update_job(
+                                job_id,
+                                failed=failed,
+                                message=f"{character.character_tag} 에스컬레이션 실패: {exc}",
+                            )
+                            break
+
+            # ── 커버 이미지 자동 선택 ──────────────────────────────────────
+            if not self._is_cancelled(job_id):
+                self._update_job(job_id, message="커버 이미지 자동 선택 중...")
+                for char_id, char_imgs in char_batch_images.items():
+                    if char_imgs:
+                        service.auto_select_cover(char_id, char_imgs)
 
             summary = f"완료: {completed}장 저장 · 실패 {failed}"
             if completed:

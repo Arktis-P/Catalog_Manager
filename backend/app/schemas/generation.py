@@ -93,3 +93,8 @@ class GenerationQueuePreviewResponse(BaseModel):
     prompt_suffix: str
     negative_prompt: str
     skipped: list[dict[str, object]]
+
+
+class SuggestLevelResponse(BaseModel):
+    suggested_level: int
+    breakdown: dict[int, int]

@@ -13,6 +13,8 @@ class SettingsResponse(BaseModel):
     review_thumbnail_size: int = Field(ge=128, le=1024)
     review_max_loaded_images: int = Field(ge=10, le=120)
     min_character_post_count: int = Field(ge=0, le=500)
+    hf_token: str = ""
+    hf_wd_model: str = ""
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -26,3 +28,5 @@ class SettingsUpdateRequest(BaseModel):
     review_thumbnail_size: int | None = Field(default=None, ge=128, le=1024)
     review_max_loaded_images: int | None = Field(default=None, ge=10, le=120)
     min_character_post_count: int | None = Field(default=None, ge=0, le=500)
+    hf_token: str | None = None
+    hf_wd_model: str | None = None

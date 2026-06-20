@@ -20,6 +20,8 @@ SETTING_GENERATION_NEGATIVE_PROMPT = "generation_negative_prompt"
 SETTING_REVIEW_THUMBNAIL_SIZE = "review_thumbnail_size"
 SETTING_REVIEW_MAX_LOADED_IMAGES = "review_max_loaded_images"
 SETTING_MIN_CHARACTER_POST_COUNT = "min_character_post_count"
+SETTING_HF_TOKEN = "hf_token"
+SETTING_HF_WD_MODEL = "hf_wd_model"
 DEFAULT_NAIA_BASE_URL = "http://127.0.0.1:7243"
 DEFAULT_IMAGES_PER_CHARACTER = 2
 DEFAULT_REVIEW_THUMBNAIL_SIZE = 384
@@ -134,6 +136,23 @@ class SettingsService:
         self._set_setting(SETTING_REVIEW_MAX_LOADED_IMAGES, str(clamped))
         return clamped
 
+    def get_hf_token(self) -> str:
+        return self._get_setting(SETTING_HF_TOKEN) or ""
+
+    def set_hf_token(self, value: str) -> str:
+        cleaned = value.strip()
+        self._set_setting(SETTING_HF_TOKEN, cleaned)
+        return cleaned
+
+    def get_hf_wd_model(self) -> str:
+        from app.integrations.image_tagger.hf_wd_tagger import DEFAULT_HF_WD_MODEL
+        return self._get_setting(SETTING_HF_WD_MODEL) or DEFAULT_HF_WD_MODEL
+
+    def set_hf_wd_model(self, value: str) -> str:
+        cleaned = value.strip()
+        self._set_setting(SETTING_HF_WD_MODEL, cleaned)
+        return cleaned
+
     def get_min_character_post_count(self) -> int:
         raw = self._get_setting(SETTING_MIN_CHARACTER_POST_COUNT)
         if not raw:
@@ -185,4 +204,6 @@ class SettingsService:
             "review_thumbnail_size": self.get_review_thumbnail_size(),
             "review_max_loaded_images": self.get_review_max_loaded_images(),
             "min_character_post_count": self.get_min_character_post_count(),
+            "hf_token": self.get_hf_token(),
+            "hf_wd_model": self.get_hf_wd_model(),
         }
