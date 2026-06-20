@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(python -c \"from app.services.pipeline_manager import pipeline_manager; from app.schemas.pipeline import PipelineStatusResponse; from app.routers.characters import router; print\\('OK'\\)\")",
+      "Bash(python -m py_compile app/services/pipeline_manager.py)",
+      "Bash(python -m py_compile app/schemas/pipeline.py)",
+      "Bash(python -m py_compile app/routers/characters.py)",
+      "Read(//c/Users/cwson/.claude/projects/c--Users-cwson-OneDrive-Desktop-Projects-Catalogue-Manager/memory/**)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\cwson\\.claude\\projects\\c--Users-cwson-OneDrive-Desktop-Projects-Catalogue-Manager\\memory"
+    ]
+  }
+}

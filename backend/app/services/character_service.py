@@ -178,6 +178,9 @@ class CharacterService:
         stack.add(series.id)
 
         target_series = series
+        # Hub-series recursive collection is only allowed at the top level to prevent
+        # unbounded recursion into unrelated series discovered from sub-series wikis.
+        is_top_level = _collect_stack is None
         series.status = "collecting"
         commit_db_session(self.db)
 
@@ -188,7 +191,7 @@ class CharacterService:
         total_created = 0
         total_skipped = 0
 
-        if discovery.sub_series_tags and not discovery.characters:
+        if discovery.sub_series_tags and not discovery.characters and is_top_level:
             sub_series_tags = discovery.sub_series_tags[:MAX_HUB_SUB_SERIES]
             if len(discovery.sub_series_tags) > len(sub_series_tags):
                 skipped_sub_series.extend(discovery.sub_series_tags[len(sub_series_tags) :])

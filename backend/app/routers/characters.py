@@ -17,8 +17,10 @@ from app.schemas.character_collect import (
     CollectJobListResponse,
     CollectJobResponse,
 )
+from app.schemas.pipeline import PipelineStatusResponse
 from app.services.character_service import CharacterService
 from app.services.collect_job_manager import series_job_manager
+from app.services.pipeline_manager import pipeline_manager
 
 router = APIRouter(prefix="/characters", tags=["characters"])
 
@@ -179,6 +181,31 @@ def get_collect_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Collect job not found")
     return CollectJobResponse.from_state(job)
+
+
+@router.post("/pipeline/start", response_model=PipelineStatusResponse)
+def start_pipeline():
+    if not settings.danbooru_configured:
+        raise HTTPException(status_code=400, detail="Configure Danbooru credentials in input/danbooru.env first.")
+    state = pipeline_manager.get_state()
+    if state.status in {"running", "stopping"}:
+        raise HTTPException(status_code=409, detail="Pipeline is already running")
+    pipeline_manager.start()
+    return PipelineStatusResponse.from_state(pipeline_manager.get_state())
+
+
+@router.get("/pipeline/status", response_model=PipelineStatusResponse)
+def get_pipeline_status():
+    return PipelineStatusResponse.from_state(pipeline_manager.get_state())
+
+
+@router.post("/pipeline/stop", response_model=PipelineStatusResponse)
+def stop_pipeline():
+    state = pipeline_manager.get_state()
+    if state.status not in {"running"}:
+        raise HTTPException(status_code=409, detail="Pipeline is not running")
+    pipeline_manager.stop()
+    return PipelineStatusResponse.from_state(pipeline_manager.get_state())
 
 
 @router.post("/collect/jobs/{job_id}/cancel", response_model=CollectJobResponse)

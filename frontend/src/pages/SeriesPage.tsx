@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import { SeriesCharactersModal } from "../components/SeriesCharactersModal";
 import { isSeriesMergeEligible, SeriesMergeModal } from "../components/SeriesMergeModal";
 import { useCollectJobs } from "../context/CollectJobContext";
-import type { DanbooruStatus, Series, SeriesCreatePayload } from "../types";
+import type { DanbooruStatus, PipelineStatus, Series, SeriesCreatePayload } from "../types";
 import { downloadTextFile } from "../utils/download";
 import { resolveSeriesStatus, seriesStatusBadgeClass } from "../utils/seriesStatus";
 
@@ -57,6 +57,7 @@ export function SeriesPage() {
   const [selectedSeriesIds, setSelectedSeriesIds] = useState<Set<number>>(() => new Set());
   const [expandedParentIds, setExpandedParentIds] = useState<Set<number>>(() => new Set());
   const [exportingCharacters, setExportingCharacters] = useState(false);
+  const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus | null>(null);
 
   const mergeEligibleItems = useMemo(
     () => items.filter((series) => isSeriesMergeEligible(series)),
@@ -170,6 +171,31 @@ export function SeriesPage() {
       .then(setDanbooruStatus)
       .catch(() => setDanbooruStatus(null));
   }, []);
+
+  useEffect(() => {
+    void api
+      .getPipelineStatus()
+      .then(setPipelineStatus)
+      .catch(() => null);
+  }, []);
+
+  useEffect(() => {
+    if (!pipelineStatus || !["running", "stopping"].includes(pipelineStatus.status)) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void api
+        .getPipelineStatus()
+        .then((status) => {
+          setPipelineStatus(status);
+          if (["completed", "stopped", "failed"].includes(status.status)) {
+            void loadSeries();
+          }
+        })
+        .catch(() => null);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [pipelineStatus?.status]);
 
   useEffect(() => {
     if (!lastCompletedJob) {
@@ -373,6 +399,24 @@ export function SeriesPage() {
     setMergingSeriesList([series]);
   };
 
+  const handleStartPipeline = async () => {
+    try {
+      const status = await api.startPipeline();
+      setPipelineStatus(status);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "파이프라인 시작 실패");
+    }
+  };
+
+  const handleStopPipeline = async () => {
+    try {
+      const status = await api.stopPipeline();
+      setPipelineStatus(status);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "파이프라인 중지 실패");
+    }
+  };
+
   const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -430,6 +474,155 @@ export function SeriesPage() {
             : danbooruStatus.message}
         </div>
       ) : null}
+
+      <section className="pipeline-panel">
+        <div className="pipeline-panel-header">
+          <div className="pipeline-panel-title">
+            전체 자동 수집
+            {pipelineStatus?.status === "running" ? (
+              <span className="pipeline-phase-badge">
+                {pipelineStatus.phase === "collecting" ? "Phase 1: 캐릭터 수집" : "Phase 2: 외형 태그 추출"}
+              </span>
+            ) : pipelineStatus?.status === "stopping" ? (
+              <span className="pipeline-phase-badge pipeline-phase-badge-stopping">중지 중...</span>
+            ) : null}
+          </div>
+          <div className="pipeline-panel-actions">
+            {(!pipelineStatus || pipelineStatus.status === "idle") && (
+              <button
+                className="btn btn-primary btn-small"
+                type="button"
+                disabled={danbooruStatus?.ready === false}
+                onClick={() => void handleStartPipeline()}
+              >
+                전체 수집 시작
+              </button>
+            )}
+            {pipelineStatus?.status === "running" && (
+              <button className="btn btn-small btn-danger" type="button" onClick={() => void handleStopPipeline()}>
+                중지
+              </button>
+            )}
+            {pipelineStatus?.status === "stopping" && (
+              <button className="btn btn-small" type="button" disabled>
+                중지 중...
+              </button>
+            )}
+            {pipelineStatus && ["completed", "stopped", "failed"].includes(pipelineStatus.status) && (
+              <>
+                <button
+                  className="btn btn-primary btn-small"
+                  type="button"
+                  disabled={danbooruStatus?.ready === false}
+                  onClick={() => void handleStartPipeline()}
+                >
+                  다시 시작
+                </button>
+                <button
+                  className="btn btn-small"
+                  type="button"
+                  onClick={() => setPipelineStatus({ ...pipelineStatus, status: "idle" })}
+                >
+                  닫기
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {pipelineStatus && pipelineStatus.status !== "idle" && (
+          <div className="pipeline-panel-body">
+            {(pipelineStatus.status === "running" || pipelineStatus.status === "stopping") && (
+              <>
+                <div className="pipeline-progress-row">
+                  <span className="pipeline-progress-label">Phase 1 · 캐릭터 수집</span>
+                  <div className="pipeline-progress-bar-wrap">
+                    <div
+                      className="pipeline-progress-bar"
+                      style={{
+                        width:
+                          pipelineStatus.collect_total > 0
+                            ? `${Math.min(100, ((pipelineStatus.collect_done + pipelineStatus.collect_failed) / pipelineStatus.collect_total) * 100)}%`
+                            : pipelineStatus.phase === "collecting" ? "0%" : "100%",
+                      }}
+                    />
+                  </div>
+                  <span className="pipeline-progress-count">
+                    {pipelineStatus.phase === "collecting"
+                      ? `${pipelineStatus.collect_done + pipelineStatus.collect_failed} / ${pipelineStatus.collect_total}`
+                      : pipelineStatus.collect_total > 0
+                        ? `완료 ${pipelineStatus.collect_total}`
+                        : "-"}
+                  </span>
+                </div>
+                <div className="pipeline-progress-row">
+                  <span className="pipeline-progress-label">Phase 2 · 외형 태그 추출</span>
+                  <div className="pipeline-progress-bar-wrap">
+                    <div
+                      className="pipeline-progress-bar"
+                      style={{
+                        width:
+                          pipelineStatus.extract_total > 0
+                            ? `${Math.min(100, ((pipelineStatus.extract_done + pipelineStatus.extract_failed) / pipelineStatus.extract_total) * 100)}%`
+                            : "0%",
+                      }}
+                    />
+                  </div>
+                  <span className="pipeline-progress-count">
+                    {pipelineStatus.extract_total > 0
+                      ? `${pipelineStatus.extract_done + pipelineStatus.extract_failed} / ${pipelineStatus.extract_total}`
+                      : "-"}
+                  </span>
+                </div>
+                {pipelineStatus.current_series_tag && (
+                  <div className="pipeline-current">
+                    <span className="pipeline-current-tag">{pipelineStatus.current_series_tag}</span>
+                    <span className="pipeline-current-msg">{pipelineStatus.current_job_message}</span>
+                  </div>
+                )}
+              </>
+            )}
+
+            {["completed", "stopped", "failed"].includes(pipelineStatus.status) && (
+              <div className="pipeline-summary">
+                <span
+                  className={`pipeline-summary-status ${
+                    pipelineStatus.status === "completed"
+                      ? "pipeline-summary-completed"
+                      : pipelineStatus.status === "failed"
+                        ? "pipeline-summary-failed"
+                        : "pipeline-summary-stopped"
+                  }`}
+                >
+                  {pipelineStatus.status === "completed" ? "완료" : pipelineStatus.status === "failed" ? "실패" : "중지됨"}
+                </span>
+                <span className="pipeline-summary-detail">
+                  수집 {pipelineStatus.collect_done}/{pipelineStatus.collect_total}
+                  {pipelineStatus.collect_failed > 0 ? ` (실패 ${pipelineStatus.collect_failed})` : ""}
+                  {" · "}
+                  외형 추출 {pipelineStatus.extract_done}/{pipelineStatus.extract_total}
+                  {pipelineStatus.extract_failed > 0 ? ` (실패 ${pipelineStatus.extract_failed})` : ""}
+                </span>
+              </div>
+            )}
+
+            {pipelineStatus.errors.length > 0 && (
+              <div className="pipeline-errors">
+                {pipelineStatus.errors.slice(-3).map((err, i) => (
+                  <div key={i} className="pipeline-error-line">
+                    {err}
+                  </div>
+                ))}
+                {pipelineStatus.errors.length > 3 && (
+                  <div className="pipeline-error-line pipeline-error-more">
+                    +{pipelineStatus.errors.length - 3}개 오류 더 있음
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
 
       <section className="panel">
         <div className="toolbar">

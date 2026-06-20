@@ -17,6 +17,7 @@ import type {
   GenerationQueuePreview,
   GenerationStartPayload,
   NaiaStatus,
+  PipelineStatus,
   ReviewRegenerateJob,
   ReviewRegenerateJobListResponse,
   Series,
@@ -256,6 +257,10 @@ export const api = {
     request<{ id: number; character_tag: string; deleted: boolean }>(`/characters/${characterId}`, { method: "DELETE" }),
 
   getDanbooruStatus: () => request<DanbooruStatus>("/characters/danbooru/status"),
+
+  startPipeline: () => request<PipelineStatus>("/characters/pipeline/start", { method: "POST" }),
+  getPipelineStatus: () => request<PipelineStatus>("/characters/pipeline/status"),
+  stopPipeline: () => request<PipelineStatus>("/characters/pipeline/stop", { method: "POST" }),
 
   updateCharacterSeries: (characterId: number, seriesId: number) =>
     request<{ id: number; series_id: number; series_tag: string; character_tag: string; post_count: number }>(

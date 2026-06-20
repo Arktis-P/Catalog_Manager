@@ -179,12 +179,6 @@ class WikiCharacterCollector:
             source_wiki_title=wiki_title,
         )
 
-    def _resolve_character_tag(self, raw_link: str) -> str | None:
-        for candidate in resolve_wiki_tag_candidates(raw_link):
-            if self._get_tag_category(candidate) == DanbooruClient.CATEGORY_CHARACTER:
-                return candidate
-        return None
-
     def _extract_raw_wiki_links(self, body: str) -> list[str]:
         raw_links: list[str] = []
         for match in WIKI_LINK_RE.finditer(body):
@@ -204,19 +198,23 @@ class WikiCharacterCollector:
     ) -> None:
         normalized_series = normalize_wiki_title(series_tag)
         for raw in raw_links[:MAX_LINKS_PER_WIKI_PAGE]:
-            character_tag = self._resolve_character_tag(raw)
-            if character_tag:
-                self._add_character(
-                    result,
-                    character_tag,
-                    from_list_page=from_list_page,
-                    wiki_title=wiki_title,
-                )
-                continue
-
             for candidate in resolve_wiki_tag_candidates(raw):
                 category = self._get_tag_category(candidate)
-                if category == DanbooruClient.CATEGORY_COPYRIGHT and candidate != normalized_series:
+                if category == DanbooruClient.CATEGORY_CHARACTER:
+                    self._add_character(
+                        result,
+                        candidate,
+                        from_list_page=from_list_page,
+                        wiki_title=wiki_title,
+                    )
+                    break
+                # Sub-series are only meaningful from the main series wiki page, not from
+                # list-of-characters pages (which should only contain character links).
+                if (
+                    not from_list_page
+                    and category == DanbooruClient.CATEGORY_COPYRIGHT
+                    and candidate != normalized_series
+                ):
                     if candidate not in result.sub_series_tags:
                         result.sub_series_tags.append(candidate)
                     break
