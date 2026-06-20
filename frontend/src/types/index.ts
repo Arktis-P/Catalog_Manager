@@ -233,6 +233,7 @@ export interface AppSettings {
   generation_negative_prompt: string;
   review_thumbnail_size: number;
   review_max_loaded_images: number;
+  min_character_post_count: number;
 }
 
 export interface AppearanceReviewItem {

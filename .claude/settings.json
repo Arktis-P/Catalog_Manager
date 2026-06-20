@@ -6,7 +6,9 @@
       "Bash(python -m py_compile app/services/pipeline_manager.py)",
       "Bash(python -m py_compile app/schemas/pipeline.py)",
       "Bash(python -m py_compile app/routers/characters.py)",
-      "Read(//c/Users/cwson/.claude/projects/c--Users-cwson-OneDrive-Desktop-Projects-Catalogue-Manager/memory/**)"
+      "Read(//c/Users/cwson/.claude/projects/c--Users-cwson-OneDrive-Desktop-Projects-Catalogue-Manager/memory/**)",
+      "Bash(python -m py_compile app/services/settings_service.py app/schemas/settings.py app/routers/settings.py app/services/character_service.py app/services/appearance_service.py app/services/pipeline_manager.py)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js|jsx|json\\)$\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\cwson\\.claude\\projects\\c--Users-cwson-OneDrive-Desktop-Projects-Catalogue-Manager\\memory"

@@ -21,6 +21,7 @@ from app.models.character import Character
 from app.models.series import Series
 from app.services.db_write_queue import commit_db_session
 from app.services.prompt_service import build_generation_prompt
+from app.services.settings_service import SettingsService
 
 AppearanceProgressCallback = Callable[[dict[str, object]], None]
 
@@ -76,21 +77,31 @@ class AppearanceService:
         *,
         progress_callback: AppearanceProgressCallback | None = None,
     ) -> AppearanceExtractResult:
-        characters = (
+        min_post_count = SettingsService(self.db).get_min_character_post_count()
+
+        all_characters = (
             self.db.query(Character)
             .filter(Character.series_id == series.id)
             .order_by(Character.character_tag.asc())
             .all()
         )
+        # 포스트 수 임계값 이상 캐릭터만 추출 대상
+        eligible_characters = [c for c in all_characters if c.post_count >= min_post_count]
+        # 이미 추출 완료된 캐릭터는 건너뜀 (재시작 최적화)
+        characters = [c for c in eligible_characters if not c.from_related]
+
         total = len(characters)
+        eligible_total = len(eligible_characters)
+        already_done = eligible_total - total
         updated = 0
         membership_flagged = 0
 
         if progress_callback:
+            skip_msg = f" · {already_done}명 이미 완료" if already_done > 0 else ""
             progress_callback(
                 {
                     "phase": "starting",
-                    "message": f"{series.series_tag} 외형 태그 추출 시작 · {total}명",
+                    "message": f"{series.series_tag} 외형 태그 추출 시작 · {eligible_total}명 대상{skip_msg}",
                     "current": 0,
                     "total": total,
                 }
@@ -145,7 +156,8 @@ class AppearanceService:
                 )
 
         series.last_appearance_updated = updated
-        if total > 0 and updated == total and series.status in {"pending", "collecting", "collected"}:
+        total_extracted = already_done + updated
+        if eligible_total > 0 and total_extracted >= eligible_total and series.status in {"pending", "collecting", "collected"}:
             series.status = "tagged"
 
         commit_db_session(self.db)

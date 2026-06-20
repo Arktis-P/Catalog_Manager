@@ -15,6 +15,7 @@ from app.integrations.danbooru.wiki_character_collector import WikiCharacterColl
 from app.models.character import Character
 from app.models.series import Series
 from app.services.db_write_queue import commit_db_session
+from app.services.settings_service import SettingsService
 
 CollectProgressCallback = Callable[[dict[str, object]], None]
 
@@ -167,6 +168,15 @@ class CharacterService:
         progress_callback: CollectProgressCallback | None = None,
         _collect_stack: set[int] | None = None,
     ) -> CharacterCollectResult:
+        # Skip series that were merged into another parent or explicitly disabled.
+        if series.parent_series_id is not None or series.status == "disabled":
+            return CharacterCollectResult(
+                series_tag=series.series_tag,
+                discovered=0,
+                created=0,
+                skipped_existing=0,
+            )
+
         stack = set(_collect_stack or ())
         if series.id in stack:
             return CharacterCollectResult(
@@ -335,9 +345,13 @@ class CharacterService:
                 progress_callback=progress_callback,
             )
 
+        min_post_count = SettingsService(self.db).get_min_character_post_count()
         created = 0
         skipped_existing = len(candidates) - len(new_candidates)
         for candidate in new_candidates.values():
+            if candidate.post_count < min_post_count:
+                skipped_existing += 1
+                continue
             self.db.add(
                 Character(
                     series_id=series.id,

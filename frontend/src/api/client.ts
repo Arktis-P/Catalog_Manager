@@ -180,6 +180,7 @@ export const api = {
         | "generation_negative_prompt"
         | "review_thumbnail_size"
         | "review_max_loaded_images"
+        | "min_character_post_count"
       >
     >,
   ) => request<AppSettings>("/settings", { method: "PATCH", body: JSON.stringify(payload) }),

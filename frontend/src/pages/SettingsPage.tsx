@@ -13,6 +13,7 @@ export function SettingsPage() {
   const [negativePrompt, setNegativePrompt] = useState("");
   const [reviewThumbnailSize, setReviewThumbnailSize] = useState(384);
   const [reviewMaxLoadedImages, setReviewMaxLoadedImages] = useState(30);
+  const [minCharacterPostCount, setMinCharacterPostCount] = useState(20);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +35,7 @@ export function SettingsPage() {
         setNegativePrompt(response.generation_negative_prompt);
         setReviewThumbnailSize(response.review_thumbnail_size);
         setReviewMaxLoadedImages(response.review_max_loaded_images);
+        setMinCharacterPostCount(response.min_character_post_count);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load settings");
       } finally {
@@ -58,6 +60,7 @@ export function SettingsPage() {
         generation_negative_prompt: negativePrompt,
         review_thumbnail_size: reviewThumbnailSize,
         review_max_loaded_images: reviewMaxLoadedImages,
+        min_character_post_count: minCharacterPostCount,
       });
       setSettings(response);
       setMaxConcurrent(response.danbooru_collect_max_concurrent);
@@ -69,6 +72,7 @@ export function SettingsPage() {
       setNegativePrompt(response.generation_negative_prompt);
       setReviewThumbnailSize(response.review_thumbnail_size);
       setReviewMaxLoadedImages(response.review_max_loaded_images);
+      setMinCharacterPostCount(response.min_character_post_count);
       setSavedMessage("설정을 저장했습니다.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
@@ -95,6 +99,29 @@ export function SettingsPage() {
       {!loading && settings ? (
         <form className="panel" onSubmit={(event) => void handleSubmit(event)}>
           <div className="form-grid">
+            <div className="field full-width">
+              <label htmlFor="min-post-count">
+                캐릭터 최소 포스트 수 (수집 필터 · 외형 추출 필터 공통)
+              </label>
+              <div className="settings-range-row">
+                <input
+                  id="min-post-count"
+                  type="number"
+                  min={0}
+                  max={500}
+                  step={5}
+                  value={minCharacterPostCount}
+                  onChange={(event) => setMinCharacterPostCount(Number(event.target.value))}
+                  style={{ width: 80 }}
+                />
+              </div>
+              <p className="field-help">
+                이 값은 <strong>시리즈 태그 포함 포스트 수</strong> 기준입니다 (전체 포스트의 약 60~70% 수준).
+                임계값 미만 캐릭터는 수집 시 저장하지 않고 외형 추출 시에도 건너뜁니다.
+                기본값 10 권장 — 10 미만은 외형 태그 추출 통계가 불안정해집니다. 0으로 설정하면 필터를 해제합니다.
+              </p>
+            </div>
+
             <div className="field full-width">
               <label htmlFor="max-concurrent">
                 동시 Danbooru 작업 수 (캐릭터 수집 + 외형 추출 공유)

@@ -183,48 +183,79 @@ class PipelineManager:
     ) -> None:
         self._update(**{total_attr: len(targets), "phase": phase})
 
+        # 전체 작업을 한번에 제출해 job manager의 max_concurrent 슬롯을 최대한 활용
+        job_map: dict[str, str] = {}  # job_id → series_tag
+
         for series_id, series_tag in targets:
             if self._should_stop():
                 break
-
             if not is_still_eligible(series_id):
                 with self._lock:
                     prev = getattr(self._state, total_attr)
                     setattr(self._state, total_attr, max(0, prev - 1))
                 continue
-
-            self._update(
-                current_series_tag=series_tag,
-                current_job_message=f"{series_tag} {'수집 중...' if phase == 'collecting' else '외형 추출 중...'}",
-            )
-
             try:
                 job = submit_job(series_id)
-                job_id = job.job_id
+                job_map[job.job_id] = series_tag
             except Exception as exc:
                 with self._lock:
-                    prev = getattr(self._state, failed_attr)
-                    setattr(self._state, failed_attr, prev + 1)
+                    getattr(self._state, failed_attr)
+                    setattr(self._state, failed_attr, getattr(self._state, failed_attr) + 1)
                     self._state.errors.append(f"[{phase}] {series_tag}: {exc}")
-                continue
 
-            while not self._should_stop():
-                time.sleep(1)
+        # 제출된 모든 작업이 완료될 때까지 대기
+        remaining: set[str] = set(job_map)
+        while remaining:
+            time.sleep(1)
+            finished: set[str] = set()
+
+            for job_id in remaining:
                 current_job = series_job_manager.get_job(job_id)
                 if not current_job:
-                    break
-                self._update(current_job_message=current_job.message)
+                    finished.add(job_id)
+                    continue
+                if current_job.status == "running":
+                    self._update(
+                        current_series_tag=job_map[job_id],
+                        current_job_message=current_job.message,
+                    )
                 if current_job.status in {"completed", "failed", "cancelled"}:
+                    finished.add(job_id)
                     with self._lock:
                         if current_job.status == "completed":
-                            prev = getattr(self._state, done_attr)
-                            setattr(self._state, done_attr, prev + 1)
+                            setattr(self._state, done_attr, getattr(self._state, done_attr) + 1)
                         else:
-                            prev = getattr(self._state, failed_attr)
-                            setattr(self._state, failed_attr, prev + 1)
+                            setattr(self._state, failed_attr, getattr(self._state, failed_attr) + 1)
                             if current_job.error:
-                                self._state.errors.append(f"[{phase}] {series_tag}: {current_job.error}")
-                    break
+                                self._state.errors.append(f"[{phase}] {job_map[job_id]}: {current_job.error}")
+
+            remaining -= finished
+
+            if self._should_stop():
+                # 아직 대기 중인 작업은 취소, 실행 중인 작업은 자연 완료 대기
+                for job_id in list(remaining):
+                    current_job = series_job_manager.get_job(job_id)
+                    if current_job and current_job.status == "queued":
+                        if series_job_manager.cancel_job(job_id):
+                            with self._lock:
+                                setattr(self._state, total_attr, max(0, getattr(self._state, total_attr) - 1))
+                            remaining.discard(job_id)
+                # 실행 중인 작업이 끝날 때까지 대기
+                while remaining:
+                    time.sleep(1)
+                    still_running: set[str] = set()
+                    for job_id in remaining:
+                        current_job = series_job_manager.get_job(job_id)
+                        if current_job and current_job.status in {"queued", "running"}:
+                            still_running.add(job_id)
+                        elif current_job and current_job.status in {"completed", "failed", "cancelled"}:
+                            with self._lock:
+                                if current_job.status == "completed":
+                                    setattr(self._state, done_attr, getattr(self._state, done_attr) + 1)
+                                else:
+                                    setattr(self._state, failed_attr, getattr(self._state, failed_attr) + 1)
+                    remaining = still_running
+                break
 
     def _run_collect_phase(self) -> None:
         targets = self._get_collect_targets()
