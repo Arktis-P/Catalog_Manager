@@ -1178,23 +1178,137 @@ button,
 }
 
 .global-task-bar-jobs {
-  --global-task-row-height: 34px;
-  --global-task-row-gap: 4px;
-  --global-task-visible-rows: 5;
   display: flex;
   flex-direction: column;
-  gap: var(--global-task-row-gap);
-  max-height: calc(
-    var(--global-task-visible-rows) * var(--global-task-row-height) +
-      (var(--global-task-visible-rows) - 1) * var(--global-task-row-gap)
-  );
+  gap: 4px;
+  max-height: 420px;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 2px;
 }
 
-.global-task-bar-jobs .progress-panel-compact {
+.global-task-bar-jobs .progress-panel-compact,
+.global-task-bar-jobs .job-running-card {
   flex-shrink: 0;
+}
+
+/* ─── Running job card ──────────────────────────────────────────────────── */
+
+.job-running-card {
+  padding: 7px 10px 8px;
+  background: rgba(88, 166, 255, 0.05);
+  border: 1px solid rgba(88, 166, 255, 0.2);
+  border-radius: 8px;
+}
+
+.job-running-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.job-running-indicator {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #56d364;
+  flex-shrink: 0;
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.job-running-series {
+  flex: 0 1 160px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.job-running-header-spacer {
+  flex: 1 1 auto;
+}
+
+.job-running-message {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.job-running-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.job-running-bar {
+  flex: 1 1 auto;
+  height: 6px;
+}
+
+.job-running-pct {
+  flex: 0 0 30px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.job-running-stats {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+/* ─── Phase badges ──────────────────────────────────────────────────────── */
+
+.job-phase-badge {
+  font-size: 0.71rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid;
+  flex-shrink: 0;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.job-phase-wiki {
+  color: #58a6ff;
+  background: rgba(88, 166, 255, 0.1);
+  border-color: rgba(88, 166, 255, 0.3);
+}
+
+.job-phase-count {
+  color: #e3b341;
+  background: rgba(227, 179, 65, 0.1);
+  border-color: rgba(227, 179, 65, 0.3);
+}
+
+.job-phase-extract {
+  color: #bc8cff;
+  background: rgba(188, 140, 255, 0.1);
+  border-color: rgba(188, 140, 255, 0.3);
+}
+
+.job-phase-save {
+  color: #56d364;
+  background: rgba(86, 211, 100, 0.1);
+  border-color: rgba(86, 211, 100, 0.3);
+}
+
+.job-phase-default {
+  color: var(--text-muted);
+  background: transparent;
+  border-color: var(--border);
 }
 
 .global-task-error {

@@ -90,7 +90,7 @@ export function GlobalTaskBar() {
                 <CollectProgressPanel
                   key={job.job_id}
                   job={job}
-                  onCancel={job.status === "queued" ? () => void cancelCollectJob(job.job_id) : undefined}
+                  onCancel={job.status === "queued" || job.status === "running" ? () => void cancelCollectJob(job.job_id) : undefined}
                   onDismiss={
                     job.status === "completed" || job.status === "failed" || job.status === "cancelled"
                       ? () => dismissCollectJob(job.job_id)
