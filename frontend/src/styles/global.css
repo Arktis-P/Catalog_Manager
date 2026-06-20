@@ -1109,6 +1109,12 @@ button,
   min-height: 24px;
 }
 
+.compact-progress-bar {
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 2px;
+}
+
 .progress-panel-series {
   flex: 0 1 120px;
   min-width: 0;
@@ -1177,139 +1183,7 @@ button,
   gap: 4px;
 }
 
-.global-task-bar-jobs {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 420px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 2px;
-}
-
-.global-task-bar-jobs .progress-panel-compact,
-.global-task-bar-jobs .job-running-card {
-  flex-shrink: 0;
-}
-
-/* ─── Running job card ──────────────────────────────────────────────────── */
-
-.job-running-card {
-  padding: 7px 10px 8px;
-  background: rgba(88, 166, 255, 0.05);
-  border: 1px solid rgba(88, 166, 255, 0.2);
-  border-radius: 8px;
-}
-
-.job-running-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.job-running-indicator {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #56d364;
-  flex-shrink: 0;
-  animation: pulse-dot 1.4s ease-in-out infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
-.job-running-series {
-  flex: 0 1 160px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
-.job-running-header-spacer {
-  flex: 1 1 auto;
-}
-
-.job-running-message {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  margin-bottom: 5px;
-  word-break: break-word;
-  line-height: 1.35;
-}
-
-.job-running-progress-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 3px;
-}
-
-.job-running-bar {
-  flex: 1 1 auto;
-  height: 6px;
-}
-
-.job-running-pct {
-  flex: 0 0 30px;
-  font-size: 0.74rem;
-  color: var(--text-muted);
-  text-align: right;
-}
-
-.job-running-stats {
-  font-size: 0.74rem;
-  color: var(--text-muted);
-}
-
-/* ─── Phase badges ──────────────────────────────────────────────────────── */
-
-.job-phase-badge {
-  font-size: 0.71rem;
-  padding: 1px 5px;
-  border-radius: 4px;
-  border: 1px solid;
-  flex-shrink: 0;
-  font-weight: 500;
-  line-height: 1.6;
-}
-
-.job-phase-wiki {
-  color: #58a6ff;
-  background: rgba(88, 166, 255, 0.1);
-  border-color: rgba(88, 166, 255, 0.3);
-}
-
-.job-phase-count {
-  color: #e3b341;
-  background: rgba(227, 179, 65, 0.1);
-  border-color: rgba(227, 179, 65, 0.3);
-}
-
-.job-phase-extract {
-  color: #bc8cff;
-  background: rgba(188, 140, 255, 0.1);
-  border-color: rgba(188, 140, 255, 0.3);
-}
-
-.job-phase-save {
-  color: #56d364;
-  background: rgba(86, 211, 100, 0.1);
-  border-color: rgba(86, 211, 100, 0.3);
-}
-
-.job-phase-default {
-  color: var(--text-muted);
-  background: transparent;
-  border-color: var(--border);
-}
+/* .global-task-bar-jobs → 아래 pipeline 섹션에서 재정의 */
 
 .global-task-error {
   display: flex;
@@ -1364,10 +1238,7 @@ button,
   transition: width 0.25s ease;
 }
 
-.progress-bar-indeterminate .progress-bar-fill {
-  width: 35% !important;
-  animation: progress-indeterminate 1.2s ease-in-out infinite;
-}
+/* indeterminate → pipeline 섹션에서 재정의 */
 
 @keyframes progress-indeterminate {
   0% {
@@ -1562,6 +1433,277 @@ button,
 
 .pipeline-error-more {
   color: var(--text-muted);
+}
+
+/* ─── 파이프라인 패널 — 전체 진행률 / 작업 카드 섹션 ──────────────────────── */
+
+.pipeline-overall-section {
+  margin-bottom: 4px;
+}
+
+.pipeline-section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 7px;
+}
+
+.pipeline-section-count {
+  font-weight: 400;
+  font-size: 0.76rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+}
+
+.pipeline-active-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.pipeline-active-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pipeline-queued-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.pipeline-queued-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.pipeline-queued-tags {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 라이브 ticker — 폴백 표시 */
+.pipeline-live-ticker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(88, 166, 255, 0.04);
+  border: 1px solid rgba(88, 166, 255, 0.18);
+  border-left: 3px solid rgba(88, 166, 255, 0.5);
+  border-radius: 6px;
+}
+
+.pipeline-live-preparing {
+  border-color: var(--border);
+  border-left-color: var(--text-muted);
+  background: transparent;
+}
+
+.pipeline-live-series {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.pipeline-live-msg {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ─── 개별 실행 작업 카드 (pipeline panel + GlobalTaskBar 공유) ──────────── */
+
+.job-running-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(88, 166, 255, 0.04);
+  border: 1px solid rgba(88, 166, 255, 0.18);
+  border-left: 3px solid rgba(88, 166, 255, 0.5);
+  border-radius: 6px;
+}
+
+.job-running-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.job-running-indicator {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #56d364;
+  flex-shrink: 0;
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+.job-indicator-inline {
+  margin-right: 2px;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.job-running-series {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.job-type-label {
+  flex-shrink: 0;
+  font-size: 0.73rem;
+  color: var(--text-muted);
+}
+
+.job-running-header-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.job-running-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.job-running-meta-spacer {
+  flex: 1 1 auto;
+}
+
+.job-running-count {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.job-running-pct-badge {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.job-running-bar {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.job-running-message {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+/* ─── 페이즈 배지 색상 ────────────────────────────────────────────────────── */
+
+.job-phase-badge {
+  font-size: 0.71rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid;
+  flex-shrink: 0;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.job-phase-wiki {
+  color: #58a6ff;
+  background: rgba(88, 166, 255, 0.1);
+  border-color: rgba(88, 166, 255, 0.3);
+}
+
+.job-phase-count {
+  color: #e3b341;
+  background: rgba(227, 179, 65, 0.1);
+  border-color: rgba(227, 179, 65, 0.3);
+}
+
+.job-phase-extract {
+  color: #bc8cff;
+  background: rgba(188, 140, 255, 0.1);
+  border-color: rgba(188, 140, 255, 0.3);
+}
+
+.job-phase-save {
+  color: #56d364;
+  background: rgba(86, 211, 100, 0.1);
+  border-color: rgba(86, 211, 100, 0.3);
+}
+
+.job-phase-default {
+  color: var(--text-muted);
+  background: transparent;
+  border-color: var(--border);
+}
+
+/* ─── GlobalTaskBar 확장 — 실행 중 카드 포함 대응 ───────────────────────── */
+
+.global-task-bar-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.global-task-bar-jobs .progress-panel-compact,
+.global-task-bar-jobs .job-running-card {
+  flex-shrink: 0;
+}
+
+/* indeterminate 바 */
+.progress-bar-indeterminate .progress-bar-fill {
+  width: 35% !important;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
 }
 
 .generation-page .generation-layout {

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
+import { RunningJobCard } from "../components/CollectProgressPanel";
 import { SeriesCharactersModal } from "../components/SeriesCharactersModal";
 import { isSeriesMergeEligible, SeriesMergeModal } from "../components/SeriesMergeModal";
 import { useCollectJobs } from "../context/CollectJobContext";
@@ -39,6 +40,8 @@ export function SeriesPage() {
     isExtractingAppearanceSeries,
     lastCompletedJob,
     clearLastCompletedJob,
+    jobs: collectJobs,
+    cancelJob,
   } = useCollectJobs();
   const [items, setItems] = useState<Series[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
@@ -58,6 +61,15 @@ export function SeriesPage() {
   const [expandedParentIds, setExpandedParentIds] = useState<Set<number>>(() => new Set());
   const [exportingCharacters, setExportingCharacters] = useState(false);
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus | null>(null);
+
+  const pipelineRunningJobs = useMemo(
+    () => collectJobs.filter((j) => j.status === "running"),
+    [collectJobs],
+  );
+  const pipelineQueuedJobs = useMemo(
+    () => collectJobs.filter((j) => j.status === "queued"),
+    [collectJobs],
+  );
 
   const mergeEligibleItems = useMemo(
     () => items.filter((series) => isSeriesMergeEligible(series)),
@@ -534,50 +546,108 @@ export function SeriesPage() {
           <div className="pipeline-panel-body">
             {(pipelineStatus.status === "running" || pipelineStatus.status === "stopping") && (
               <>
-                <div className="pipeline-progress-row">
-                  <span className="pipeline-progress-label">Phase 1 · 캐릭터 수집</span>
-                  <div className="pipeline-progress-bar-wrap">
-                    <div
-                      className="pipeline-progress-bar"
-                      style={{
-                        width:
-                          pipelineStatus.collect_total > 0
-                            ? `${Math.min(100, ((pipelineStatus.collect_done + pipelineStatus.collect_failed) / pipelineStatus.collect_total) * 100)}%`
-                            : pipelineStatus.phase === "collecting" ? "0%" : "100%",
-                      }}
-                    />
+                {/* ── 전체 진행률 ── */}
+                <div className="pipeline-overall-section">
+                  <div className="pipeline-section-label">전체 진행률</div>
+                  <div className="pipeline-progress-row">
+                    <span className="pipeline-progress-label">Phase 1 · 캐릭터 수집</span>
+                    <div className="pipeline-progress-bar-wrap">
+                      <div
+                        className="pipeline-progress-bar"
+                        style={{
+                          width:
+                            pipelineStatus.collect_total > 0
+                              ? `${Math.min(100, ((pipelineStatus.collect_done + pipelineStatus.collect_failed) / pipelineStatus.collect_total) * 100)}%`
+                              : pipelineStatus.phase === "collecting" ? "0%" : "100%",
+                        }}
+                      />
+                    </div>
+                    <span className="pipeline-progress-count">
+                      {pipelineStatus.phase === "collecting"
+                        ? `${(pipelineStatus.collect_done + pipelineStatus.collect_failed).toLocaleString()} / ${pipelineStatus.collect_total.toLocaleString()}`
+                        : pipelineStatus.collect_total > 0
+                          ? `완료 ${pipelineStatus.collect_total.toLocaleString()}`
+                          : "-"}
+                    </span>
                   </div>
-                  <span className="pipeline-progress-count">
-                    {pipelineStatus.phase === "collecting"
-                      ? `${pipelineStatus.collect_done + pipelineStatus.collect_failed} / ${pipelineStatus.collect_total}`
-                      : pipelineStatus.collect_total > 0
-                        ? `완료 ${pipelineStatus.collect_total}`
-                        : "-"}
-                  </span>
-                </div>
-                <div className="pipeline-progress-row">
-                  <span className="pipeline-progress-label">Phase 2 · 외형 태그 추출</span>
-                  <div className="pipeline-progress-bar-wrap">
-                    <div
-                      className="pipeline-progress-bar"
-                      style={{
-                        width:
-                          pipelineStatus.extract_total > 0
-                            ? `${Math.min(100, ((pipelineStatus.extract_done + pipelineStatus.extract_failed) / pipelineStatus.extract_total) * 100)}%`
-                            : "0%",
-                      }}
-                    />
+                  <div className="pipeline-progress-row">
+                    <span className="pipeline-progress-label">Phase 2 · 외형 태그 추출</span>
+                    <div className="pipeline-progress-bar-wrap">
+                      <div
+                        className="pipeline-progress-bar"
+                        style={{
+                          width:
+                            pipelineStatus.extract_total > 0
+                              ? `${Math.min(100, ((pipelineStatus.extract_done + pipelineStatus.extract_failed) / pipelineStatus.extract_total) * 100)}%`
+                              : "0%",
+                        }}
+                      />
+                    </div>
+                    <span className="pipeline-progress-count">
+                      {pipelineStatus.extract_total > 0
+                        ? `${(pipelineStatus.extract_done + pipelineStatus.extract_failed).toLocaleString()} / ${pipelineStatus.extract_total.toLocaleString()}`
+                        : pipelineStatus.phase === "extracting"
+                          ? "계산 중..."
+                          : "대기 중"}
+                    </span>
                   </div>
-                  <span className="pipeline-progress-count">
-                    {pipelineStatus.extract_total > 0
-                      ? `${pipelineStatus.extract_done + pipelineStatus.extract_failed} / ${pipelineStatus.extract_total}`
-                      : "-"}
-                  </span>
                 </div>
-                {pipelineStatus.current_series_tag && (
-                  <div className="pipeline-current">
-                    <span className="pipeline-current-tag">{pipelineStatus.current_series_tag}</span>
-                    <span className="pipeline-current-msg">{pipelineStatus.current_job_message}</span>
+
+                {/* ── 현재 작업 중인 개별 카드 ── */}
+                {pipelineRunningJobs.length > 0 ? (
+                  <div className="pipeline-active-section">
+                    <div className="pipeline-section-label">
+                      현재 작업 중
+                      <span className="pipeline-section-count">{pipelineRunningJobs.length}개</span>
+                    </div>
+                    <div className="pipeline-active-jobs">
+                      {pipelineRunningJobs.map((job) => (
+                        <RunningJobCard
+                          key={job.job_id}
+                          job={job}
+                          onCancel={() => void cancelJob(job.job_id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : pipelineStatus.current_series_tag ? (
+                  /* 폴백: CollectJobContext 아직 미수신 시 pipelineStatus 정보 표시 */
+                  <div className="pipeline-active-section">
+                    <div className="pipeline-section-label">현재 작업 중</div>
+                    <div className="pipeline-live-ticker">
+                      <span className="job-running-indicator" aria-hidden="true" />
+                      <strong className="pipeline-live-series">{pipelineStatus.current_series_tag}</strong>
+                      {pipelineStatus.current_job_message ? (
+                        <span className="pipeline-live-msg">{pipelineStatus.current_job_message}</span>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : (
+                  /* 파이프라인 시작 직후 — 작업 배분 중 */
+                  <div className="pipeline-active-section">
+                    <div className="pipeline-section-label">현재 작업 중</div>
+                    <div className="pipeline-live-ticker pipeline-live-preparing">
+                      <span className="job-running-indicator" aria-hidden="true" />
+                      <span className="pipeline-live-msg">작업 배분 중... (잠시 후 표시됩니다)</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── 대기 중 요약 ── */}
+                {pipelineQueuedJobs.length > 0 && (
+                  <div className="pipeline-queued-section">
+                    <span className="pipeline-queued-label">
+                      대기 중
+                      <span className="pipeline-section-count">{pipelineQueuedJobs.length}개</span>
+                    </span>
+                    <span className="pipeline-queued-tags">
+                      {pipelineQueuedJobs
+                        .filter((j) => j.series_tag)
+                        .slice(0, 6)
+                        .map((j) => j.series_tag)
+                        .join(" · ")}
+                      {pipelineQueuedJobs.length > 6 ? ` +${pipelineQueuedJobs.length - 6}개` : ""}
+                    </span>
                   </div>
                 )}
               </>
@@ -597,10 +667,10 @@ export function SeriesPage() {
                   {pipelineStatus.status === "completed" ? "완료" : pipelineStatus.status === "failed" ? "실패" : "중지됨"}
                 </span>
                 <span className="pipeline-summary-detail">
-                  수집 {pipelineStatus.collect_done}/{pipelineStatus.collect_total}
+                  수집 {pipelineStatus.collect_done.toLocaleString()} / {pipelineStatus.collect_total.toLocaleString()}
                   {pipelineStatus.collect_failed > 0 ? ` (실패 ${pipelineStatus.collect_failed})` : ""}
                   {" · "}
-                  외형 추출 {pipelineStatus.extract_done}/{pipelineStatus.extract_total}
+                  외형 추출 {pipelineStatus.extract_done.toLocaleString()} / {pipelineStatus.extract_total.toLocaleString()}
                   {pipelineStatus.extract_failed > 0 ? ` (실패 ${pipelineStatus.extract_failed})` : ""}
                 </span>
               </div>

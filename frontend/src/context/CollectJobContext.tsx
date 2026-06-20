@@ -122,6 +122,14 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
     void refreshJobs();
   }, [refreshJobs]);
 
+  // 주기적으로 잡 목록 갱신 — 파이프라인 실행 중 새로 시작된 running 잡 발견
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void refreshJobs();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [refreshJobs]);
+
   useEffect(() => {
     if (runningJobIds.length === 0) {
       return;

@@ -51,6 +51,7 @@ class SeriesJobManager:
         self._jobs: dict[str, SeriesJobState] = {}
         self._active_by_series: dict[int, str] = {}
         self._job_queue: deque[str] = deque()
+        self._running_job_ids: set[str] = set()
         self._running_count = 0
         self._lock = threading.Lock()
 
@@ -68,6 +69,10 @@ class SeriesJobManager:
         with self._lock:
             return self._jobs.get(job_id)
 
+    def get_running_jobs(self) -> list[SeriesJobState]:
+        with self._lock:
+            return [self._jobs[jid] for jid in self._running_job_ids if jid in self._jobs]
+
     def get_active_job_for_series(self, series_id: int) -> SeriesJobState | None:
         with self._lock:
             job_id = self._active_by_series.get(series_id)
@@ -78,14 +83,32 @@ class SeriesJobManager:
     def list_visible_jobs(self, *, limit: int = 20) -> list[SeriesJobState]:
         with self._lock:
             jobs = list(self._jobs.values())
-        jobs.sort(key=lambda job: job.started_at, reverse=True)
-        return jobs[:limit]
+            queue_order: dict[str, int] = {
+                job_id: idx for idx, job_id in enumerate(self._job_queue)
+            }
 
-    def start_series_collect(self, series_id: int) -> SeriesJobState:
-        return self._enqueue(series_id, JOB_TYPE_CHARACTER_COLLECT)
+        running = [j for j in jobs if j.status == "running"]
+        queued = sorted(
+            [j for j in jobs if j.status == "queued"],
+            key=lambda j: queue_order.get(j.job_id, 999_999),
+        )
+        done = sorted(
+            [j for j in jobs if j.status in {"completed", "failed", "cancelled"}],
+            key=lambda j: j.started_at,
+            reverse=True,
+        )
 
-    def start_appearance_extract(self, series_id: int) -> SeriesJobState:
-        return self._enqueue(series_id, JOB_TYPE_APPEARANCE_EXTRACT)
+        # running 전체 + 큐 앞쪽 N개 + 최근 완료 N개
+        n_running = len(running)
+        n_queued_slots = max(0, limit - n_running - 5)
+        result = running + queued[:n_queued_slots] + done[:5]
+        return result[:limit]
+
+    def start_series_collect(self, series_id: int, series_tag: str = "") -> SeriesJobState:
+        return self._enqueue(series_id, JOB_TYPE_CHARACTER_COLLECT, series_tag=series_tag)
+
+    def start_appearance_extract(self, series_id: int, series_tag: str = "") -> SeriesJobState:
+        return self._enqueue(series_id, JOB_TYPE_APPEARANCE_EXTRACT, series_tag=series_tag)
 
     def cancel_job(self, job_id: str) -> bool:
         with self._lock:
@@ -109,7 +132,7 @@ class SeriesJobManager:
         self._dispatch_next()
         return True
 
-    def _enqueue(self, series_id: int, job_type: str) -> SeriesJobState:
+    def _enqueue(self, series_id: int, job_type: str, series_tag: str = "") -> SeriesJobState:
         with self._lock:
             existing_job_id = self._active_by_series.get(series_id)
             if existing_job_id:
@@ -120,7 +143,7 @@ class SeriesJobManager:
             job = SeriesJobState(
                 job_id=str(uuid.uuid4()),
                 series_id=series_id,
-                series_tag="",
+                series_tag=series_tag,
                 job_type=job_type,
             )
             self._jobs[job.job_id] = job
@@ -155,6 +178,7 @@ class SeriesJobManager:
                     continue
 
                 self._running_count += 1
+                self._running_job_ids.add(job_id)
                 series_id = job.series_id
                 job_type = job.job_type
                 thread = threading.Thread(
@@ -352,6 +376,7 @@ class SeriesJobManager:
             active_job_id = self._active_by_series.get(series_id)
             if active_job_id == job_id:
                 self._active_by_series.pop(series_id, None)
+            self._running_job_ids.discard(job_id)
             self._running_count = max(0, self._running_count - 1)
 
         self._dispatch_next()

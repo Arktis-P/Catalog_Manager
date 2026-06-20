@@ -6,77 +6,49 @@ interface CollectProgressPanelProps {
   onCancel?: () => void;
 }
 
-function getProgressPercent(job: CollectJob): number | null {
-  if (job.status === "completed") {
-    return 100;
-  }
-  if (job.total > 0) {
-    return Math.min(100, Math.round((job.current / job.total) * 100));
-  }
+// ─── 공통 유틸 ───────────────────────────────────────────────────────────────
+
+export function getProgressPercent(job: CollectJob): number | null {
+  if (job.status === "completed") return 100;
+  if (job.total > 0) return Math.min(100, Math.round((job.current / job.total) * 100));
   return null;
 }
 
-function phaseShortLabel(phase: string): string {
+export function phaseShortLabel(phase: string): string {
   switch (phase) {
-    case "discovering_wiki":
-      return "위키";
-    case "discovering_wiki_subseries":
-      return "하위";
-    case "discovering_pattern":
-      return "패턴";
-    case "discovering_posts_scan":
-      return "tag";
-    case "discovering_posts_verify":
-      return "분류";
-    case "discovering":
-      return "발견";
-    case "counting":
-      return "count";
-    case "extracting":
-      return "외형";
-    case "saving":
-      return "저장";
-    case "completed":
-      return "완료";
-    case "failed":
-      return "실패";
-    case "starting":
-      return "시작";
-    case "queued":
-      return "대기";
-    case "cancelled":
-      return "취소";
-    default:
-      return "준비";
+    case "discovering_wiki": return "위키";
+    case "discovering_wiki_subseries": return "하위";
+    case "discovering_pattern": return "패턴";
+    case "discovering_posts_scan": return "스캔";
+    case "discovering_posts_verify": return "분류";
+    case "counting": return "count";
+    case "extracting": return "외형";
+    case "saving": return "저장";
+    case "completed": return "완료";
+    case "failed": return "실패";
+    case "cancelled": return "취소";
+    case "queued": return "대기";
+    case "starting": return "시작";
+    default: return "준비";
   }
 }
 
-function phaseFullLabel(phase: string): string {
+export function phaseFullLabel(phase: string): string {
   switch (phase) {
-    case "discovering_wiki":
-      return "위키 파싱";
-    case "discovering_wiki_subseries":
-      return "하위 시리즈";
-    case "discovering_pattern":
-      return "패턴 검색";
-    case "discovering_posts_scan":
-      return "포스트 스캔";
-    case "discovering_posts_verify":
-      return "태그 분류";
-    case "counting":
-      return "포스트 수 조회";
-    case "extracting":
-      return "외형 추출";
-    case "saving":
-      return "저장 중";
-    case "starting":
-      return "초기화";
-    default:
-      return phase;
+    case "discovering_wiki": return "위키 파싱";
+    case "discovering_wiki_subseries": return "하위 시리즈";
+    case "discovering_pattern": return "패턴 검색";
+    case "discovering_posts_scan": return "포스트 스캔";
+    case "discovering_posts_verify": return "태그 분류";
+    case "counting": return "포스트 수 조회";
+    case "extracting": return "외형 추출";
+    case "saving": return "저장 중";
+    case "starting": return "초기화";
+    default: return phase;
   }
 }
 
-function phaseBadgeClass(phase: string): string {
+export function phaseBadgeClass(phase: string): string {
   switch (phase) {
     case "discovering_wiki":
     case "discovering_wiki_subseries":
@@ -84,210 +56,224 @@ function phaseBadgeClass(phase: string): string {
     case "discovering_posts_scan":
     case "discovering_posts_verify":
       return "job-phase-badge job-phase-wiki";
-    case "counting":
-      return "job-phase-badge job-phase-count";
-    case "extracting":
-      return "job-phase-badge job-phase-extract";
-    case "saving":
-      return "job-phase-badge job-phase-save";
-    default:
-      return "job-phase-badge job-phase-default";
+    case "counting": return "job-phase-badge job-phase-count";
+    case "extracting": return "job-phase-badge job-phase-extract";
+    case "saving": return "job-phase-badge job-phase-save";
+    default: return "job-phase-badge job-phase-default";
   }
+}
+
+export function jobTypeLabel(job: CollectJob): string {
+  return job.job_type === "appearance_extract" ? "외형 태그 추출" : "캐릭터 수집";
 }
 
 function formatEta(job: CollectJob): string | null {
-  if (job.job_type === "appearance_extract") {
-    if (job.phase !== "extracting" || job.total <= 0 || job.current <= 0) {
-      return null;
-    }
-    const remaining = job.total - job.current;
-    const seconds = remaining * 0.5;
-    if (seconds < 60) {
-      return `~${Math.ceil(seconds)}s`;
-    }
-    return `~${Math.ceil(seconds / 60)}m`;
-  }
-  if (job.phase !== "counting" || job.total <= 0 || job.current <= 0) {
-    return null;
-  }
-  const remaining = job.total - job.current;
-  const seconds = remaining * 0.5;
-  if (seconds < 60) {
-    return `~${Math.ceil(seconds)}s`;
-  }
-  return `~${Math.ceil(seconds / 60)}m`;
+  const isExtract = job.job_type === "appearance_extract";
+  if (isExtract && job.phase !== "extracting") return null;
+  if (!isExtract && job.phase !== "counting") return null;
+  if (job.total <= 0 || job.current <= 0) return null;
+  const sec = (job.total - job.current) * 0.5;
+  return sec < 60 ? `~${Math.ceil(sec)}s` : `~${Math.ceil(sec / 60)}m`;
 }
 
-function formatCompactMeta(job: CollectJob, percent: number | null): string | null {
-  const parts: string[] = [];
-  if (job.job_type === "appearance_extract") {
-    if (job.total > 0) {
-      parts.push(`${job.current}/${job.total}${percent !== null ? ` ${percent}%` : ""}`);
-    }
-    if (job.status === "completed" && job.updated > 0) {
-      parts.push(`updated ${job.updated}`);
-    }
-  } else if (job.total > 0) {
-    parts.push(`${job.current}/${job.total}${percent !== null ? ` ${percent}%` : ""}`);
-    if (
-      (job.phase === "discovering_wiki" || job.phase === "discovering_wiki_subseries") &&
-      job.discovered > 0
-    ) {
-      parts.push(`캐릭터 ${job.discovered}`);
-    }
-  } else if (job.discovered > 0) {
-    parts.push(`discovered ${job.discovered}`);
-  }
-  const eta = formatEta(job);
-  if (eta) {
-    parts.push(eta);
-  }
-  if (job.status === "completed" && job.job_type === "character_collect") {
-    parts.push(`+${job.created}`);
-  }
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
+// ─── 파이프라인 패널용 확장 카드 (export) ────────────────────────────────────
 
-function jobTypeLabel(job: CollectJob): string {
-  return job.job_type === "appearance_extract" ? "Appearance" : "Collect";
-}
-
-// ─── 실행 중인 작업 — 상세 카드 ──────────────────────────────────────────────
-
-function RunningJobCard({ job, onCancel }: { job: CollectJob; onCancel?: () => void }) {
+export function RunningJobCard({
+  job,
+  onCancel,
+}: {
+  job: CollectJob;
+  onCancel?: () => void;
+}) {
   const percent = getProgressPercent(job);
   const eta = formatEta(job);
 
-  const statsLine: string[] = [];
-  if (job.job_type === "character_collect") {
-    if (job.total > 0) statsLine.push(`${job.current} / ${job.total}`);
-    if (job.discovered > 0) statsLine.push(`발견 ${job.discovered}명`);
-  } else {
-    if (job.total > 0) statsLine.push(`${job.current} / ${job.total}명`);
-    if (eta) statsLine.push(eta);
+  // x / y 카운트
+  const countParts: string[] = [];
+  if (job.total > 0) {
+    countParts.push(`${job.current.toLocaleString()} / ${job.total.toLocaleString()}`);
   }
+  if (job.job_type === "character_collect" && job.discovered > 0) {
+    countParts.push(`발견 ${job.discovered}명`);
+  }
+  if (eta) countParts.push(eta);
+
+  const countDisplay = countParts.join(" · ");
 
   return (
     <div className="job-running-card">
+      {/* Row 1: 시리즈명 + 타입 + 취소 */}
       <div className="job-running-header">
         <span className="job-running-indicator" aria-hidden="true" />
         <strong className="job-running-series" title={job.series_tag}>
           {job.series_tag}
         </strong>
-        <span className="badge badge-compact badge-muted">{jobTypeLabel(job)}</span>
-        <span className={phaseBadgeClass(job.phase)}>{phaseFullLabel(job.phase)}</span>
         <div className="job-running-header-spacer" />
+        <span className="job-type-label">{jobTypeLabel(job)}</span>
         {onCancel ? (
           <button
             className="btn btn-small btn-ghost"
             type="button"
             aria-label="작업 취소"
-            title="작업 취소"
             onClick={onCancel}
           >
             ×
           </button>
         ) : null}
       </div>
-      <div className="job-running-message" title={job.message}>
-        {job.message}
+
+      {/* Row 2: 단계 배지 + 카운트 */}
+      <div className="job-running-meta-row">
+        <span className={phaseBadgeClass(job.phase)}>{phaseFullLabel(job.phase)}</span>
+        <div className="job-running-meta-spacer" />
+        {countDisplay ? (
+          <span className="job-running-count">{countDisplay}</span>
+        ) : null}
+        {percent !== null && job.total > 0 ? (
+          <span className="job-running-pct-badge">{percent}%</span>
+        ) : null}
       </div>
-      <div className="job-running-progress-row">
+
+      {/* Row 3: 프로그레스 바 */}
+      <div
+        className={`progress-bar job-running-bar${
+          percent === null ? " progress-bar-indeterminate" : ""
+        }`}
+      >
         <div
-          className={`progress-bar job-running-bar${percent === null ? " progress-bar-indeterminate" : ""}`}
-        >
-          <div
-            className="progress-bar-fill"
-            style={percent === null ? undefined : { width: `${percent}%` }}
-          />
-        </div>
-        <span className="job-running-pct">{percent !== null ? `${percent}%` : ""}</span>
+          className="progress-bar-fill"
+          style={percent !== null ? { width: `${percent}%` } : undefined}
+        />
       </div>
-      {statsLine.length > 0 ? (
-        <div className="job-running-stats">{statsLine.join(" · ")}</div>
-      ) : null}
-      {job.error ? <div className="progress-panel-error-line">{job.error}</div> : null}
-    </div>
-  );
-}
 
-// ─── 대기 중인 작업 — 컴팩트 ────────────────────────────────────────────────
-
-function QueuedJobRow({ job, onCancel }: { job: CollectJob; onCancel?: () => void }) {
-  return (
-    <div className="progress-panel progress-panel-compact">
-      <div className="progress-panel-compact-row">
-        <strong className="progress-panel-series" title={job.series_tag}>
-          {job.series_tag}
-        </strong>
-        <span className="badge badge-compact badge-muted">{jobTypeLabel(job)}</span>
-        <span className="badge badge-compact">{phaseShortLabel(job.phase)}</span>
-        <span className="progress-panel-message-compact" title={job.message}>
+      {/* Row 4: 상세 메시지 */}
+      {job.message ? (
+        <div className="job-running-message" title={job.message}>
           {job.message}
-        </span>
-        {onCancel ? (
-          <button
-            className="btn btn-small btn-ghost"
-            type="button"
-            aria-label="대기 취소"
-            title="대기 취소"
-            onClick={onCancel}
-          >
-            ×
-          </button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
+
+      {job.error ? (
+        <div className="progress-panel-error-line">{job.error}</div>
+      ) : null}
     </div>
   );
 }
 
-// ─── 완료 / 실패 / 취소 — 컴팩트 ────────────────────────────────────────────
+// ─── GlobalTaskBar용 컴팩트 1줄 ──────────────────────────────────────────────
 
-function DoneJobRow({
+function CompactJobRow({
   job,
-  onDismiss,
+  onAction,
+  actionLabel,
 }: {
   job: CollectJob;
-  onDismiss?: () => void;
+  onAction?: () => void;
+  actionLabel?: string;
 }) {
   const percent = getProgressPercent(job);
-  const meta = formatCompactMeta(job, percent);
+  const eta = formatEta(job);
+
+  const meta: string[] = [];
+  if (job.total > 0 && percent !== null && job.status !== "completed") {
+    meta.push(`${percent}%`);
+  }
+  if (job.status === "running" && job.job_type === "character_collect" && job.discovered > 0) {
+    meta.push(`${job.discovered}발견`);
+  }
+  if (job.status === "running" && eta) {
+    meta.push(eta);
+  }
+  if (job.status === "completed" && job.job_type === "character_collect" && job.created > 0) {
+    meta.push(`+${job.created}`);
+  }
+  if (job.status === "completed" && job.job_type === "appearance_extract" && job.updated > 0) {
+    meta.push(`+${job.updated}`);
+  }
 
   return (
     <div
       className={`progress-panel progress-panel-compact${
         job.status === "failed" ? " progress-panel-error" : ""
-      } progress-panel-done`}
+      }${
+        job.status === "completed" || job.status === "cancelled"
+          ? " progress-panel-done"
+          : ""
+      }`}
     >
       <div className="progress-panel-compact-row">
+        {job.status === "running" ? (
+          <span className="job-running-indicator job-indicator-inline" aria-hidden="true" />
+        ) : null}
         <strong className="progress-panel-series" title={job.series_tag}>
           {job.series_tag}
         </strong>
-        <span className="badge badge-compact badge-muted">{jobTypeLabel(job)}</span>
-        <span className="badge badge-compact">{phaseShortLabel(job.phase)}</span>
+        <span className="badge badge-compact badge-muted">
+          {job.job_type === "appearance_extract" ? "외형" : "수집"}
+        </span>
+        <span
+          className={
+            job.status === "running"
+              ? phaseBadgeClass(job.phase)
+              : "badge badge-compact"
+          }
+        >
+          {phaseShortLabel(job.status === "running" ? job.phase : job.status)}
+        </span>
         <span className="progress-panel-message-compact" title={job.message}>
           {job.message}
         </span>
-        {meta ? <span className="progress-panel-meta">{meta}</span> : null}
-        {onDismiss ? (
-          <button className="btn btn-small btn-ghost" type="button" onClick={onDismiss}>
+        {meta.length > 0 ? (
+          <span className="progress-panel-meta">{meta.join(" · ")}</span>
+        ) : null}
+        {onAction ? (
+          <button
+            className="btn btn-small btn-ghost"
+            type="button"
+            aria-label={actionLabel}
+            onClick={onAction}
+          >
             ×
           </button>
         ) : null}
       </div>
-      {job.error ? <div className="progress-panel-error-line">{job.error}</div> : null}
+      {job.status === "running" && (
+        <div className={`progress-bar compact-progress-bar${percent === null ? " progress-bar-indeterminate" : ""}`}>
+          <div
+            className="progress-bar-fill"
+            style={percent !== null ? { width: `${percent}%` } : undefined}
+          />
+        </div>
+      )}
+      {job.error ? (
+        <div className="progress-panel-error-line">{job.error}</div>
+      ) : null}
     </div>
   );
 }
 
-// ─── 외부 공개 컴포넌트 ──────────────────────────────────────────────────────
+// ─── 외부 공개 컴포넌트 (GlobalTaskBar 전용) ─────────────────────────────────
 
-export function CollectProgressPanel({ job, onDismiss, onCancel }: CollectProgressPanelProps) {
-  if (job.status === "running") {
-    return <RunningJobCard job={job} onCancel={onCancel} />;
-  }
-  if (job.status === "queued") {
-    return <QueuedJobRow job={job} onCancel={onCancel} />;
-  }
-  return <DoneJobRow job={job} onDismiss={onDismiss} />;
+export function CollectProgressPanel({
+  job,
+  onDismiss,
+  onCancel,
+}: CollectProgressPanelProps) {
+  const isDone =
+    job.status === "completed" ||
+    job.status === "failed" ||
+    job.status === "cancelled";
+  return (
+    <CompactJobRow
+      job={job}
+      onAction={
+        isDone
+          ? onDismiss
+          : job.status === "queued" || job.status === "running"
+            ? onCancel
+            : undefined
+      }
+      actionLabel={isDone ? "닫기" : "취소"}
+    />
+  );
 }

@@ -195,7 +195,7 @@ class PipelineManager:
                     setattr(self._state, total_attr, max(0, prev - 1))
                 continue
             try:
-                job = submit_job(series_id)
+                job = submit_job(series_id, series_tag)
                 job_map[job.job_id] = series_tag
             except Exception as exc:
                 with self._lock:
@@ -205,31 +205,39 @@ class PipelineManager:
 
         # 제출된 모든 작업이 완료될 때까지 대기
         remaining: set[str] = set(job_map)
+        tick = 0
         while remaining:
             time.sleep(1)
-            finished: set[str] = set()
+            tick += 1
 
-            for job_id in remaining:
-                current_job = series_job_manager.get_job(job_id)
-                if not current_job:
-                    finished.add(job_id)
-                    continue
-                if current_job.status == "running":
-                    self._update(
-                        current_series_tag=job_map[job_id],
-                        current_job_message=current_job.message,
-                    )
-                if current_job.status in {"completed", "failed", "cancelled"}:
-                    finished.add(job_id)
-                    with self._lock:
-                        if current_job.status == "completed":
-                            setattr(self._state, done_attr, getattr(self._state, done_attr) + 1)
-                        else:
-                            setattr(self._state, failed_attr, getattr(self._state, failed_attr) + 1)
-                            if current_job.error:
-                                self._state.errors.append(f"[{phase}] {job_map[job_id]}: {current_job.error}")
+            # 매 틱: 실행 중 작업만 조회해 current_series_tag 갱신 (O(max_concurrent))
+            running_jobs = series_job_manager.get_running_jobs()
+            relevant = [j for j in running_jobs if j.job_id in remaining]
+            if relevant:
+                first = relevant[0]
+                self._update(
+                    current_series_tag=job_map.get(first.job_id) or first.series_tag,
+                    current_job_message=first.message,
+                )
 
-            remaining -= finished
+            # 5틱마다: 완료된 작업 스캔 (42k 작업 전체 순회를 1/5로 감소)
+            if tick % 5 == 0:
+                finished: set[str] = set()
+                for job_id in list(remaining):
+                    current_job = series_job_manager.get_job(job_id)
+                    if not current_job:
+                        finished.add(job_id)
+                        continue
+                    if current_job.status in {"completed", "failed", "cancelled"}:
+                        finished.add(job_id)
+                        with self._lock:
+                            if current_job.status == "completed":
+                                setattr(self._state, done_attr, getattr(self._state, done_attr) + 1)
+                            else:
+                                setattr(self._state, failed_attr, getattr(self._state, failed_attr) + 1)
+                                if current_job.error:
+                                    self._state.errors.append(f"[{phase}] {job_map.get(job_id, '')}: {current_job.error}")
+                remaining -= finished
 
             if self._should_stop():
                 # 아직 대기 중인 작업은 취소, 실행 중인 작업은 자연 완료 대기
@@ -240,7 +248,6 @@ class PipelineManager:
                             with self._lock:
                                 setattr(self._state, total_attr, max(0, getattr(self._state, total_attr) - 1))
                             remaining.discard(job_id)
-                # 실행 중인 작업이 끝날 때까지 대기
                 while remaining:
                     time.sleep(1)
                     still_running: set[str] = set()
@@ -263,7 +270,7 @@ class PipelineManager:
             "collecting",
             targets,
             is_still_eligible=self._is_still_pending,
-            submit_job=series_job_manager.start_series_collect,
+            submit_job=lambda sid, stag: series_job_manager.start_series_collect(sid, stag),
             done_attr="collect_done",
             failed_attr="collect_failed",
             total_attr="collect_total",
@@ -275,7 +282,7 @@ class PipelineManager:
             "extracting",
             targets,
             is_still_eligible=self._is_still_collected,
-            submit_job=series_job_manager.start_appearance_extract,
+            submit_job=lambda sid, stag: series_job_manager.start_appearance_extract(sid, stag),
             done_attr="extract_done",
             failed_attr="extract_failed",
             total_attr="extract_total",
