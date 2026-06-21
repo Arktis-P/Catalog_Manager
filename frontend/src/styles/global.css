@@ -1093,6 +1093,8 @@ button,
 }
 
 .progress-panel-compact {
+  position: relative;
+  overflow: hidden;
   padding: 5px 10px;
   border-radius: 8px;
   background: rgba(31, 39, 51, 0.72);
@@ -1110,9 +1112,12 @@ button,
 }
 
 .compact-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
   height: 3px;
-  margin-top: 4px;
-  border-radius: 2px;
+  border-radius: 0;
 }
 
 .progress-panel-series {
