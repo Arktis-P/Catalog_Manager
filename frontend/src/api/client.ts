@@ -272,7 +272,11 @@ export const api = {
 
   getDanbooruStatus: () => request<DanbooruStatus>("/characters/danbooru/status"),
 
-  startPipeline: () => request<PipelineStatus>("/characters/pipeline/start", { method: "POST" }),
+  startPipeline: (autoGenerate = false) =>
+    request<PipelineStatus>(
+      `/characters/pipeline/start?auto_generate=${autoGenerate}`,
+      { method: "POST" },
+    ),
   getPipelineStatus: () => request<PipelineStatus>("/characters/pipeline/status"),
   stopPipeline: () => request<PipelineStatus>("/characters/pipeline/stop", { method: "POST" }),
 

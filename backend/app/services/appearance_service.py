@@ -53,6 +53,21 @@ class AppearanceService:
         extra.update(row[0] for row in child_series)
         return extra
 
+    @staticmethod
+    def _can_auto_confirm(character: Character) -> bool:
+        """Danbooru 데이터가 충분히 신뢰할 수 있는 경우 수동 검수 없이 자동 확정.
+
+        기준:
+        - 포스트 수 100 이상 (통계가 안정적)
+        - 머리색·눈색 모두 추출됨 (핵심 외형 태그 존재)
+        - 멤버십 불일치 없음 (호출 위치에서 mismatch가 False인 경우에만 호출됨)
+        """
+        return (
+            character.post_count >= 100
+            and bool(character.hair_color)
+            and bool(character.eye_color)
+        )
+
     def _apply_membership_result(
         self,
         character: Character,
@@ -129,6 +144,11 @@ class AppearanceService:
                 )
                 if self._apply_membership_result(character, membership):
                     membership_flagged += 1
+                elif self._can_auto_confirm(character):
+                    # 충분한 데이터와 시리즈 소속이 확인된 경우 수동 검수 없이 자동 확정
+                    character.appearance_confirmed = True
+                    if character.status not in ("confirmed", "generated"):
+                        character.status = "confirmed"
 
                 updated += 1
             except DanbooruAuthError:

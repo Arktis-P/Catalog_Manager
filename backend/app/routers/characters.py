@@ -184,13 +184,13 @@ def get_collect_job(job_id: str):
 
 
 @router.post("/pipeline/start", response_model=PipelineStatusResponse)
-def start_pipeline():
+def start_pipeline(auto_generate: bool = Query(default=False)):
     if not settings.danbooru_configured:
         raise HTTPException(status_code=400, detail="Configure Danbooru credentials in input/danbooru.env first.")
     state = pipeline_manager.get_state()
     if state.status in {"running", "stopping"}:
         raise HTTPException(status_code=409, detail="Pipeline is already running")
-    pipeline_manager.start()
+    pipeline_manager.start(auto_generate=auto_generate)
     return PipelineStatusResponse.from_state(pipeline_manager.get_state())
 
 

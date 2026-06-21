@@ -1354,6 +1354,30 @@ button,
   transition: width 0.4s ease;
 }
 
+.pipeline-progress-bar-generate {
+  background: var(--success, #22c55e);
+}
+
+.pipeline-phase-parallel {
+  font-size: 0.7rem;
+  color: var(--accent);
+  font-weight: 400;
+}
+
+.pipeline-auto-gen-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.pipeline-auto-gen-toggle input[type="checkbox"] {
+  cursor: pointer;
+}
+
 .pipeline-progress-count {
   flex: 0 0 80px;
   text-align: right;

@@ -619,4 +619,9 @@ class GenerationService:
         )
         if not refreshed:
             raise ValueError("Character not found after regenerate")
+
+        # 재생성 완료 후 최고 점수 이미지를 커버로 자동 선택
+        if refreshed.images:
+            self.auto_select_cover(character_id, list(refreshed.images))
+
         return refreshed

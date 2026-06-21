@@ -405,14 +405,24 @@ export interface SeriesUpdatePayload {
 }
 
 export interface PipelineStatus {
-  status: "idle" | "running" | "stopping" | "completed" | "failed";
-  phase: "collecting" | "extracting" | null;
+  status: "idle" | "running" | "stopping" | "completed" | "stopped" | "failed";
+  phase:
+    | "collecting"
+    | "collecting+extracting"
+    | "extracting"
+    | "extracting+generating"
+    | "generating"
+    | null;
   collect_total: number;
   collect_done: number;
   collect_failed: number;
   extract_total: number;
   extract_done: number;
   extract_failed: number;
+  generate_total: number;
+  generate_done: number;
+  generate_failed: number;
+  auto_generate: boolean;
   current_series_tag: string | null;
   current_job_message: string | null;
   started_at: string | null;

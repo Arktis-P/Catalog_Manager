@@ -411,9 +411,11 @@ export function SeriesPage() {
     setMergingSeriesList([series]);
   };
 
+  const [autoGenerate, setAutoGenerate] = useState(false);
+
   const handleStartPipeline = async () => {
     try {
-      const status = await api.startPipeline();
+      const status = await api.startPipeline(autoGenerate);
       setPipelineStatus(status);
     } catch (err) {
       setError(err instanceof Error ? err.message : "파이프라인 시작 실패");
@@ -493,7 +495,11 @@ export function SeriesPage() {
             전체 자동 수집
             {pipelineStatus?.status === "running" ? (
               <span className="pipeline-phase-badge">
-                {pipelineStatus.phase === "collecting" ? "Phase 1: 캐릭터 수집" : "Phase 2: 외형 태그 추출"}
+                {pipelineStatus.phase === "collecting" && "Phase 1: 캐릭터 수집"}
+                {pipelineStatus.phase === "collecting+extracting" && "Phase 1+2 병렬 진행 중"}
+                {pipelineStatus.phase === "extracting" && "Phase 2: 외형 태그 추출"}
+                {pipelineStatus.phase === "extracting+generating" && "Phase 2+3 병렬 진행 중"}
+                {pipelineStatus.phase === "generating" && "Phase 3: 이미지 생성"}
               </span>
             ) : pipelineStatus?.status === "stopping" ? (
               <span className="pipeline-phase-badge pipeline-phase-badge-stopping">중지 중...</span>
@@ -501,14 +507,24 @@ export function SeriesPage() {
           </div>
           <div className="pipeline-panel-actions">
             {(!pipelineStatus || pipelineStatus.status === "idle") && (
-              <button
-                className="btn btn-primary btn-small"
-                type="button"
-                disabled={danbooruStatus?.ready === false}
-                onClick={() => void handleStartPipeline()}
-              >
-                전체 수집 시작
-              </button>
+              <>
+                <label className="pipeline-auto-gen-toggle" title="추출 완료된 시리즈의 이미지 생성을 자동으로 시작합니다">
+                  <input
+                    type="checkbox"
+                    checked={autoGenerate}
+                    onChange={(e) => setAutoGenerate(e.target.checked)}
+                  />
+                  이미지 자동 생성
+                </label>
+                <button
+                  className="btn btn-primary btn-small"
+                  type="button"
+                  disabled={danbooruStatus?.ready === false}
+                  onClick={() => void handleStartPipeline()}
+                >
+                  전체 수집 시작
+                </button>
+              </>
             )}
             {pipelineStatus?.status === "running" && (
               <button className="btn btn-small btn-danger" type="button" onClick={() => void handleStopPipeline()}>
@@ -549,8 +565,15 @@ export function SeriesPage() {
                 {/* ── 전체 진행률 ── */}
                 <div className="pipeline-overall-section">
                   <div className="pipeline-section-label">전체 진행률</div>
+
+                  {/* Phase 1: 캐릭터 수집 */}
                   <div className="pipeline-progress-row">
-                    <span className="pipeline-progress-label">Phase 1 · 캐릭터 수집</span>
+                    <span className="pipeline-progress-label">
+                      Phase 1 · 캐릭터 수집
+                      {(pipelineStatus.phase === "collecting+extracting") && (
+                        <span className="pipeline-phase-parallel"> (병렬)</span>
+                      )}
+                    </span>
                     <div className="pipeline-progress-bar-wrap">
                       <div
                         className="pipeline-progress-bar"
@@ -558,20 +581,25 @@ export function SeriesPage() {
                           width:
                             pipelineStatus.collect_total > 0
                               ? `${Math.min(100, ((pipelineStatus.collect_done + pipelineStatus.collect_failed) / pipelineStatus.collect_total) * 100)}%`
-                              : pipelineStatus.phase === "collecting" ? "0%" : "100%",
+                              : pipelineStatus.phase?.startsWith("collecting") ? "0%" : "100%",
                         }}
                       />
                     </div>
                     <span className="pipeline-progress-count">
-                      {pipelineStatus.phase === "collecting"
+                      {pipelineStatus.collect_total > 0
                         ? `${(pipelineStatus.collect_done + pipelineStatus.collect_failed).toLocaleString()} / ${pipelineStatus.collect_total.toLocaleString()}`
-                        : pipelineStatus.collect_total > 0
-                          ? `완료 ${pipelineStatus.collect_total.toLocaleString()}`
-                          : "-"}
+                        : "대기 중"}
                     </span>
                   </div>
+
+                  {/* Phase 2: 외형 태그 추출 */}
                   <div className="pipeline-progress-row">
-                    <span className="pipeline-progress-label">Phase 2 · 외형 태그 추출</span>
+                    <span className="pipeline-progress-label">
+                      Phase 2 · 외형 태그 추출
+                      {(pipelineStatus.phase === "collecting+extracting" || pipelineStatus.phase === "extracting+generating") && (
+                        <span className="pipeline-phase-parallel"> (병렬)</span>
+                      )}
+                    </span>
                     <div className="pipeline-progress-bar-wrap">
                       <div
                         className="pipeline-progress-bar"
@@ -586,11 +614,37 @@ export function SeriesPage() {
                     <span className="pipeline-progress-count">
                       {pipelineStatus.extract_total > 0
                         ? `${(pipelineStatus.extract_done + pipelineStatus.extract_failed).toLocaleString()} / ${pipelineStatus.extract_total.toLocaleString()}`
-                        : pipelineStatus.phase === "extracting"
-                          ? "계산 중..."
-                          : "대기 중"}
+                        : "대기 중"}
                     </span>
                   </div>
+
+                  {/* Phase 3: 이미지 생성 (auto_generate 활성화 시) */}
+                  {pipelineStatus.auto_generate && (
+                    <div className="pipeline-progress-row">
+                      <span className="pipeline-progress-label">
+                        Phase 3 · 이미지 생성
+                        {pipelineStatus.phase === "extracting+generating" && (
+                          <span className="pipeline-phase-parallel"> (병렬)</span>
+                        )}
+                      </span>
+                      <div className="pipeline-progress-bar-wrap">
+                        <div
+                          className="pipeline-progress-bar pipeline-progress-bar-generate"
+                          style={{
+                            width:
+                              pipelineStatus.generate_total > 0
+                                ? `${Math.min(100, ((pipelineStatus.generate_done + pipelineStatus.generate_failed) / pipelineStatus.generate_total) * 100)}%`
+                                : "0%",
+                          }}
+                        />
+                      </div>
+                      <span className="pipeline-progress-count">
+                        {pipelineStatus.generate_total > 0
+                          ? `${(pipelineStatus.generate_done + pipelineStatus.generate_failed).toLocaleString()} / ${pipelineStatus.generate_total.toLocaleString()}`
+                          : "대기 중"}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* ── 현재 작업 중인 개별 카드 ── */}
@@ -672,6 +726,13 @@ export function SeriesPage() {
                   {" · "}
                   외형 추출 {pipelineStatus.extract_done.toLocaleString()} / {pipelineStatus.extract_total.toLocaleString()}
                   {pipelineStatus.extract_failed > 0 ? ` (실패 ${pipelineStatus.extract_failed})` : ""}
+                  {pipelineStatus.auto_generate && pipelineStatus.generate_total > 0 && (
+                    <>
+                      {" · "}
+                      이미지 생성 {pipelineStatus.generate_done.toLocaleString()} / {pipelineStatus.generate_total.toLocaleString()}
+                      {pipelineStatus.generate_failed > 0 ? ` (실패 ${pipelineStatus.generate_failed})` : ""}
+                    </>
+                  )}
                 </span>
               </div>
             )}

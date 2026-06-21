@@ -10,6 +10,10 @@ class PipelineStatusResponse(BaseModel):
     extract_total: int
     extract_done: int
     extract_failed: int
+    generate_total: int
+    generate_done: int
+    generate_failed: int
+    auto_generate: bool
     current_series_tag: str | None
     current_job_message: str | None
     started_at: str | None
@@ -27,6 +31,10 @@ class PipelineStatusResponse(BaseModel):
             extract_total=state.extract_total,
             extract_done=state.extract_done,
             extract_failed=state.extract_failed,
+            generate_total=state.generate_total,
+            generate_done=state.generate_done,
+            generate_failed=state.generate_failed,
+            auto_generate=state.auto_generate,
             current_series_tag=state.current_series_tag,
             current_job_message=state.current_job_message,
             started_at=state.started_at,
