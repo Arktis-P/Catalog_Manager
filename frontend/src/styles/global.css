@@ -225,6 +225,22 @@ button,
   color: var(--text-muted);
 }
 
+.search-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.search-input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-input-clear {
+  flex-shrink: 0;
+  padding-inline: 8px;
+}
+
 .field input,
 .field select,
 .field textarea {

@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     danbooru_username: str = ""
     danbooru_api_key: str = ""
     danbooru_base_url: str = "https://danbooru.donmai.us"
-    danbooru_request_delay: float = 0.5
+    danbooru_request_delay: float = 0.4
     danbooru_request_retries: int = 3
     danbooru_collect_max_concurrent: int = 2
     danbooru_character_tag_pages: int = 20

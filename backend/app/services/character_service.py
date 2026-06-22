@@ -237,6 +237,9 @@ class CharacterService:
                 if child_series.status == "collecting" and child_series.id != series.id:
                     skipped_sub_series.append(sub_tag)
                     continue
+                if child_series.post_count < 5:
+                    skipped_sub_series.append(sub_tag)
+                    continue
 
                 child_result = self._collect_for_series_wiki(
                     child_series,

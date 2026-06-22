@@ -119,6 +119,7 @@ class PipelineManager:
                 .filter(
                     Series.parent_series_id.is_(None),
                     Series.status.in_(["pending", "collecting"]),
+                    Series.post_count >= 10,
                 )
                 .order_by(Series.priority.asc(), Series.post_count.desc(), Series.id.asc())
                 .all()

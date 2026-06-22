@@ -110,6 +110,7 @@ export function SeriesPage() {
 
   const filteredCount = useMemo(() => visibleItems.length, [visibleItems]);
   const autoExpandedRef = useRef("");
+  const prevSearchRef = useRef("");
 
   const loadSeries = async () => {
     setLoading(true);
@@ -144,9 +145,24 @@ export function SeriesPage() {
     void loadSeries();
   }, [search, statusFilter]);
 
+  const resetSearch = () => {
+    setSearchInput("");
+    setSearch("");
+    autoExpandedRef.current = "";
+    prevSearchRef.current = "";
+    setExpandedParentIds(new Set());
+  };
+
   useEffect(() => {
-    if (!search.trim()) {
+    const hadSearch = prevSearchRef.current.trim().length > 0;
+    const hasSearch = search.trim().length > 0;
+    prevSearchRef.current = search;
+
+    if (!hasSearch) {
       autoExpandedRef.current = "";
+      if (hadSearch) {
+        setExpandedParentIds(new Set());
+      }
       return;
     }
     const fingerprint = `${search}::${items.map((series) => series.id).join(",")}`;
@@ -759,12 +775,25 @@ export function SeriesPage() {
         <div className="toolbar">
           <div className="field">
             <label htmlFor="series-search">Search</label>
-            <input
-              id="series-search"
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="series tag / display name"
-            />
+            <div className="search-input-row">
+              <input
+                id="series-search"
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder="series tag / display name"
+              />
+              {searchInput ? (
+                <button
+                  className="btn btn-small search-input-clear"
+                  type="button"
+                  aria-label="검색 초기화"
+                  title="검색 초기화"
+                  onClick={resetSearch}
+                >
+                  ✕
+                </button>
+              ) : null}
+            </div>
           </div>
           <div className="field">
             <label htmlFor="series-status">Status</label>
