@@ -19,7 +19,9 @@
       "Bash(curl -s \"http://localhost:8000/api/characters/collect/jobs\")",
       "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); running=[j for j in data['items'] if j['status']=='running']; print\\('running:', len\\(running\\)\\); print\\('queued:', len\\([j for j in data['items'] if j['status']=='queued']\\)\\); print\\('total jobs:', len\\(data['items']\\)\\); [print\\(j['status'], j['series_tag'][:30] if j['series_tag'] else '[EMPTY]', j['phase'], j['message'][:50] if j.get\\('message'\\) else ''\\) for j in data['items'][:5]]\")",
       "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); jobs=data['items']; running=[j for j in jobs if j['status']=='running']; print\\('--- RUNNING ---'\\); [print\\(j['series_tag'], j['phase'], j['message'][:60]\\) for j in running[:5]]; print\\('--- ALL statuses ---'\\); from collections import Counter; print\\(Counter\\(j['status'] for j in jobs\\)\\)\")",
-      "Bash(python -m py_compile backend/app/services/collect_job_manager.py backend/app/services/pipeline_manager.py)"
+      "Bash(python -m py_compile backend/app/services/collect_job_manager.py backend/app/services/pipeline_manager.py)",
+      "Bash(ls -la \"c:\\\\Users\\\\cwson\\\\OneDrive\\\\Desktop\\\\Projects\\\\Catalogue_Manager\\\\\" | head -30)",
+      "Read(//c/Users/cwson/OneDrive/Desktop/Projects/**)"
     ],
     "additionalDirectories": [
       "c:\\Users\\cwson\\.claude\\projects\\c--Users-cwson-OneDrive-Desktop-Projects-Catalogue-Manager\\memory"

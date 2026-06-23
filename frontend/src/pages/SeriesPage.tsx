@@ -229,9 +229,21 @@ export function SeriesPage() {
     if (!lastCompletedJob) {
       return;
     }
-    void loadSeries().finally(() => {
-      clearLastCompletedJob();
-    });
+    const refreshCompletedSeries = async () => {
+      try {
+        const updated = await api.getSeries(lastCompletedJob.series_id);
+        setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+        if (updated.parent_series_id !== null) {
+          const parent = await api.getSeries(updated.parent_series_id);
+          setItems((prev) => prev.map((item) => (item.id === parent.id ? parent : item)));
+        }
+      } catch {
+        void loadSeries();
+      } finally {
+        clearLastCompletedJob();
+      }
+    };
+    void refreshCompletedSeries();
   }, [lastCompletedJob?.job_id]);
 
   const openCreateModal = () => {

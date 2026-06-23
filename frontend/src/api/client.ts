@@ -140,6 +140,8 @@ export const api = {
   createSeries: (payload: SeriesCreatePayload) =>
     request<Series>("/series", { method: "POST", body: JSON.stringify(payload) }),
 
+  getSeries: (id: number) => request<Series>(`/series/${id}`),
+
   updateSeries: (id: number, payload: SeriesUpdatePayload) =>
     request<Series>(`/series/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
 
