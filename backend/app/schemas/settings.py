@@ -15,6 +15,7 @@ class SettingsResponse(BaseModel):
     min_character_post_count: int = Field(ge=0, le=500)
     hf_token: str = ""
     hf_wd_model: str = ""
+    notification_mode: str = "each"
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -30,3 +31,4 @@ class SettingsUpdateRequest(BaseModel):
     min_character_post_count: int | None = Field(default=None, ge=0, le=500)
     hf_token: str | None = None
     hf_wd_model: str | None = None
+    notification_mode: str | None = None

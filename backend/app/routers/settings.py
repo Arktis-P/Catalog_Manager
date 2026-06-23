@@ -53,5 +53,7 @@ def update_settings(
         service.set_hf_token(payload.hf_token)
     if payload.hf_wd_model is not None:
         service.set_hf_wd_model(payload.hf_wd_model)
+    if payload.notification_mode is not None:
+        service.set_notification_mode(payload.notification_mode)
     data = service.get_public_settings()
     return SettingsResponse(**data)

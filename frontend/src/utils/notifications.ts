@@ -1,3 +1,10 @@
+export type NotificationPermissionStatus = "granted" | "denied" | "default" | "unsupported";
+
+export function getNotificationPermissionStatus(): NotificationPermissionStatus {
+  if (!("Notification" in window)) return "unsupported";
+  return Notification.permission;
+}
+
 export async function ensureNotificationPermission(): Promise<boolean> {
   if (!("Notification" in window)) {
     return false;

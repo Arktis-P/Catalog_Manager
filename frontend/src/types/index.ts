@@ -227,6 +227,8 @@ export interface SuggestLevelResponse {
   breakdown: Record<number, number>;
 }
 
+export type NotificationMode = "each" | "all_done" | "none";
+
 export interface AppSettings {
   danbooru_collect_max_concurrent: number;
   danbooru_request_delay: number;
@@ -241,6 +243,7 @@ export interface AppSettings {
   min_character_post_count: number;
   hf_token: string;
   hf_wd_model: string;
+  notification_mode: NotificationMode;
 }
 
 export interface AppearanceReviewItem {

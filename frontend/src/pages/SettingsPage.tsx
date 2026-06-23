@@ -1,6 +1,12 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { AppSettings } from "../types";
+import type { AppSettings, NotificationMode } from "../types";
+import { useNotificationMode } from "../context/NotificationModeContext";
+import {
+  ensureNotificationPermission,
+  getNotificationPermissionStatus,
+  type NotificationPermissionStatus,
+} from "../utils/notifications";
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -21,6 +27,12 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
+  const { mode: contextNotificationMode, setMode: setContextNotificationMode } = useNotificationMode();
+  const [notificationMode, setNotificationMode] = useState<NotificationMode>(contextNotificationMode);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermissionStatus>(() =>
+    getNotificationPermissionStatus(),
+  );
+
   useEffect(() => {
     void (async () => {
       setLoading(true);
@@ -40,6 +52,9 @@ export function SettingsPage() {
         setMinCharacterPostCount(response.min_character_post_count);
         setHfToken(response.hf_token ?? "");
         setHfWdModel(response.hf_wd_model ?? "");
+        if (response.notification_mode) {
+          setNotificationMode(response.notification_mode as NotificationMode);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load settings");
       } finally {
@@ -47,6 +62,10 @@ export function SettingsPage() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    setNotificationMode(contextNotificationMode);
+  }, [contextNotificationMode]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -67,7 +86,9 @@ export function SettingsPage() {
         min_character_post_count: minCharacterPostCount,
         hf_token: hfToken,
         hf_wd_model: hfWdModel,
+        notification_mode: notificationMode,
       });
+      setContextNotificationMode(notificationMode);
       setSettings(response);
       setMaxConcurrent(response.danbooru_collect_max_concurrent);
       setNaiaBaseUrl(response.naia_base_url);
@@ -81,6 +102,9 @@ export function SettingsPage() {
       setMinCharacterPostCount(response.min_character_post_count);
       setHfToken(response.hf_token ?? "");
       setHfWdModel(response.hf_wd_model ?? "");
+      if (response.notification_mode) {
+        setNotificationMode(response.notification_mode as NotificationMode);
+      }
       setSavedMessage("설정을 저장했습니다.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
@@ -300,6 +324,77 @@ export function SettingsPage() {
               <p className="field-help">
                 비워두면 기본값 <code>SmilingWolf/wd-eva02-large-tagger-v3</code>를 사용합니다.
               </p>
+            </div>
+
+            <div className="field full-width">
+              <label>데스크탑 알림</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="notification_mode"
+                    value="each"
+                    checked={notificationMode === "each"}
+                    onChange={() => setNotificationMode("each")}
+                  />
+                  작업 하나가 끝날 때마다 알림
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="notification_mode"
+                    value="all_done"
+                    checked={notificationMode === "all_done"}
+                    onChange={() => setNotificationMode("all_done")}
+                  />
+                  대기 목록의 모든 작업이 끝났을 때만 알림
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="notification_mode"
+                    value="none"
+                    checked={notificationMode === "none"}
+                    onChange={() => setNotificationMode("none")}
+                  />
+                  알림 없음
+                </label>
+              </div>
+              <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 12 }}>
+                {notifPermission === "granted" && (
+                  <span style={{ color: "var(--color-success, #4caf50)", fontSize: 13 }}>
+                    알림 권한이 허용되어 있습니다.
+                  </span>
+                )}
+                {notifPermission === "denied" && (
+                  <span style={{ color: "var(--color-error, #f44336)", fontSize: 13 }}>
+                    알림이 차단되어 있습니다. 브라우저 주소창 옆 자물쇠 아이콘에서 알림을 허용해주세요.
+                  </span>
+                )}
+                {notifPermission === "default" && (
+                  <>
+                    <span style={{ fontSize: 13 }}>알림 권한이 아직 설정되지 않았습니다.</span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: 12, padding: "4px 10px" }}
+                      onClick={() => {
+                        void ensureNotificationPermission().then((granted) => {
+                          setNotifPermission(getNotificationPermissionStatus());
+                          if (granted) setSavedMessage("알림 권한이 허용되었습니다.");
+                        });
+                      }}
+                    >
+                      알림 권한 요청
+                    </button>
+                  </>
+                )}
+                {notifPermission === "unsupported" && (
+                  <span style={{ color: "var(--color-text-muted, #888)", fontSize: 13 }}>
+                    이 브라우저는 데스크탑 알림을 지원하지 않습니다.
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <div className="modal-actions">

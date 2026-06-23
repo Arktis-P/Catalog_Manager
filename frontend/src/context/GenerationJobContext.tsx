@@ -10,6 +10,7 @@ import {
 } from "react";
 import { api } from "../api/client";
 import type { CollectJob } from "../types";
+import { useNotificationMode } from "./NotificationModeContext";
 import { ensureNotificationPermission, showTaskCompleteNotification } from "../utils/notifications";
 
 interface GenerationJobContextValue {
@@ -53,6 +54,11 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
   const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(() => new Set());
   const [lastError, setLastError] = useState<string | null>(null);
   const notifiedJobIdsRef = useRef<Set<string>>(new Set());
+  const { mode: notificationMode } = useNotificationMode();
+  const notificationModeRef = useRef(notificationMode);
+  notificationModeRef.current = notificationMode;
+  const allDoneCountRef = useRef(0);
+  const prevRunningCountRef = useRef(0);
 
   const visibleJobs = useMemo(
     () => jobs.filter((job) => !dismissedJobIds.has(job.job_id)),
@@ -90,6 +96,19 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
     void refreshJobs();
   }, [refreshJobs]);
 
+  // "모든 작업 완료 시 알림" 모드: running → idle 전환 감지
+  useEffect(() => {
+    const wasRunning = prevRunningCountRef.current > 0;
+    prevRunningCountRef.current = runningJobIds.length;
+    if (wasRunning && runningJobIds.length === 0 && notificationMode === "all_done") {
+      const count = allDoneCountRef.current;
+      allDoneCountRef.current = 0;
+      if (count > 0) {
+        showTaskCompleteNotification("모든 이미지 생성 완료", `${count}개 작업 완료`);
+      }
+    }
+  }, [runningJobIds.length, notificationMode]);
+
   useEffect(() => {
     if (runningJobIds.length === 0) {
       return;
@@ -109,10 +128,15 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
               !notifiedJobIdsRef.current.has(job.job_id)
             ) {
               notifiedJobIdsRef.current.add(job.job_id);
-              showTaskCompleteNotification(
-                `${job.series_tag} 이미지 생성 완료`,
-                `${job.completed ?? 0}장 저장 · 실패 ${job.failed ?? 0}`,
-              );
+              const mode = notificationModeRef.current;
+              if (mode === "each") {
+                showTaskCompleteNotification(
+                  `${job.series_tag} 이미지 생성 완료`,
+                  `${job.completed ?? 0}장 저장 · 실패 ${job.failed ?? 0}`,
+                );
+              } else if (mode === "all_done") {
+                allDoneCountRef.current++;
+              }
             }
             if (
               prior &&
@@ -121,10 +145,13 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
               !notifiedJobIdsRef.current.has(job.job_id)
             ) {
               notifiedJobIdsRef.current.add(job.job_id);
-              showTaskCompleteNotification(
-                `${job.series_tag} 이미지 생성 실패`,
-                job.error || job.message,
-              );
+              const mode = notificationModeRef.current;
+              if (mode === "each") {
+                showTaskCompleteNotification(
+                  `${job.series_tag} 이미지 생성 실패`,
+                  job.error || job.message,
+                );
+              }
             }
             merged = upsertJob(merged, job);
           }

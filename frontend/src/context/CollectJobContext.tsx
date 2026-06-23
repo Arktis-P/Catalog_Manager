@@ -10,6 +10,7 @@ import {
 } from "react";
 import { api } from "../api/client";
 import type { CollectJob } from "../types";
+import { useNotificationMode } from "./NotificationModeContext";
 import { ensureNotificationPermission, showTaskCompleteNotification } from "../utils/notifications";
 
 interface CollectJobContextValue {
@@ -62,6 +63,11 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastCompletedJob, setLastCompletedJob] = useState<CollectJob | null>(null);
   const notifiedJobIdsRef = useRef<Set<string>>(new Set());
+  const { mode: notificationMode } = useNotificationMode();
+  const notificationModeRef = useRef(notificationMode);
+  notificationModeRef.current = notificationMode;
+  const allDoneCountRef = useRef(0);
+  const prevRunningCountRef = useRef(0);
 
   const visibleJobs = useMemo(
     () => jobs.filter((job) => !dismissedJobIds.has(job.job_id)),
@@ -88,16 +94,24 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
       }
       if (job.status === "completed" && !notifiedJobIdsRef.current.has(job.job_id)) {
         notifiedJobIdsRef.current.add(job.job_id);
-        notifyJobComplete(job);
+        const mode = notificationModeRef.current;
+        if (mode === "each") {
+          notifyJobComplete(job);
+        } else if (mode === "all_done") {
+          allDoneCountRef.current++;
+        }
         setLastCompletedJob(job);
       }
       if (job.status === "failed" && !notifiedJobIdsRef.current.has(job.job_id)) {
         notifiedJobIdsRef.current.add(job.job_id);
-        const title =
-          job.job_type === "appearance_extract"
-            ? `${job.series_tag} 외형 태그 추출 실패`
-            : `${job.series_tag} 캐릭터 수집 실패`;
-        showTaskCompleteNotification(title, job.error || job.message);
+        const mode = notificationModeRef.current;
+        if (mode === "each") {
+          const title =
+            job.job_type === "appearance_extract"
+              ? `${job.series_tag} 외형 태그 추출 실패`
+              : `${job.series_tag} 캐릭터 수집 실패`;
+          showTaskCompleteNotification(title, job.error || job.message);
+        }
       }
     }
   }, []);
@@ -129,6 +143,19 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
     }, 3000);
     return () => window.clearInterval(timer);
   }, [refreshJobs]);
+
+  // "모든 작업 완료 시 알림" 모드: running → idle 전환 감지
+  useEffect(() => {
+    const wasRunning = prevRunningCountRef.current > 0;
+    prevRunningCountRef.current = runningJobIds.length;
+    if (wasRunning && runningJobIds.length === 0 && notificationMode === "all_done") {
+      const count = allDoneCountRef.current;
+      allDoneCountRef.current = 0;
+      if (count > 0) {
+        showTaskCompleteNotification("모든 수집/추출 작업 완료", `${count}개 작업 완료`);
+      }
+    }
+  }, [runningJobIds.length, notificationMode]);
 
   useEffect(() => {
     if (runningJobIds.length === 0) {
