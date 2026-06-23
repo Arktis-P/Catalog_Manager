@@ -44,6 +44,21 @@ export function GlobalTaskBar() {
     [collectJobs, generationJobs],
   );
 
+  const dismissibleJobs = useMemo(
+    () => activeJobs.filter((job) => job.status === "completed" || job.status === "failed" || job.status === "cancelled"),
+    [activeJobs],
+  );
+
+  const dismissAllCompleted = () => {
+    for (const job of dismissibleJobs) {
+      if (job.job_type === "image_generation") {
+        dismissGenerationJob(job.job_id);
+      } else {
+        dismissCollectJob(job.job_id);
+      }
+    }
+  };
+
   const lastError = collectError || generationError;
 
   if (activeJobs.length === 0 && !lastError) {
@@ -70,6 +85,13 @@ export function GlobalTaskBar() {
         ) : null}
         {activeJobs.length > 0 ? (
           <div className="global-task-bar-jobs">
+            {dismissibleJobs.length > 0 ? (
+              <div className="global-task-bar-actions">
+                <button className="btn btn-small" type="button" onClick={dismissAllCompleted}>
+                  완료된 작업 모두 지우기 ({dismissibleJobs.length})
+                </button>
+              </div>
+            ) : null}
             {activeJobs.map((job) =>
               job.job_type === "image_generation" ? (
                 <GenerationProgressPanel

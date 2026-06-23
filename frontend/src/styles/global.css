@@ -1745,6 +1745,12 @@ button,
   flex-shrink: 0;
 }
 
+.global-task-bar-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 2px;
+}
+
 /* indeterminate 바 */
 .progress-bar-indeterminate .progress-bar-fill {
   width: 35% !important;
