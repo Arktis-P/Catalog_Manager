@@ -228,6 +228,7 @@ export interface SuggestLevelResponse {
 }
 
 export type NotificationMode = "each" | "all_done" | "none";
+export type NotificationDisplay = "toast" | "browser" | "both";
 
 export interface AppSettings {
   danbooru_collect_max_concurrent: number;
@@ -244,6 +245,7 @@ export interface AppSettings {
   hf_token: string;
   hf_wd_model: string;
   notification_mode: NotificationMode;
+  notification_display: NotificationDisplay;
 }
 
 export interface AppearanceReviewItem {

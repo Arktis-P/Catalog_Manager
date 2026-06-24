@@ -18,6 +18,7 @@ import type {
   GenerationQueuePreview,
   GenerationStartPayload,
   NaiaStatus,
+  NotificationDisplay,
   NotificationMode,
   PipelineStatus,
   ReviewRegenerateJob,
@@ -190,7 +191,7 @@ export const api = {
         | "hf_wd_model"
         | "notification_mode"
       >
-    > & { notification_mode?: NotificationMode },
+    > & { notification_mode?: NotificationMode; notification_display?: NotificationDisplay },
   ) => request<AppSettings>("/settings", { method: "PATCH", body: JSON.stringify(payload) }),
 
   listAppearanceReviews: (params: { series_tag?: string; search?: string; skip?: number; limit?: number } = {}) =>

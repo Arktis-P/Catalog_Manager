@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { GlobalTaskBar } from "./GlobalTaskBar";
+import { ToastContainer } from "./ToastContainer";
 
 const navItems = [
   { to: "/", label: "Catalog", end: true },
@@ -38,6 +39,7 @@ export function Layout() {
       <main className="page-container">
         <Outlet />
       </main>
+      <ToastContainer />
     </div>
   );
 }

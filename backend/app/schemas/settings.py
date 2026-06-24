@@ -16,6 +16,7 @@ class SettingsResponse(BaseModel):
     hf_token: str = ""
     hf_wd_model: str = ""
     notification_mode: str = "each"
+    notification_display: str = "toast"
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -32,3 +33,4 @@ class SettingsUpdateRequest(BaseModel):
     hf_token: str | None = None
     hf_wd_model: str | None = None
     notification_mode: str | None = None
+    notification_display: str | None = None

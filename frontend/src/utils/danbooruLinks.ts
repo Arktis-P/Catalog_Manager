@@ -15,6 +15,10 @@ export function danbooruWikiUrl(characterTag: string, fallback?: string | null):
   return `${DANBOORU_BASE}/wiki_pages/${encodeURIComponent(characterTag)}`;
 }
 
+export function danbooruSeriesWikiUrl(seriesTag: string): string {
+  return `${DANBOORU_BASE}/wiki_pages/${encodeURIComponent(seriesTag)}`;
+}
+
 export function openExternal(url: string): void {
   window.open(url, "_blank", "noopener,noreferrer");
 }

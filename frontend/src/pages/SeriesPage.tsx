@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { RunningJobCard } from "../components/CollectProgressPanel";
 import { SeriesCharactersModal } from "../components/SeriesCharactersModal";
@@ -6,6 +6,7 @@ import { isSeriesMergeEligible, SeriesMergeModal } from "../components/SeriesMer
 import { useCollectJobs } from "../context/CollectJobContext";
 import type { DanbooruStatus, PipelineStatus, Series, SeriesCreatePayload } from "../types";
 import { downloadTextFile } from "../utils/download";
+import { danbooruSeriesWikiUrl } from "../utils/danbooruLinks";
 import { resolveSeriesStatus, seriesStatusBadgeClass } from "../utils/seriesStatus";
 
 type ModalMode = "create" | "edit";
@@ -111,6 +112,7 @@ export function SeriesPage() {
   const filteredCount = useMemo(() => visibleItems.length, [visibleItems]);
   const autoExpandedRef = useRef("");
   const prevSearchRef = useRef("");
+  const stickyToolbarRef = useRef<HTMLDivElement>(null);
 
   const loadSeries = async () => {
     setLoading(true);
@@ -438,6 +440,20 @@ export function SeriesPage() {
     }
     setMergingSeriesList([series]);
   };
+
+  useLayoutEffect(() => {
+    const appTop = document.querySelector(".app-top") as HTMLElement | null;
+    if (!appTop) return;
+    const update = () => {
+      if (stickyToolbarRef.current) {
+        stickyToolbarRef.current.style.top = `${appTop.offsetHeight}px`;
+      }
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(appTop);
+    return () => observer.disconnect();
+  }, []);
 
   const [autoGenerate, setAutoGenerate] = useState(false);
 
@@ -783,10 +799,10 @@ export function SeriesPage() {
         )}
       </section>
 
-      <section className="panel">
-        <div className="toolbar">
-          <div className="field">
-            <label htmlFor="series-search">Search</label>
+      <section className="panel series-list-panel">
+        <div className="series-sticky-toolbar" ref={stickyToolbarRef}>
+          <div className="series-toolbar-search">
+            <span className="series-toolbar-label">Search</span>
             <div className="search-input-row">
               <input
                 id="series-search"
@@ -807,9 +823,13 @@ export function SeriesPage() {
               ) : null}
             </div>
           </div>
-          <div className="field">
-            <label htmlFor="series-status">Status</label>
-            <select id="series-status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+          <div className="series-toolbar-filters">
+            <label htmlFor="series-status" className="series-toolbar-label">Status</label>
+            <select
+              id="series-status"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
               <option value="">All</option>
               {statuses.map((status) => (
                 <option key={status} value={status}>
@@ -817,9 +837,7 @@ export function SeriesPage() {
                 </option>
               ))}
             </select>
-          </div>
-          <div className="field">
-            <label htmlFor="import-replace">Import mode</label>
+            <label htmlFor="import-replace" className="series-toolbar-label">Import</label>
             <select
               id="import-replace"
               value={String(importReplace)}
@@ -829,8 +847,7 @@ export function SeriesPage() {
               <option value="true">Replace all</option>
             </select>
           </div>
-          <div className="field" style={{ justifyContent: "flex-end" }}>
-            <label>&nbsp;</label>
+          <div className="series-toolbar-refresh">
             <button className="btn" type="button" onClick={() => void loadSeries()}>
               Refresh
             </button>
@@ -939,8 +956,19 @@ export function SeriesPage() {
                           </span>
                         </div>
                       </td>
-                      <td className="col-display-name cell-ellipsis" title={series.display_name}>
-                        {series.display_name}
+                      <td className="col-display-name" title={series.display_name}>
+                        <div className="series-display-name-cell">
+                          <span className="series-display-name-text">{series.display_name}</span>
+                          <a
+                            href={danbooruSeriesWikiUrl(series.series_tag)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="series-wiki-btn"
+                            title={`Danbooru wiki: ${series.series_tag}`}
+                          >
+                            W
+                          </a>
+                        </div>
                       </td>
                       <td className="col-count series-cell-nowrap">{series.post_count.toLocaleString()}</td>
                       <td

@@ -212,26 +212,52 @@ def app_icon_path() -> str | None:
     return None
 
 
-def ensure_windows_app_identity() -> None:
-    """Group taskbar entry under our icon instead of python.exe on Windows."""
-    if sys.platform != "win32":
-        return
-    try:
-        import ctypes
+_BROWSER_CANDIDATES = [
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+]
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("CatalogueManager.Desktop.1")
-    except Exception:
-        pass
+
+def find_browser() -> Path | None:
+    for candidate in _BROWSER_CANDIDATES:
+        p = Path(candidate)
+        if p.is_file():
+            return p
+    return None
+
+
+def open_app_browser(url: str) -> "subprocess.Popen[bytes] | None":
+    browser = find_browser()
+    if browser is None:
+        print(f"[desktop] Chrome/Edge not found. Open manually: {url}", flush=True)
+        return None
+
+    if sys.platform == "win32":
+        profile_dir = (
+            Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+            / "CatalogueManager"
+            / "browser-profile"
+        )
+    else:
+        profile_dir = Path.home() / ".local" / "share" / "CatalogueManager" / "browser-profile"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    return subprocess.Popen(
+        [
+            str(browser),
+            f"--app={url}",
+            f"--user-data-dir={profile_dir}",
+            "--window-size=1440,900",
+            "--no-first-run",
+            "--no-default-browser-check",
+        ],
+        **_hidden_subprocess_kwargs(),
+    )
 
 
 def run_desktop() -> int:
-    import webview
-
-    ensure_windows_app_identity()
-    icon = app_icon_path()
-    if icon is None:
-        print(f"[desktop] Warning: app icon not found at {APP_ICON_PATH}")
-
     log_path: Path | None = None
     try:
         ensure_frontend_build()
@@ -249,16 +275,15 @@ def run_desktop() -> int:
             stop_backend()
             return 1
 
-        window = webview.create_window(
-            "Catalogue Manager",
-            APP_URL,
-            width=1440,
-            height=900,
-            min_size=(1024, 720),
-            background_color="#0f1419",
-        )
-        window.events.closed += stop_backend
-        webview.start(gui="edgechromium", icon=icon)
+        browser_proc = open_app_browser(APP_URL)
+        if browser_proc is None:
+            # 브라우저를 찾지 못한 경우 URL 출력 후 Ctrl+C 대기
+            print(f"[desktop] App running at {APP_URL}  (Ctrl+C to stop)", flush=True)
+            if _backend_process is not None:
+                _backend_process.wait()
+        else:
+            browser_proc.wait()
+
         stop_backend()
         return 0
     except KeyboardInterrupt:

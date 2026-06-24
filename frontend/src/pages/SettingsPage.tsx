@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { AppSettings, NotificationMode } from "../types";
+import type { AppSettings, NotificationDisplay, NotificationMode } from "../types";
 import { useNotificationMode } from "../context/NotificationModeContext";
 import {
   ensureNotificationPermission,
@@ -27,8 +27,14 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
-  const { mode: contextNotificationMode, setMode: setContextNotificationMode } = useNotificationMode();
+  const {
+    mode: contextNotificationMode,
+    setMode: setContextNotificationMode,
+    display: contextNotificationDisplay,
+    setDisplay: setContextNotificationDisplay,
+  } = useNotificationMode();
   const [notificationMode, setNotificationMode] = useState<NotificationMode>(contextNotificationMode);
+  const [notificationDisplay, setNotificationDisplay] = useState<NotificationDisplay>(contextNotificationDisplay);
   const [notifPermission, setNotifPermission] = useState<NotificationPermissionStatus>(() =>
     getNotificationPermissionStatus(),
   );
@@ -55,6 +61,9 @@ export function SettingsPage() {
         if (response.notification_mode) {
           setNotificationMode(response.notification_mode as NotificationMode);
         }
+        if (response.notification_display) {
+          setNotificationDisplay(response.notification_display as NotificationDisplay);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load settings");
       } finally {
@@ -66,6 +75,10 @@ export function SettingsPage() {
   useEffect(() => {
     setNotificationMode(contextNotificationMode);
   }, [contextNotificationMode]);
+
+  useEffect(() => {
+    setNotificationDisplay(contextNotificationDisplay);
+  }, [contextNotificationDisplay]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -87,8 +100,10 @@ export function SettingsPage() {
         hf_token: hfToken,
         hf_wd_model: hfWdModel,
         notification_mode: notificationMode,
+        notification_display: notificationDisplay,
       });
       setContextNotificationMode(notificationMode);
+      setContextNotificationDisplay(notificationDisplay);
       setSettings(response);
       setMaxConcurrent(response.danbooru_collect_max_concurrent);
       setNaiaBaseUrl(response.naia_base_url);
@@ -104,6 +119,9 @@ export function SettingsPage() {
       setHfWdModel(response.hf_wd_model ?? "");
       if (response.notification_mode) {
         setNotificationMode(response.notification_mode as NotificationMode);
+      }
+      if (response.notification_display) {
+        setNotificationDisplay(response.notification_display as NotificationDisplay);
       }
       setSavedMessage("설정을 저장했습니다.");
     } catch (err) {
@@ -327,7 +345,7 @@ export function SettingsPage() {
             </div>
 
             <div className="field full-width">
-              <label>데스크탑 알림</label>
+              <label>알림 타이밍</label>
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input
@@ -360,41 +378,81 @@ export function SettingsPage() {
                   알림 없음
                 </label>
               </div>
-              <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 12 }}>
-                {notifPermission === "granted" && (
-                  <span style={{ color: "var(--color-success, #4caf50)", fontSize: 13 }}>
-                    알림 권한이 허용되어 있습니다.
-                  </span>
-                )}
-                {notifPermission === "denied" && (
-                  <span style={{ color: "var(--color-error, #f44336)", fontSize: 13 }}>
-                    알림이 차단되어 있습니다. 브라우저 주소창 옆 자물쇠 아이콘에서 알림을 허용해주세요.
-                  </span>
-                )}
-                {notifPermission === "default" && (
-                  <>
-                    <span style={{ fontSize: 13 }}>알림 권한이 아직 설정되지 않았습니다.</span>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ fontSize: 12, padding: "4px 10px" }}
-                      onClick={() => {
-                        void ensureNotificationPermission().then((granted) => {
-                          setNotifPermission(getNotificationPermissionStatus());
-                          if (granted) setSavedMessage("알림 권한이 허용되었습니다.");
-                        });
-                      }}
-                    >
-                      알림 권한 요청
-                    </button>
-                  </>
-                )}
-                {notifPermission === "unsupported" && (
-                  <span style={{ color: "var(--color-text-muted, #888)", fontSize: 13 }}>
-                    이 브라우저는 데스크탑 알림을 지원하지 않습니다.
-                  </span>
-                )}
+            </div>
+
+            <div className="field full-width">
+              <label>알림 표시 방식</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="notification_display"
+                    value="toast"
+                    checked={notificationDisplay === "toast"}
+                    onChange={() => setNotificationDisplay("toast")}
+                  />
+                  앱 내 토스트 알림 (항상 동작)
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="notification_display"
+                    value="browser"
+                    checked={notificationDisplay === "browser"}
+                    onChange={() => setNotificationDisplay("browser")}
+                  />
+                  브라우저 알림 (OS 알림 센터)
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="notification_display"
+                    value="both"
+                    checked={notificationDisplay === "both"}
+                    onChange={() => setNotificationDisplay("both")}
+                  />
+                  둘 다
+                </label>
               </div>
+              <p className="field-help">
+                브라우저 알림은 OS 권한이 필요하며, 완전한 브라우저 환경이 아닌 경우 동작하지 않을 수 있습니다.
+              </p>
+              {(notificationDisplay === "browser" || notificationDisplay === "both") && (
+                <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 12 }}>
+                  {notifPermission === "granted" && (
+                    <span style={{ color: "var(--success)", fontSize: 13 }}>
+                      브라우저 알림 권한이 허용되어 있습니다.
+                    </span>
+                  )}
+                  {notifPermission === "denied" && (
+                    <span style={{ color: "var(--danger)", fontSize: 13 }}>
+                      브라우저 알림이 차단되어 있습니다. 브라우저 설정에서 알림을 허용해주세요.
+                    </span>
+                  )}
+                  {notifPermission === "default" && (
+                    <>
+                      <span style={{ fontSize: 13 }}>브라우저 알림 권한이 아직 설정되지 않았습니다.</span>
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        onClick={() => {
+                          void ensureNotificationPermission().then((granted) => {
+                            setNotifPermission(getNotificationPermissionStatus());
+                            if (granted) setSavedMessage("브라우저 알림 권한이 허용되었습니다.");
+                          });
+                        }}
+                      >
+                        권한 요청
+                      </button>
+                    </>
+                  )}
+                  {notifPermission === "unsupported" && (
+                    <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
+                      이 환경은 브라우저 알림을 지원하지 않습니다. 앱 내 토스트를 사용하세요.
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
           <div className="modal-actions">
