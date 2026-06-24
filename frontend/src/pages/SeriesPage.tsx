@@ -62,6 +62,9 @@ export function SeriesPage() {
   const [expandedParentIds, setExpandedParentIds] = useState<Set<number>>(() => new Set());
   const [exportingCharacters, setExportingCharacters] = useState(false);
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus | null>(null);
+  const [pageSize, setPageSize] = useState(100);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
   const pipelineRunningJobs = useMemo(
     () => collectJobs.filter((j) => j.status === "running"),
@@ -109,12 +112,12 @@ export function SeriesPage() {
     return visible;
   }, [items, expandedParentIds]);
 
-  const filteredCount = useMemo(() => visibleItems.length, [visibleItems]);
   const autoExpandedRef = useRef("");
   const prevSearchRef = useRef("");
   const stickyToolbarRef = useRef<HTMLDivElement>(null);
+  const preSearchPageRef = useRef(1);
 
-  const loadSeries = async () => {
+  const loadSeries = async (page = currentPage, size = pageSize) => {
     setLoading(true);
     setError(null);
     try {
@@ -124,12 +127,14 @@ export function SeriesPage() {
           status: statusFilter || undefined,
           sort_by: "post_count",
           sort_order: "desc",
-          limit: 500,
+          skip: (page - 1) * size,
+          limit: size,
           hierarchical: true,
         }),
         api.getSeriesStatuses(),
       ]);
       setItems(seriesResponse.items);
+      setTotal(seriesResponse.total);
       setStatuses(statusList);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load series");
@@ -139,17 +144,26 @@ export function SeriesPage() {
   };
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setSearch(searchInput), 300);
+    const timer = window.setTimeout(() => {
+      const wasEmpty = !search.trim();
+      const willBeEmpty = !searchInput.trim();
+      if (wasEmpty && !willBeEmpty) {
+        preSearchPageRef.current = currentPage;
+      }
+      setSearch(searchInput);
+      setCurrentPage(1);
+    }, 300);
     return () => window.clearTimeout(timer);
   }, [searchInput]);
 
   useEffect(() => {
     void loadSeries();
-  }, [search, statusFilter]);
+  }, [search, statusFilter, currentPage, pageSize]);
 
   const resetSearch = () => {
     setSearchInput("");
     setSearch("");
+    setCurrentPage(preSearchPageRef.current);
     autoExpandedRef.current = "";
     prevSearchRef.current = "";
     setExpandedParentIds(new Set());
@@ -828,7 +842,7 @@ export function SeriesPage() {
             <select
               id="series-status"
               value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
+              onChange={(event) => { setStatusFilter(event.target.value); setCurrentPage(1); }}
             >
               <option value="">All</option>
               {statuses.map((status) => (
@@ -846,6 +860,16 @@ export function SeriesPage() {
               <option value="false">Merge</option>
               <option value="true">Replace all</option>
             </select>
+            <label htmlFor="series-page-size" className="series-toolbar-label">Show</label>
+            <select
+              id="series-page-size"
+              value={String(pageSize)}
+              onChange={(event) => { setPageSize(Number(event.target.value)); setCurrentPage(1); }}
+            >
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+            </select>
           </div>
           <div className="series-toolbar-refresh">
             <button className="btn" type="button" onClick={() => void loadSeries()}>
@@ -860,9 +884,23 @@ export function SeriesPage() {
         {!loading ? (
           <>
             <div className="catalog-card-subtitle" style={{ marginBottom: 12 }}>
-              표시: {filteredCount.toLocaleString()}
+              표시: {visibleItems.length.toLocaleString()} / 전체 {total.toLocaleString()}개
               {hiddenChildCount > 0 ? ` · 하위 시리즈 ${hiddenChildCount.toLocaleString()}개 숨김` : null}
             </div>
+            {total > pageSize ? (
+              <div className="series-pagination">
+                <span className="series-pagination-info">
+                  {((currentPage - 1) * pageSize + 1).toLocaleString()}–{Math.min(currentPage * pageSize, total).toLocaleString()} / {total.toLocaleString()}개
+                </span>
+                <div className="series-pagination-controls">
+                  <button className="btn btn-small" type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage(1)}>«</button>
+                  <button className="btn btn-small" type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)}>‹</button>
+                  <span className="series-pagination-page">{currentPage} / {Math.ceil(total / pageSize)}</span>
+                  <button className="btn btn-small" type="button" disabled={currentPage >= Math.ceil(total / pageSize)} onClick={() => setCurrentPage((p) => p + 1)}>›</button>
+                  <button className="btn btn-small" type="button" disabled={currentPage >= Math.ceil(total / pageSize)} onClick={() => setCurrentPage(Math.ceil(total / pageSize))}>»</button>
+                </div>
+              </div>
+            ) : null}
             <div className="series-table-scroll">
               <table className="data-table series-table">
                 <colgroup>
@@ -1105,6 +1143,20 @@ export function SeriesPage() {
                 </tbody>
               </table>
             </div>
+            {total > pageSize ? (
+              <div className="series-pagination series-pagination-bottom">
+                <span className="series-pagination-info">
+                  {((currentPage - 1) * pageSize + 1).toLocaleString()}–{Math.min(currentPage * pageSize, total).toLocaleString()} / {total.toLocaleString()}개
+                </span>
+                <div className="series-pagination-controls">
+                  <button className="btn btn-small" type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage(1)}>«</button>
+                  <button className="btn btn-small" type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)}>‹</button>
+                  <span className="series-pagination-page">{currentPage} / {Math.ceil(total / pageSize)}</span>
+                  <button className="btn btn-small" type="button" disabled={currentPage >= Math.ceil(total / pageSize)} onClick={() => setCurrentPage((p) => p + 1)}>›</button>
+                  <button className="btn btn-small" type="button" disabled={currentPage >= Math.ceil(total / pageSize)} onClick={() => setCurrentPage(Math.ceil(total / pageSize))}>»</button>
+                </div>
+              </div>
+            ) : null}
           </>
         ) : null}
       </section>

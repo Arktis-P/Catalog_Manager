@@ -102,6 +102,7 @@ export const api = {
     search?: string;
     sort_by?: string;
     sort_order?: string;
+    skip?: number;
     limit?: number;
     hierarchical?: boolean;
   } = {}) => request<SeriesListResponse>(`/series${buildQuery(params)}`),

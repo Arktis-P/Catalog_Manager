@@ -887,6 +887,38 @@ button,
   background: var(--accent-soft);
 }
 
+.series-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  gap: 12px;
+}
+
+.series-pagination-bottom {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+.series-pagination-info {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.series-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.series-pagination-page {
+  font-size: 0.85rem;
+  color: var(--text);
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
 .merge-mode-toggle {
   display: flex;
   flex-direction: column;
