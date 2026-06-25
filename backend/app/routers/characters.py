@@ -215,10 +215,38 @@ def cancel_collect_job(job_id: str):
         raise HTTPException(status_code=404, detail="Collect job not found")
     if job.status == "cancelled":
         return CollectJobResponse.from_state(job)
-    if job.status != "queued":
-        raise HTTPException(status_code=400, detail="Only queued jobs can be cancelled")
+    if job.status not in {"queued", "paused"}:
+        raise HTTPException(status_code=400, detail="Only queued or paused jobs can be cancelled")
     if not series_job_manager.cancel_job(job_id):
         raise HTTPException(status_code=409, detail="Job could not be cancelled")
+    job = series_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Collect job not found")
+    return CollectJobResponse.from_state(job)
+
+
+@router.post("/collect/jobs/{job_id}/pause", response_model=CollectJobResponse)
+def pause_collect_job(job_id: str):
+    job = series_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Collect job not found")
+    if job.status != "running":
+        raise HTTPException(status_code=400, detail="Only running jobs can be paused")
+    series_job_manager.pause_job(job_id)
+    job = series_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Collect job not found")
+    return CollectJobResponse.from_state(job)
+
+
+@router.post("/collect/jobs/{job_id}/resume", response_model=CollectJobResponse)
+def resume_collect_job(job_id: str):
+    job = series_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Collect job not found")
+    if job.status not in {"paused", "running"}:
+        raise HTTPException(status_code=400, detail="Only paused jobs can be resumed")
+    series_job_manager.resume_job(job_id)
     job = series_job_manager.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Collect job not found")

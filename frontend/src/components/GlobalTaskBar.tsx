@@ -9,22 +9,34 @@ function jobSortRank(job: CollectJob): number {
   if (job.status === "running") {
     return 0;
   }
-  if (job.status === "queued") {
+  if (job.status === "paused") {
     return 1;
   }
-  if (job.status === "failed") {
+  if (job.status === "queued") {
     return 2;
   }
-  return 3;
+  if (job.status === "failed") {
+    return 3;
+  }
+  return 4;
 }
 
 export function GlobalTaskBar() {
-  const { jobs: collectJobs, cancelJob: cancelCollectJob, dismissJob: dismissCollectJob, lastError: collectError, clearLastError: clearCollectError } =
-    useCollectJobs();
+  const {
+    jobs: collectJobs,
+    cancelJob: cancelCollectJob,
+    pauseJob: pauseCollectJob,
+    resumeJob: resumeCollectJob,
+    dismissJob: dismissCollectJob,
+    lastError: collectError,
+    clearLastError: clearCollectError,
+  } = useCollectJobs();
   const {
     jobs: generationJobs,
     dismissJob: dismissGenerationJob,
     cancelJob,
+    pauseJob: pauseGenerationJob,
+    resumeJob: resumeGenerationJob,
     lastError: generationError,
     clearLastError: clearGenerationError,
   } = useGenerationJobs();
@@ -36,6 +48,7 @@ export function GlobalTaskBar() {
           (job) =>
             job.status === "queued" ||
             job.status === "running" ||
+            job.status === "paused" ||
             job.status === "completed" ||
             job.status === "failed" ||
             job.status === "cancelled",
@@ -98,10 +111,12 @@ export function GlobalTaskBar() {
                   key={job.job_id}
                   job={job}
                   onCancel={
-                    job.status === "queued" || job.status === "running"
+                    job.status === "queued" || job.status === "running" || job.status === "paused"
                       ? () => void cancelJob(job.job_id)
                       : undefined
                   }
+                  onPause={job.status === "running" ? () => void pauseGenerationJob(job.job_id) : undefined}
+                  onResume={job.status === "paused" ? () => void resumeGenerationJob(job.job_id) : undefined}
                   onDismiss={
                     job.status === "completed" || job.status === "failed" || job.status === "cancelled"
                       ? () => dismissGenerationJob(job.job_id)
@@ -112,7 +127,13 @@ export function GlobalTaskBar() {
                 <CollectProgressPanel
                   key={job.job_id}
                   job={job}
-                  onCancel={job.status === "queued" || job.status === "running" ? () => void cancelCollectJob(job.job_id) : undefined}
+                  onCancel={
+                    job.status === "queued" || job.status === "running" || job.status === "paused"
+                      ? () => void cancelCollectJob(job.job_id)
+                      : undefined
+                  }
+                  onPause={job.status === "running" ? () => void pauseCollectJob(job.job_id) : undefined}
+                  onResume={job.status === "paused" ? () => void resumeCollectJob(job.job_id) : undefined}
                   onDismiss={
                     job.status === "completed" || job.status === "failed" || job.status === "cancelled"
                       ? () => dismissCollectJob(job.job_id)

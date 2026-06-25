@@ -172,8 +172,36 @@ def cancel_generation_job(job_id: str):
     job = generation_job_manager.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if not cancelled and job.status in {"queued", "running"}:
+    if not cancelled and job.status in {"queued", "running", "paused"}:
         raise HTTPException(status_code=409, detail="Job could not be cancelled")
+    return _job_to_schema(job)
+
+
+@router.post("/jobs/{job_id}/pause", response_model=GenerationJobState)
+def pause_generation_job(job_id: str):
+    job = generation_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "running":
+        raise HTTPException(status_code=400, detail="Only running jobs can be paused")
+    generation_job_manager.pause_job(job_id)
+    job = generation_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _job_to_schema(job)
+
+
+@router.post("/jobs/{job_id}/resume", response_model=GenerationJobState)
+def resume_generation_job(job_id: str):
+    job = generation_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status not in {"paused", "running"}:
+        raise HTTPException(status_code=400, detail="Only paused jobs can be resumed")
+    generation_job_manager.resume_job(job_id)
+    job = generation_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
     return _job_to_schema(job)
 
 

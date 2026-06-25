@@ -20,6 +20,8 @@ interface GenerationJobContextValue {
     payload?: { character_ids?: number[]; prompt_level?: number; require_confirmed?: boolean },
   ) => Promise<CollectJob>;
   cancelJob: (jobId: string) => Promise<void>;
+  pauseJob: (jobId: string) => Promise<void>;
+  resumeJob: (jobId: string) => Promise<void>;
   dismissJob: (jobId: string) => void;
   isGeneratingSeries: (seriesId: number) => boolean;
   lastError: string | null;
@@ -68,7 +70,7 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
   const runningJobIds = useMemo(
     () =>
       visibleJobs
-        .filter((job) => job.status === "queued" || job.status === "running")
+        .filter((job) => job.status === "queued" || job.status === "running" || job.status === "paused")
         .map((job) => job.job_id),
     [visibleJobs],
   );
@@ -199,6 +201,26 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
     setJobs((current) => upsertJob(current, job));
   }, []);
 
+  const pauseJob = useCallback(async (jobId: string) => {
+    try {
+      setLastError(null);
+      const job = normalizeGenerationJob(await api.pauseGenerationJob(jobId));
+      setJobs((current) => upsertJob(current, job));
+    } catch (err) {
+      setLastError(err instanceof Error ? err.message : "Failed to pause job");
+    }
+  }, []);
+
+  const resumeJob = useCallback(async (jobId: string) => {
+    try {
+      setLastError(null);
+      const job = normalizeGenerationJob(await api.resumeGenerationJob(jobId));
+      setJobs((current) => upsertJob(current, job));
+    } catch (err) {
+      setLastError(err instanceof Error ? err.message : "Failed to resume job");
+    }
+  }, []);
+
   const dismissJob = useCallback((jobId: string) => {
     setDismissedJobIds((current) => new Set(current).add(jobId));
   }, []);
@@ -209,7 +231,7 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
         (job) =>
           job.series_id === seriesId &&
           job.job_type === "image_generation" &&
-          (job.status === "queued" || job.status === "running"),
+          (job.status === "queued" || job.status === "running" || job.status === "paused"),
       ),
     [visibleJobs],
   );
@@ -219,12 +241,14 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
       jobs: visibleJobs,
       startGeneration,
       cancelJob,
+      pauseJob,
+      resumeJob,
       dismissJob,
       isGeneratingSeries,
       lastError,
       clearLastError: () => setLastError(null),
     }),
-    [visibleJobs, startGeneration, cancelJob, dismissJob, isGeneratingSeries, lastError],
+    [visibleJobs, startGeneration, cancelJob, pauseJob, resumeJob, dismissJob, isGeneratingSeries, lastError],
   );
 
   return <GenerationJobContext.Provider value={value}>{children}</GenerationJobContext.Provider>;

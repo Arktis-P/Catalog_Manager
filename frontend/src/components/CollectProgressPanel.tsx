@@ -4,6 +4,8 @@ interface CollectProgressPanelProps {
   job: CollectJob;
   onDismiss?: () => void;
   onCancel?: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
 }
 
 // ─── 공통 유틸 ───────────────────────────────────────────────────────────────
@@ -29,6 +31,7 @@ export function phaseShortLabel(phase: string): string {
     case "cancelled": return "취소";
     case "queued": return "대기";
     case "starting": return "시작";
+    case "paused": return "정지";
     default: return "준비";
   }
 }
@@ -81,9 +84,13 @@ function formatEta(job: CollectJob): string | null {
 export function RunningJobCard({
   job,
   onCancel,
+  onPause,
+  onResume,
 }: {
   job: CollectJob;
   onCancel?: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
 }) {
   const percent = getProgressPercent(job);
   const eta = formatEta(job);
@@ -110,6 +117,28 @@ export function RunningJobCard({
         </strong>
         <div className="job-running-header-spacer" />
         <span className="job-type-label">{jobTypeLabel(job)}</span>
+        {job.status === "running" && onPause ? (
+          <button
+            className="btn btn-small btn-ghost"
+            type="button"
+            aria-label="일시정지"
+            title="일시정지"
+            onClick={onPause}
+          >
+            ⏸
+          </button>
+        ) : null}
+        {job.status === "paused" && onResume ? (
+          <button
+            className="btn btn-small btn-ghost"
+            type="button"
+            aria-label="재개"
+            title="재개"
+            onClick={onResume}
+          >
+            ▶
+          </button>
+        ) : null}
         {onCancel ? (
           <button
             className="btn btn-small btn-ghost"
@@ -166,10 +195,14 @@ function CompactJobRow({
   job,
   onAction,
   actionLabel,
+  onPause,
+  onResume,
 }: {
   job: CollectJob;
   onAction?: () => void;
   actionLabel?: string;
+  onPause?: () => void;
+  onResume?: () => void;
 }) {
   const percent = getProgressPercent(job);
   const eta = formatEta(job);
@@ -196,6 +229,8 @@ function CompactJobRow({
       className={`progress-panel progress-panel-compact${
         job.status === "failed" ? " progress-panel-error" : ""
       }${
+        job.status === "paused" ? " progress-panel-paused" : ""
+      }${
         job.status === "completed" || job.status === "cancelled"
           ? " progress-panel-done"
           : ""
@@ -204,6 +239,9 @@ function CompactJobRow({
       <div className="progress-panel-compact-row">
         {job.status === "running" ? (
           <span className="job-running-indicator job-indicator-inline" aria-hidden="true" />
+        ) : null}
+        {job.status === "paused" ? (
+          <span className="job-paused-indicator job-indicator-inline" aria-hidden="true" title="일시정지됨">⏸</span>
         ) : null}
         <strong className="progress-panel-series" title={job.series_tag}>
           {job.series_tag}
@@ -225,6 +263,28 @@ function CompactJobRow({
         </span>
         {meta.length > 0 ? (
           <span className="progress-panel-meta">{meta.join(" · ")}</span>
+        ) : null}
+        {job.status === "running" && onPause ? (
+          <button
+            className="btn btn-small btn-ghost"
+            type="button"
+            aria-label="일시정지"
+            title="일시정지"
+            onClick={onPause}
+          >
+            ⏸
+          </button>
+        ) : null}
+        {job.status === "paused" && onResume ? (
+          <button
+            className="btn btn-small btn-ghost"
+            type="button"
+            aria-label="재개"
+            title="재개"
+            onClick={onResume}
+          >
+            ▶
+          </button>
         ) : null}
         {onAction ? (
           <button
@@ -258,6 +318,8 @@ export function CollectProgressPanel({
   job,
   onDismiss,
   onCancel,
+  onPause,
+  onResume,
 }: CollectProgressPanelProps) {
   const isDone =
     job.status === "completed" ||
@@ -269,11 +331,13 @@ export function CollectProgressPanel({
       onAction={
         isDone
           ? onDismiss
-          : job.status === "queued" || job.status === "running"
+          : job.status === "queued" || job.status === "running" || job.status === "paused"
             ? onCancel
             : undefined
       }
       actionLabel={isDone ? "닫기" : "취소"}
+      onPause={job.status === "running" ? onPause : undefined}
+      onResume={job.status === "paused" ? onResume : undefined}
     />
   );
 }

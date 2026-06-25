@@ -4,6 +4,8 @@ interface GenerationProgressPanelProps {
   job: CollectJob;
   onDismiss?: () => void;
   onCancel?: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
 }
 
 function getProgressPercent(job: CollectJob): number | null {
@@ -24,9 +26,10 @@ function pendingReviewImageUrl(imagePath: string | null | undefined): string | n
   return filename ? `/media/pending-review/${filename}` : null;
 }
 
-export function GenerationProgressPanel({ job, onDismiss, onCancel }: GenerationProgressPanelProps) {
+export function GenerationProgressPanel({ job, onDismiss, onCancel, onPause, onResume }: GenerationProgressPanelProps) {
   const percent = getProgressPercent(job);
   const isRunning = job.status === "queued" || job.status === "running";
+  const isPaused = job.status === "paused";
   const previewUrl = pendingReviewImageUrl(job.last_image_path);
   const metaParts: string[] = [];
   if (job.total > 0) {
@@ -51,9 +54,14 @@ export function GenerationProgressPanel({ job, onDismiss, onCancel }: Generation
     <div
       className={`progress-panel progress-panel-compact generation-progress-panel${
         job.status === "failed" ? " progress-panel-error" : ""
-      }${job.status === "completed" ? " progress-panel-done" : ""}`}
+      }${job.status === "completed" ? " progress-panel-done" : ""}${
+        isPaused ? " progress-panel-paused" : ""
+      }`}
     >
       <div className="progress-panel-compact-row">
+        {isPaused ? (
+          <span className="job-paused-indicator job-indicator-inline" aria-hidden="true" title="일시정지됨">⏸</span>
+        ) : null}
         <strong className="progress-panel-series" title={job.series_tag || "Series"}>
           {job.series_tag || "Series"}
         </strong>
@@ -86,9 +94,36 @@ export function GenerationProgressPanel({ job, onDismiss, onCancel }: Generation
             ×
           </button>
         ) : null}
+        {job.status === "running" && onPause ? (
+          <button
+            className="btn btn-small btn-ghost"
+            type="button"
+            aria-label="일시정지"
+            title="일시정지"
+            onClick={onPause}
+          >
+            ⏸
+          </button>
+        ) : null}
         {job.status === "running" && onCancel ? (
           <button className="btn btn-small btn-ghost" type="button" onClick={onCancel}>
             Cancel
+          </button>
+        ) : null}
+        {isPaused && onResume ? (
+          <button
+            className="btn btn-small btn-ghost"
+            type="button"
+            aria-label="재개"
+            title="재개"
+            onClick={onResume}
+          >
+            ▶ 재개
+          </button>
+        ) : null}
+        {isPaused && onCancel ? (
+          <button className="btn btn-small btn-ghost" type="button" onClick={onCancel}>
+            ×
           </button>
         ) : null}
         {onDismiss ? (

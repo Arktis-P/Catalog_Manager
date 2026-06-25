@@ -19,6 +19,8 @@ interface CollectJobContextValue {
   startCollectMany: (seriesIds: number[]) => Promise<CollectJob[]>;
   startAppearanceExtract: (seriesId: number) => Promise<CollectJob>;
   cancelJob: (jobId: string) => Promise<void>;
+  pauseJob: (jobId: string) => Promise<void>;
+  resumeJob: (jobId: string) => Promise<void>;
   dismissJob: (jobId: string) => void;
   isProcessingSeries: (seriesId: number) => boolean;
   isCollectingSeries: (seriesId: number) => boolean;
@@ -77,7 +79,7 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
   const runningJobIds = useMemo(
     () =>
       visibleJobs
-        .filter((job) => job.status === "queued" || job.status === "running")
+        .filter((job) => job.status === "queued" || job.status === "running" || job.status === "paused")
         .map((job) => job.job_id),
     [visibleJobs],
   );
@@ -242,13 +244,33 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const pauseJob = useCallback(async (jobId: string) => {
+    try {
+      setLastError(null);
+      const job = await api.pauseCollectJob(jobId);
+      setJobs((current) => upsertJob(current, job));
+    } catch (err) {
+      setLastError(err instanceof Error ? err.message : "Failed to pause job");
+    }
+  }, []);
+
+  const resumeJob = useCallback(async (jobId: string) => {
+    try {
+      setLastError(null);
+      const job = await api.resumeCollectJob(jobId);
+      setJobs((current) => upsertJob(current, job));
+    } catch (err) {
+      setLastError(err instanceof Error ? err.message : "Failed to resume job");
+    }
+  }, []);
+
   const isActiveJobForSeries = useCallback(
     (seriesId: number, jobType?: CollectJob["job_type"]) =>
       visibleJobs.some(
         (job) =>
           job.series_id === seriesId &&
           (jobType ? job.job_type === jobType : true) &&
-          (job.status === "queued" || job.status === "running"),
+          (job.status === "queued" || job.status === "running" || job.status === "paused"),
       ),
     [visibleJobs],
   );
@@ -275,6 +297,8 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
       startCollectMany,
       startAppearanceExtract,
       cancelJob,
+      pauseJob,
+      resumeJob,
       dismissJob,
       isProcessingSeries,
       isCollectingSeries,
@@ -290,6 +314,8 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
       startCollectMany,
       startAppearanceExtract,
       cancelJob,
+      pauseJob,
+      resumeJob,
       dismissJob,
       isProcessingSeries,
       isCollectingSeries,

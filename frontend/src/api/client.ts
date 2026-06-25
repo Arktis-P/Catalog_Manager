@@ -170,6 +170,12 @@ export const api = {
   cancelCollectJob: (jobId: string) =>
     request<CollectJob>(`/characters/collect/jobs/${jobId}/cancel`, { method: "POST" }),
 
+  pauseCollectJob: (jobId: string) =>
+    request<CollectJob>(`/characters/collect/jobs/${jobId}/pause`, { method: "POST" }),
+
+  resumeCollectJob: (jobId: string) =>
+    request<CollectJob>(`/characters/collect/jobs/${jobId}/resume`, { method: "POST" }),
+
   listCollectJobs: () => request<{ items: CollectJob[] }>("/characters/collect/jobs"),
 
   getSettings: () => request<AppSettings>("/settings"),
@@ -368,4 +374,10 @@ export const api = {
 
   cancelGenerationJob: (jobId: string) =>
     request<CollectJob>(`/generation/jobs/${jobId}/cancel`, { method: "POST" }),
+
+  pauseGenerationJob: (jobId: string) =>
+    request<CollectJob>(`/generation/jobs/${jobId}/pause`, { method: "POST" }),
+
+  resumeGenerationJob: (jobId: string) =>
+    request<CollectJob>(`/generation/jobs/${jobId}/resume`, { method: "POST" }),
 };

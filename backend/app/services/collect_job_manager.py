@@ -23,6 +23,11 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class _PauseCancelledError(BaseException):
+    """Raised from progress callback when a job is cancelled while paused.
+    Inherits BaseException so 'except Exception' blocks in service code don't catch it."""
+
+
 @dataclass
 class SeriesJobState:
     job_id: str
@@ -54,6 +59,8 @@ class SeriesJobManager:
         self._running_job_ids: set[str] = set()
         self._running_count = 0
         self._lock = threading.Lock()
+        self._pause_cond = threading.Condition(threading.Lock())
+        self._paused_jobs: set[str] = set()
 
     def _get_max_concurrent(self) -> int:
         db = SessionLocal()
@@ -87,7 +94,7 @@ class SeriesJobManager:
                 job_id: idx for idx, job_id in enumerate(self._job_queue)
             }
 
-        running = [j for j in jobs if j.status == "running"]
+        running = [j for j in jobs if j.status in {"running", "paused"}]
         queued = sorted(
             [j for j in jobs if j.status == "queued"],
             key=lambda j: queue_order.get(j.job_id, 999_999),
@@ -110,18 +117,74 @@ class SeriesJobManager:
     def start_appearance_extract(self, series_id: int, series_tag: str = "") -> SeriesJobState:
         return self._enqueue(series_id, JOB_TYPE_APPEARANCE_EXTRACT, series_tag=series_tag)
 
-    def cancel_job(self, job_id: str) -> bool:
+    def pause_job(self, job_id: str) -> bool:
+        """현재 실행 중인 작업을 일시정지 요청. 다음 체크포인트에서 멈춤."""
         with self._lock:
             job = self._jobs.get(job_id)
-            if not job or job.status != "queued":
+            if not job or job.status != "running":
+                return False
+        with self._pause_cond:
+            self._paused_jobs.add(job_id)
+        return True
+
+    def resume_job(self, job_id: str) -> bool:
+        """일시정지된 작업 재개."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status not in {"paused", "running"}:
+                return False
+            if job_id not in self._paused_jobs:
+                return False
+        with self._pause_cond:
+            self._paused_jobs.discard(job_id)
+            self._pause_cond.notify_all()
+        return True
+
+    def _check_pause(self, job_id: str) -> bool:
+        """체크포인트. 일시정지 요청이 있으면 재개될 때까지 대기.
+        Returns True to continue, raises _PauseCancelledError if cancelled during pause."""
+        if job_id not in self._paused_jobs:
+            return True
+
+        # 일시정지 상태로 전환
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job:
+                job.status = "paused"
+                job.phase = "paused"
+                job.message = "일시정지됨 · 재개 시 이어서 진행"
+
+        # 재개 또는 취소될 때까지 대기
+        with self._pause_cond:
+            while job_id in self._paused_jobs:
+                self._pause_cond.wait(timeout=2.0)
+
+        # 취소 여부 확인
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status == "cancelled":
+                raise _PauseCancelledError()
+            job.status = "running"
+            job.message = "작업 재개됨"
+
+        return True
+
+    def cancel_job(self, job_id: str) -> bool:
+        was_paused = False
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status not in {"queued", "paused"}:
                 return False
 
-            self._job_queue = deque(queued_id for queued_id in self._job_queue if queued_id != job_id)
+            was_paused = job.status == "paused"
+
+            if not was_paused:
+                self._job_queue = deque(queued_id for queued_id in self._job_queue if queued_id != job_id)
 
             task_label = "수집" if job.job_type == JOB_TYPE_CHARACTER_COLLECT else "외형 추출"
             job.status = "cancelled"
             job.phase = "cancelled"
-            job.message = f"{task_label} 대기 취소됨"
+            job.message = f"{task_label} 취소됨"
             job.finished_at = _utc_now()
 
             if self._active_by_series.get(job.series_id) == job_id:
@@ -129,7 +192,15 @@ class SeriesJobManager:
 
             self._refresh_queue_messages()
 
-        self._dispatch_next()
+        # 일시정지 중인 스레드 깨우기 (취소 처리)
+        with self._pause_cond:
+            self._paused_jobs.discard(job_id)
+            self._pause_cond.notify_all()
+
+        if not was_paused:
+            self._dispatch_next()
+        # was_paused인 경우: 스레드가 깨어나서 _PauseCancelledError → _finish_job → _dispatch_next 호출
+
         return True
 
     def _enqueue(self, series_id: int, job_type: str, series_tag: str = "") -> SeriesJobState:
@@ -137,7 +208,7 @@ class SeriesJobManager:
             existing_job_id = self._active_by_series.get(series_id)
             if existing_job_id:
                 existing = self._jobs.get(existing_job_id)
-                if existing and existing.status in {"queued", "running"}:
+                if existing and existing.status in {"queued", "running", "paused"}:
                     return existing
 
             job = SeriesJobState(
@@ -247,6 +318,8 @@ class SeriesJobManager:
                 if "discovered" in payload:
                     updates["discovered"] = payload["discovered"]
                 self._update_job(job_id, **updates)
+                # 체크포인트: 일시정지 요청 시 여기서 블록
+                self._check_pause(job_id)
 
             service = CharacterService(db)
             result = service.collect_for_series(series, progress_callback=on_progress)
@@ -266,6 +339,9 @@ class SeriesJobManager:
                 total=result.discovered,
                 finished_at=_utc_now(),
             )
+        except _PauseCancelledError:
+            # 일시정지 중 취소됨 - status는 cancel_job에서 이미 설정됨
+            return
         except DanbooruAuthError as exc:
             self._update_job(
                 job_id,
@@ -338,6 +414,8 @@ class SeriesJobManager:
                     current=payload.get("current", 0),
                     total=payload.get("total", 0),
                 )
+                # 체크포인트: 일시정지 요청 시 여기서 블록
+                self._check_pause(job_id)
 
             service = AppearanceService(db)
             result = service.extract_for_series(series, progress_callback=on_progress)
@@ -352,6 +430,9 @@ class SeriesJobManager:
                 total=result.processed,
                 finished_at=_utc_now(),
             )
+        except _PauseCancelledError:
+            # 일시정지 중 취소됨
+            return
         except DanbooruAuthError as exc:
             self._update_job(
                 job_id,

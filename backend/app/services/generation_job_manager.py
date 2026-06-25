@@ -67,6 +67,8 @@ class GenerationJobManager:
         self._active_by_series: dict[int, str] = {}
         self._cancelled: set[str] = set()
         self._lock = threading.Lock()
+        self._pause_cond = threading.Condition(threading.Lock())
+        self._paused_jobs: set[str] = set()
 
     def get_job(self, job_id: str) -> GenerationBatchState | None:
         with self._lock:
@@ -85,11 +87,65 @@ class GenerationJobManager:
         jobs.sort(key=lambda job: job.started_at, reverse=True)
         return jobs[:limit]
 
-    def cancel_job(self, job_id: str) -> bool:
+    def pause_job(self, job_id: str) -> bool:
+        """현재 실행 중인 이미지 생성 작업을 일시정지 요청."""
         with self._lock:
             job = self._jobs.get(job_id)
-            if not job or job.status not in {"queued", "running"}:
+            if not job or job.status != "running":
                 return False
+        with self._pause_cond:
+            self._paused_jobs.add(job_id)
+        return True
+
+    def resume_job(self, job_id: str) -> bool:
+        """일시정지된 이미지 생성 작업 재개."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status not in {"paused", "running"}:
+                return False
+            if job_id not in self._paused_jobs:
+                return False
+        with self._pause_cond:
+            self._paused_jobs.discard(job_id)
+            self._pause_cond.notify_all()
+        return True
+
+    def _check_pause(self, job_id: str) -> bool:
+        """체크포인트. 일시정지 요청 시 재개될 때까지 블록. 취소되면 False 반환."""
+        if job_id not in self._paused_jobs:
+            return True
+
+        # 일시정지 상태로 전환
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job:
+                job.status = "paused"
+                job.phase = "paused"
+                job.message = "일시정지됨 · 재개 시 이어서 진행"
+
+        # 재개 또는 취소될 때까지 대기
+        with self._pause_cond:
+            while job_id in self._paused_jobs:
+                self._pause_cond.wait(timeout=2.0)
+
+        # 취소 여부 확인
+        with self._lock:
+            if job_id in self._cancelled:
+                return False
+            job = self._jobs.get(job_id)
+            if job and job.status == "paused":
+                job.status = "running"
+                job.message = "작업 재개됨"
+
+        return True
+
+    def cancel_job(self, job_id: str) -> bool:
+        was_paused = False
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status not in {"queued", "running", "paused"}:
+                return False
+            was_paused = job.status == "paused"
             self._cancelled.add(job_id)
             job.status = "cancelled"
             job.phase = "cancelled"
@@ -99,7 +155,8 @@ class GenerationJobManager:
             status_before = job.status_before_generation
             self._active_by_series.pop(series_id, None)
 
-        if status_before:
+        if status_before and not was_paused:
+            # paused 상태에서는 _run_generation 스레드가 restore를 처리
             db = SessionLocal()
             try:
                 series = db.query(Series).filter(Series.id == series_id).first()
@@ -107,6 +164,12 @@ class GenerationJobManager:
                     restore_series_status(db, series, status_before)
             finally:
                 db.close()
+
+        # 일시정지 중인 스레드 깨우기
+        with self._pause_cond:
+            self._paused_jobs.discard(job_id)
+            self._pause_cond.notify_all()
+
         return True
 
     def start_generation(
@@ -121,7 +184,7 @@ class GenerationJobManager:
             existing_job_id = self._active_by_series.get(series_id)
             if existing_job_id:
                 existing = self._jobs.get(existing_job_id)
-                if existing and existing.status in {"queued", "running"}:
+                if existing and existing.status in {"queued", "running", "paused"}:
                     return existing
 
             job = GenerationBatchState(
@@ -258,6 +321,11 @@ class GenerationJobManager:
                     restore_series_status(db, series, status_before_generation)
                     return
 
+                # 체크포인트: 이미지 생성 전 일시정지 확인
+                if not self._check_pause(job_id):
+                    restore_series_status(db, series, status_before_generation)
+                    return
+
                 if index > 1:
                     wait_between_naia_generations()
 
@@ -341,6 +409,10 @@ class GenerationJobManager:
                 for char_id in escalation_chars:
                     if self._is_cancelled(job_id):
                         break
+                    # 에스컬레이션 전 일시정지 확인
+                    if not self._check_pause(job_id):
+                        restore_series_status(db, series, status_before_generation)
+                        return
                     character = db.query(Character).filter(Character.id == char_id).first()
                     if not character:
                         continue

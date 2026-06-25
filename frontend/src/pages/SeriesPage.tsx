@@ -145,6 +145,7 @@ export function SeriesPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      if (searchInput === search) return;
       const wasEmpty = !search.trim();
       const willBeEmpty = !searchInput.trim();
       if (wasEmpty && !willBeEmpty) {
