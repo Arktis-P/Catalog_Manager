@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "../api/client";
+import { api, waitForBackend } from "../api/client";
 import { useReviewRegenerateJobs } from "../context/ReviewRegenerateContext";
 import type { CatalogFilters, CatalogItem, CatalogStats, Series } from "../types";
 import { CatalogEditModal } from "../components/CatalogEditModal";
@@ -59,6 +59,7 @@ export function CatalogPage() {
     setLoading(true);
     setError(null);
     try {
+      await waitForBackend();
       const query: CatalogFilters = { ...listFilters, skip: 0, limit: PAGE_SIZE };
       const [catalog, catalogStats, catalogStatuses, seriesList] = await Promise.all([
         api.listCatalog(query),

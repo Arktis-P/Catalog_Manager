@@ -61,6 +61,8 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
   notificationModeRef.current = notificationMode;
   const allDoneCountRef = useRef(0);
   const prevRunningCountRef = useRef(0);
+  const pollFailCountRef = useRef(0);
+  const POLL_ERROR_THRESHOLD = 3;
 
   const visibleJobs = useMemo(
     () => jobs.filter((job) => !dismissedJobIds.has(job.job_id)),
@@ -159,8 +161,13 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
           }
           return merged;
         });
+        pollFailCountRef.current = 0;
+        setLastError(null);
       } catch (err) {
-        setLastError(err instanceof Error ? err.message : "Failed to poll generation jobs");
+        pollFailCountRef.current += 1;
+        if (pollFailCountRef.current >= POLL_ERROR_THRESHOLD) {
+          setLastError(err instanceof Error ? err.message : "Failed to poll generation jobs");
+        }
       }
     };
 

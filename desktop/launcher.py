@@ -249,6 +249,7 @@ def open_app_browser(url: str) -> "subprocess.Popen[bytes] | None":
             str(browser),
             f"--app={url}",
             f"--user-data-dir={profile_dir}",
+            "--new-window",
             "--window-size=1440,900",
             "--no-first-run",
             "--no-default-browser-check",
@@ -275,7 +276,9 @@ def run_desktop() -> int:
             stop_backend()
             return 1
 
-        browser_proc = open_app_browser(APP_URL)
+        # Bust SPA cache and avoid reusing a stale app tab from the shared profile.
+        boot_url = f"{APP_URL}/?_boot={int(time.time())}"
+        browser_proc = open_app_browser(boot_url)
         if browser_proc is None:
             # 브라우저를 찾지 못한 경우 URL 출력 후 Ctrl+C 대기
             print(f"[desktop] App running at {APP_URL}  (Ctrl+C to stop)", flush=True)

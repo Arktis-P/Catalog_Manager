@@ -35,14 +35,63 @@ import type {
 
 const API_BASE = "/api";
 
+const NETWORK_ERROR_HINT =
+  "백엔드 API에 연결하지 못했습니다. scripts\\launch_desktop.bat 으로 앱을 실행했는지, " +
+  "주소가 http://127.0.0.1:8000 인지 확인하세요. (개발 모드 5173 은 Vite 서버도 필요합니다)";
+
+function isNetworkError(err: unknown): boolean {
+  if (!(err instanceof TypeError)) {
+    return false;
+  }
+  const message = err.message.toLowerCase();
+  return message.includes("failed to fetch") || message.includes("networkerror");
+}
+
+function formatRequestError(err: unknown): string {
+  if (isNetworkError(err)) {
+    return NETWORK_ERROR_HINT;
+  }
+  return err instanceof Error ? err.message : "Request failed";
+}
+
+export async function waitForBackend(
+  options: { attempts?: number; intervalMs?: number } = {},
+): Promise<void> {
+  const attempts = options.attempts ?? 40;
+  const intervalMs = options.intervalMs ?? 500;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(`${API_BASE}/health`, {
+        headers: { "Content-Type": "application/json" },
+      });
+      if (response.ok) {
+        return;
+      }
+      lastError = new Error(`Health check failed: ${response.status}`);
+    } catch (err) {
+      lastError = err;
+      if (attempt < attempts - 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+      }
+    }
+  }
+  throw new Error(formatRequestError(lastError));
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+      ...init,
+    });
+  } catch (err) {
+    throw new Error(formatRequestError(err));
+  }
 
   if (!response.ok) {
     const detail = await response.text();

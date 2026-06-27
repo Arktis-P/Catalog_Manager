@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { BackendGate } from "./BackendGate";
 import { GlobalTaskBar } from "./GlobalTaskBar";
 import { ToastContainer } from "./ToastContainer";
 
@@ -37,7 +38,9 @@ export function Layout() {
         <GlobalTaskBar />
       </div>
       <main className="page-container">
-        <Outlet />
+        <BackendGate>
+          <Outlet />
+        </BackendGate>
       </main>
       <ToastContainer />
     </div>

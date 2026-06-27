@@ -159,6 +159,9 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
     }
   }, [runningJobIds.length, notificationMode]);
 
+  const pollFailCountRef = useRef(0);
+  const POLL_ERROR_THRESHOLD = 3;
+
   useEffect(() => {
     if (runningJobIds.length === 0) {
       return;
@@ -167,6 +170,8 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
     const poll = async () => {
       try {
         const updates = await Promise.all(runningJobIds.map((jobId) => api.getCollectJob(jobId)));
+        pollFailCountRef.current = 0;
+        setLastError(null);
         setJobs((current) => {
           handleJobUpdates(updates, current);
           let merged = current;
@@ -176,7 +181,10 @@ export function CollectJobProvider({ children }: { children: ReactNode }) {
           return merged;
         });
       } catch (err) {
-        setLastError(err instanceof Error ? err.message : "Failed to poll background jobs");
+        pollFailCountRef.current += 1;
+        if (pollFailCountRef.current >= POLL_ERROR_THRESHOLD) {
+          setLastError(err instanceof Error ? err.message : "Failed to poll background jobs");
+        }
       }
     };
 
