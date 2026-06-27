@@ -49,10 +49,18 @@ button {
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   user-select: text;
+}
+
+.app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
 }
 
 button,
@@ -83,8 +91,7 @@ button,
 }
 
 .app-top {
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 20;
   backdrop-filter: blur(12px);
   background: rgba(15, 20, 25, 0.92);
@@ -96,13 +103,9 @@ button,
   border-bottom: none;
 }
 
-.top-nav-inner,
-.page-container {
+.top-nav-inner {
   width: min(1400px, calc(100% - 32px));
   margin: 0 auto;
-}
-
-.top-nav-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -152,7 +155,94 @@ button,
 }
 
 .page-container {
-  padding: 24px 0 48px;
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 24px 16px 48px;
+}
+
+.page-container > * {
+  width: min(1400px, 100%);
+  margin-inline: auto;
+}
+
+/* ── 우측 사이드바 ─────────────────────────────────────────────────────── */
+.right-sidebar {
+  width: 450px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-elevated);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 5px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 10;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle:active {
+  background: rgba(91, 141, 239, 0.35);
+}
+
+.right-sidebar-tasks {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.right-sidebar-wiki {
+  flex: 0 0 48%;
+  min-height: 180px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wiki-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.wiki-panel-url {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.wiki-nav-btn {
+  padding: 2px 6px;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.wiki-iframe {
+  flex: 1;
+  border: none;
+  width: 100%;
+  background: #fff;
 }
 
 .page-header {
@@ -651,9 +741,9 @@ button,
 }
 
 .series-table .col-series-tag {
-  width: 160px;
-  min-width: 140px;
-  max-width: 220px;
+  width: 240px;
+  min-width: 200px;
+  max-width: 320px;
 }
 
 .series-table .col-display-name {
@@ -663,28 +753,16 @@ button,
 }
 
 .series-table .col-count {
-  width: 72px;
-  min-width: 64px;
-  max-width: 88px;
-}
-
-.series-table .col-last-collect {
-  width: 88px;
-  min-width: 72px;
-  max-width: 100px;
-}
-
-.series-table .col-priority {
-  width: 40px;
-  min-width: 36px;
-  max-width: 48px;
-  text-align: right;
+  width: 96px;
+  min-width: 88px;
+  max-width: 120px;
 }
 
 .series-table .col-status {
-  width: 76px;
-  min-width: 68px;
-  max-width: 88px;
+  width: 88px;
+  min-width: 80px;
+  max-width: 100px;
+  padding-left: 12px;
 }
 
 .series-table .col-note {
@@ -734,11 +812,12 @@ button,
   min-width: 0;
 }
 
-.series-tag-cell > span:last-child {
+.series-tag-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex: 1;
 }
 
 .series-children-toggle {
@@ -779,10 +858,9 @@ button,
   padding-top: 0;
 }
 
-/* Sticky compact toolbar — top is set dynamically via ResizeObserver in SeriesPage */
 .series-sticky-toolbar {
   position: sticky;
-  top: 73px; /* fallback; overridden by inline style */
+  top: 0;
   z-index: 10;
   background: var(--bg-elevated);
   display: flex;
@@ -885,6 +963,41 @@ button,
   color: var(--accent);
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+
+.series-sub-toggle-btn {
+  font-size: 0.55rem;
+}
+
+.series-sub-candidates-row > td {
+  padding: 0;
+  background: var(--bg-elevated);
+}
+
+.series-sub-candidates-cell {
+  padding: 6px 12px 6px 40px;
+  border-bottom: 1px solid var(--border);
+}
+
+.series-sub-candidates-empty {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.series-sub-candidates-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.series-sub-candidates-table td {
+  padding: 3px 8px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.series-sub-candidates-table tr:last-child td {
+  border-bottom: none;
 }
 
 .series-pagination {
@@ -1267,9 +1380,10 @@ button,
 
 .progress-panel-compact-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-height: 24px;
+  flex-wrap: wrap;
 }
 
 .compact-progress-bar {
@@ -1293,11 +1407,9 @@ button,
 .progress-panel-message-compact {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--text-muted);
   font-size: 0.78rem;
+  word-break: break-word;
 }
 
 .progress-panel-meta {
@@ -1341,9 +1453,6 @@ button,
 }
 
 .global-task-bar-inner {
-  width: min(1400px, calc(100% - 32px));
-  margin: 0 auto;
-  padding: 0 0 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1879,10 +1988,6 @@ button,
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 280px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 2px;
 }
 
 .global-task-bar-jobs .progress-panel-compact,

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { RunningJobCard } from "../components/CollectProgressPanel";
 import { SeriesCharactersModal } from "../components/SeriesCharactersModal";
@@ -7,7 +7,9 @@ import { useCollectJobs } from "../context/CollectJobContext";
 import type { DanbooruStatus, PipelineStatus, Series, SeriesCreatePayload } from "../types";
 import { downloadTextFile } from "../utils/download";
 import { danbooruSeriesWikiUrl } from "../utils/danbooruLinks";
+import { normalizeSeriesTag } from "../utils/seriesNormalize";
 import { resolveSeriesStatus, seriesStatusBadgeClass } from "../utils/seriesStatus";
+import { useWikiPanel } from "../context/WikiPanelContext";
 
 type ModalMode = "create" | "edit";
 
@@ -65,6 +67,11 @@ export function SeriesPage() {
   const [pageSize, setPageSize] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [expandedSubCandidateIds, setExpandedSubCandidateIds] = useState<Set<number>>(() => new Set());
+  const [subCandidateCache, setSubCandidateCache] = useState<Map<number, Series[]>>(() => new Map());
+  const [loadingCandidateIds, setLoadingCandidateIds] = useState<Set<number>>(() => new Set());
+
+  const { openWiki } = useWikiPanel();
 
   const pipelineRunningJobs = useMemo(
     () => collectJobs.filter((j) => j.status === "running"),
@@ -356,17 +363,6 @@ export function SeriesPage() {
     return `${series.character_count.toLocaleString()}${merged}`;
   };
 
-  const formatLastCollect = (series: Series) => {
-    if (series.last_collect_created <= 0 && series.last_collect_skipped <= 0) {
-      return "-";
-    }
-    const created =
-      series.last_collect_created > 0 ? `+${series.last_collect_created.toLocaleString()}` : "";
-    const skipped =
-      series.last_collect_skipped > 0 ? `s${series.last_collect_skipped.toLocaleString()}` : "";
-    return [created, skipped].filter(Boolean).join(" · ");
-  };
-
   const canExtractAppearance = (series: Series) =>
     !series.is_merged_child && series.character_count > 0;
 
@@ -447,6 +443,45 @@ export function SeriesPage() {
     });
   };
 
+  const toggleSubCandidates = async (series: Series) => {
+    const id = series.id;
+    if (expandedSubCandidateIds.has(id)) {
+      setExpandedSubCandidateIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      return;
+    }
+    setExpandedSubCandidateIds((prev) => new Set(prev).add(id));
+    if (subCandidateCache.has(id)) return;
+
+    const normalized = normalizeSeriesTag(series.series_tag);
+    if (!normalized) {
+      setSubCandidateCache((prev) => new Map(prev).set(id, []));
+      return;
+    }
+
+    setLoadingCandidateIds((prev) => new Set(prev).add(id));
+    try {
+      const result = await api.listSeries({ search: series.series_tag, limit: 200 });
+      const candidates = result.items.filter(
+        (candidate) =>
+          candidate.id !== id &&
+          normalizeSeriesTag(candidate.series_tag).startsWith(normalized),
+      );
+      setSubCandidateCache((prev) => new Map(prev).set(id, candidates));
+    } catch {
+      setSubCandidateCache((prev) => new Map(prev).set(id, []));
+    } finally {
+      setLoadingCandidateIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
   const openMergeModal = (series: Series) => {
     const selected = mergeEligibleItems.filter((item) => selectedSeriesIds.has(item.id));
     if (selectedSeriesIds.has(series.id) && selected.length > 1) {
@@ -456,19 +491,6 @@ export function SeriesPage() {
     setMergingSeriesList([series]);
   };
 
-  useLayoutEffect(() => {
-    const appTop = document.querySelector(".app-top") as HTMLElement | null;
-    if (!appTop) return;
-    const update = () => {
-      if (stickyToolbarRef.current) {
-        stickyToolbarRef.current.style.top = `${appTop.offsetHeight}px`;
-      }
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(appTop);
-    return () => observer.disconnect();
-  }, []);
 
   const [autoGenerate, setAutoGenerate] = useState(false);
 
@@ -907,11 +929,8 @@ export function SeriesPage() {
                 <colgroup>
                   <col className="col-checkbox" />
                   <col className="col-series-tag" />
-                  <col className="col-display-name" />
                   <col className="col-count" />
                   <col className="col-count" />
-                  <col className="col-last-collect" />
-                  <col className="col-priority" />
                   <col className="col-status" />
                   <col className="col-note" />
                   <col className="col-actions" />
@@ -932,11 +951,8 @@ export function SeriesPage() {
                       ) : null}
                     </th>
                     <th className="col-series-tag">series_tag</th>
-                    <th className="col-display-name">display_name</th>
                     <th className="col-count">posts</th>
                     <th className="col-count">chars</th>
-                    <th className="col-last-collect">collect</th>
-                    <th className="col-priority">pri</th>
                     <th className="col-status">status</th>
                     <th className="col-note">note</th>
                     <th className="col-actions">Actions</th>
@@ -944,7 +960,8 @@ export function SeriesPage() {
                 </thead>
                 <tbody>
                   {visibleItems.map((series) => (
-                    <tr key={series.id} className={series.is_merged_child ? "series-child-row" : undefined}>
+                  <Fragment key={series.id}>
+                    <tr className={series.is_merged_child ? "series-child-row" : undefined}>
                       <td className="col-checkbox">
                         <input
                           type="checkbox"
@@ -990,23 +1007,26 @@ export function SeriesPage() {
                               ) : null}
                             </>
                           ) : null}
-                          <span className={series.is_merged_child ? "series-child-tag" : undefined}>
+                          <span className={`series-tag-text${series.is_merged_child ? " series-child-tag" : ""}`}>
                             {series.is_merged_child ? `└ ${series.series_tag}` : series.series_tag}
                           </span>
-                        </div>
-                      </td>
-                      <td className="col-display-name" title={series.display_name}>
-                        <div className="series-display-name-cell">
-                          <span className="series-display-name-text">{series.display_name}</span>
-                          <a
-                            href={danbooruSeriesWikiUrl(series.series_tag)}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
                             className="series-wiki-btn"
                             title={`Danbooru wiki: ${series.series_tag}`}
+                            onClick={() => openWiki(danbooruSeriesWikiUrl(series.series_tag))}
                           >
                             W
-                          </a>
+                          </button>
+                          <button
+                            type="button"
+                            className="series-wiki-btn series-sub-toggle-btn"
+                            title={expandedSubCandidateIds.has(series.id) ? "하위 시리즈 후보 접기" : "하위 시리즈 후보 펼치기"}
+                            aria-expanded={expandedSubCandidateIds.has(series.id)}
+                            onClick={() => void toggleSubCandidates(series)}
+                          >
+                            {expandedSubCandidateIds.has(series.id) ? "▲" : "▼"}
+                          </button>
                         </div>
                       </td>
                       <td className="col-count series-cell-nowrap">{series.post_count.toLocaleString()}</td>
@@ -1024,10 +1044,6 @@ export function SeriesPage() {
                       >
                         {formatCharacterCount(series)}
                       </td>
-                      <td className="col-last-collect series-cell-nowrap" title={formatLastCollect(series)}>
-                        {formatLastCollect(series)}
-                      </td>
-                      <td className="col-priority series-cell-nowrap">{series.priority}</td>
                       <td className="col-status series-cell-nowrap">
                         {(() => {
                           const displayStatus = resolveSeriesStatus(series);
@@ -1140,6 +1156,67 @@ export function SeriesPage() {
                         </div>
                       </td>
                     </tr>
+                    {expandedSubCandidateIds.has(series.id) && (
+                      <tr key={`sub-${series.id}`} className="series-sub-candidates-row">
+                        <td colSpan={7} className="series-sub-candidates-cell">
+                          {loadingCandidateIds.has(series.id) ? (
+                            <span className="series-sub-candidates-empty">검색 중...</span>
+                          ) : (subCandidateCache.get(series.id) ?? []).length === 0 ? (
+                            <span className="series-sub-candidates-empty">정규화 검색 결과 없음</span>
+                          ) : (
+                            <table className="data-table series-sub-candidates-table">
+                              <tbody>
+                                {(subCandidateCache.get(series.id) ?? []).map((candidate) => {
+                                  const displayStatus = resolveSeriesStatus(candidate);
+                                  return (
+                                    <tr key={candidate.id}>
+                                      <td className="col-series-tag cell-ellipsis" title={candidate.series_tag}>
+                                        <div className="series-tag-cell">
+                                          <span className="series-tag-text">{candidate.series_tag}</span>
+                                          <button
+                                            type="button"
+                                            className="series-wiki-btn"
+                                            title={`Danbooru wiki: ${candidate.series_tag}`}
+                                            onClick={() => openWiki(danbooruSeriesWikiUrl(candidate.series_tag))}
+                                          >
+                                            W
+                                          </button>
+                                        </div>
+                                      </td>
+                                      <td className="col-count series-cell-nowrap">{candidate.post_count.toLocaleString()}</td>
+                                      <td className="col-count series-cell-nowrap">{candidate.character_count.toLocaleString()}</td>
+                                      <td className="col-status series-cell-nowrap">
+                                        <span className={seriesStatusBadgeClass(displayStatus.tone)}>{displayStatus.label}</span>
+                                      </td>
+                                      <td className="col-actions">
+                                        <div className="table-actions">
+                                          <input
+                                            type="checkbox"
+                                            aria-label={`Select ${candidate.series_tag}`}
+                                            checked={selectedSeriesIds.has(candidate.id)}
+                                            onChange={() => toggleSeriesSelection(candidate.id)}
+                                          />
+                                          {isSeriesMergeEligible(candidate) ? (
+                                            <button
+                                              className="btn btn-small"
+                                              type="button"
+                                              onClick={() => openMergeModal(candidate)}
+                                            >
+                                              Merge
+                                            </button>
+                                          ) : null}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                   ))}
                 </tbody>
               </table>
