@@ -1380,10 +1380,10 @@ button,
 
 .progress-panel-compact-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   min-height: 24px;
-  flex-wrap: wrap;
+  overflow: hidden;
 }
 
 .compact-progress-bar {
@@ -1407,9 +1407,11 @@ button,
 .progress-panel-message-compact {
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-muted);
   font-size: 0.78rem;
-  word-break: break-word;
 }
 
 .progress-panel-meta {
@@ -2005,6 +2007,141 @@ button,
 .progress-bar-indeterminate .progress-bar-fill {
   width: 35% !important;
   animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+/* ─── 우측 사이드바 고정 2행 task-card ──────────────────────────────────── */
+
+.task-card {
+  padding: 5px 8px 5px 8px;
+  border-radius: 8px;
+  background: rgba(31, 39, 51, 0.72);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.task-card-error {
+  border-color: rgba(224, 108, 117, 0.45);
+}
+
+.task-card-done {
+  opacity: 0.82;
+}
+
+.task-card-paused {
+  border-color: rgba(212, 160, 23, 0.4);
+  background: rgba(212, 160, 23, 0.04);
+}
+
+/* 행 1: 한 줄 고정, 텍스트 넘침 방지 */
+.task-row1 {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  overflow: hidden;
+}
+
+.task-dot {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #56d364;
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+.task-dot-paused {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
+  animation: none;
+  font-size: 0.72rem;
+  color: var(--warning);
+}
+
+.task-name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.task-badge {
+  flex-shrink: 0;
+}
+
+.task-meta {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.task-row1-spacer {
+  flex: 0 0 2px;
+}
+
+.task-btn {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  font-size: 0.8rem;
+  min-width: 20px;
+}
+
+/* 행 2: 메시지(좌 50%) + 프로그레스바(우 50%) */
+.task-row2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  height: 14px;
+  overflow: hidden;
+}
+
+.task-msg {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.task-bar {
+  flex: 0 0 48%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.task-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #7aa2ff);
+  transition: width 0.25s ease;
+  border-radius: 2px;
+}
+
+.task-bar-indeterminate .task-bar-fill {
+  width: 35% !important;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+.task-error-line {
+  font-size: 0.7rem;
+  color: var(--danger);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
 }
 
 .generation-page .generation-layout {

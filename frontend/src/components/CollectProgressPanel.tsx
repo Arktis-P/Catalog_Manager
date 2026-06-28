@@ -95,7 +95,6 @@ export function RunningJobCard({
   const percent = getProgressPercent(job);
   const eta = formatEta(job);
 
-  // x / y 카운트
   const countParts: string[] = [];
   if (job.total > 0) {
     countParts.push(`${job.current.toLocaleString()} / ${job.total.toLocaleString()}`);
@@ -109,7 +108,6 @@ export function RunningJobCard({
 
   return (
     <div className="job-running-card">
-      {/* Row 1: 시리즈명 + 타입 + 취소 */}
       <div className="job-running-header">
         <span className="job-running-indicator" aria-hidden="true" />
         <strong className="job-running-series" title={job.series_tag}>
@@ -118,78 +116,35 @@ export function RunningJobCard({
         <div className="job-running-header-spacer" />
         <span className="job-type-label">{jobTypeLabel(job)}</span>
         {job.status === "running" && onPause ? (
-          <button
-            className="btn btn-small btn-ghost"
-            type="button"
-            aria-label="일시정지"
-            title="일시정지"
-            onClick={onPause}
-          >
-            ⏸
-          </button>
+          <button className="btn btn-small btn-ghost" type="button" aria-label="일시정지" title="일시정지" onClick={onPause}>⏸</button>
         ) : null}
         {job.status === "paused" && onResume ? (
-          <button
-            className="btn btn-small btn-ghost"
-            type="button"
-            aria-label="재개"
-            title="재개"
-            onClick={onResume}
-          >
-            ▶
-          </button>
+          <button className="btn btn-small btn-ghost" type="button" aria-label="재개" title="재개" onClick={onResume}>▶</button>
         ) : null}
         {onCancel ? (
-          <button
-            className="btn btn-small btn-ghost"
-            type="button"
-            aria-label="작업 취소"
-            onClick={onCancel}
-          >
-            ×
-          </button>
+          <button className="btn btn-small btn-ghost" type="button" aria-label="작업 취소" onClick={onCancel}>×</button>
         ) : null}
       </div>
-
-      {/* Row 2: 단계 배지 + 카운트 */}
       <div className="job-running-meta-row">
         <span className={phaseBadgeClass(job.phase)}>{phaseFullLabel(job.phase)}</span>
         <div className="job-running-meta-spacer" />
-        {countDisplay ? (
-          <span className="job-running-count">{countDisplay}</span>
-        ) : null}
+        {countDisplay ? <span className="job-running-count">{countDisplay}</span> : null}
         {percent !== null && job.total > 0 ? (
           <span className="job-running-pct-badge">{percent}%</span>
         ) : null}
       </div>
-
-      {/* Row 3: 프로그레스 바 */}
-      <div
-        className={`progress-bar job-running-bar${
-          percent === null ? " progress-bar-indeterminate" : ""
-        }`}
-      >
-        <div
-          className="progress-bar-fill"
-          style={percent !== null ? { width: `${percent}%` } : undefined}
-        />
+      <div className={`progress-bar job-running-bar${percent === null ? " progress-bar-indeterminate" : ""}`}>
+        <div className="progress-bar-fill" style={percent !== null ? { width: `${percent}%` } : undefined} />
       </div>
-
-      {/* Row 4: 상세 메시지 */}
       {job.message ? (
-        <div className="job-running-message" title={job.message}>
-          {job.message}
-        </div>
+        <div className="job-running-message" title={job.message}>{job.message}</div>
       ) : null}
-
-      {job.error ? (
-        <div className="progress-panel-error-line">{job.error}</div>
-      ) : null}
+      {job.error ? <div className="progress-panel-error-line">{job.error}</div> : null}
     </div>
   );
 }
 
-// ─── GlobalTaskBar용 컴팩트 1줄 ──────────────────────────────────────────────
+// ─── GlobalTaskBar용 고정 2행 레이아웃 ───────────────────────────────────────
 
 function CompactJobRow({
   job,
@@ -207,107 +162,65 @@ function CompactJobRow({
   const percent = getProgressPercent(job);
   const eta = formatEta(job);
 
-  const meta: string[] = [];
-  if (job.total > 0 && percent !== null && job.status !== "completed") {
-    meta.push(`${percent}%`);
-  }
+  const isActive = job.status === "running" || job.status === "paused";
+  const isDone = job.status === "completed" || job.status === "cancelled";
+
+  const metaParts: string[] = [];
+  if (isActive && percent !== null && job.total > 0) metaParts.push(`${percent}%`);
   if (job.status === "running" && job.job_type === "character_collect" && job.discovered > 0) {
-    meta.push(`${job.discovered}발견`);
+    metaParts.push(`${job.discovered}발견`);
   }
-  if (job.status === "running" && eta) {
-    meta.push(eta);
-  }
-  if (job.status === "completed" && job.job_type === "character_collect" && job.created > 0) {
-    meta.push(`+${job.created}`);
-  }
-  if (job.status === "completed" && job.job_type === "appearance_extract" && job.updated > 0) {
-    meta.push(`+${job.updated}`);
-  }
+  if (job.status === "running" && eta) metaParts.push(eta);
+  if (isDone && job.job_type === "character_collect" && job.created > 0) metaParts.push(`+${job.created}`);
+  if (isDone && job.job_type === "appearance_extract" && job.updated > 0) metaParts.push(`+${job.updated}`);
 
   return (
     <div
-      className={`progress-panel progress-panel-compact${
-        job.status === "failed" ? " progress-panel-error" : ""
-      }${
-        job.status === "paused" ? " progress-panel-paused" : ""
-      }${
-        job.status === "completed" || job.status === "cancelled"
-          ? " progress-panel-done"
-          : ""
-      }`}
+      className={`task-card${job.status === "failed" ? " task-card-error" : ""}${isDone ? " task-card-done" : ""}${job.status === "paused" ? " task-card-paused" : ""}`}
     >
-      <div className="progress-panel-compact-row">
+      {/* 행 1: 이름 · 배지 · 메타 · 버튼 */}
+      <div className="task-row1">
         {job.status === "running" ? (
-          <span className="job-running-indicator job-indicator-inline" aria-hidden="true" />
+          <span className="job-running-indicator task-dot" aria-hidden="true" />
+        ) : job.status === "paused" ? (
+          <span className="task-dot task-dot-paused" aria-hidden="true">⏸</span>
         ) : null}
-        {job.status === "paused" ? (
-          <span className="job-paused-indicator job-indicator-inline" aria-hidden="true" title="일시정지됨">⏸</span>
-        ) : null}
-        <strong className="progress-panel-series" title={job.series_tag}>
-          {job.series_tag}
-        </strong>
-        <span className="badge badge-compact badge-muted">
+        <strong className="task-name" title={job.series_tag}>{job.series_tag || "—"}</strong>
+        <span className="badge badge-compact badge-muted task-badge">
           {job.job_type === "appearance_extract" ? "외형" : "수집"}
         </span>
-        <span
-          className={
-            job.status === "running"
-              ? phaseBadgeClass(job.phase)
-              : "badge badge-compact"
-          }
-        >
-          {phaseShortLabel(job.status === "running" ? job.phase : job.status)}
+        <span className={isActive ? `${phaseBadgeClass(job.phase)} badge-compact` : "badge badge-compact"}>
+          {phaseShortLabel(isActive ? job.phase : job.status)}
         </span>
-        <span className="progress-panel-message-compact" title={job.message}>
-          {job.message}
-        </span>
-        {meta.length > 0 ? (
-          <span className="progress-panel-meta">{meta.join(" · ")}</span>
+        {metaParts.length > 0 ? (
+          <span className="task-meta">{metaParts.join(" · ")}</span>
         ) : null}
+        <div className="task-row1-spacer" />
         {job.status === "running" && onPause ? (
-          <button
-            className="btn btn-small btn-ghost"
-            type="button"
-            aria-label="일시정지"
-            title="일시정지"
-            onClick={onPause}
-          >
-            ⏸
-          </button>
+          <button className="btn btn-small btn-ghost task-btn" type="button" aria-label="일시정지" title="일시정지" onClick={onPause}>⏸</button>
         ) : null}
         {job.status === "paused" && onResume ? (
-          <button
-            className="btn btn-small btn-ghost"
-            type="button"
-            aria-label="재개"
-            title="재개"
-            onClick={onResume}
-          >
-            ▶
-          </button>
+          <button className="btn btn-small btn-ghost task-btn" type="button" aria-label="재개" title="재개" onClick={onResume}>▶</button>
         ) : null}
         {onAction ? (
-          <button
-            className="btn btn-small btn-ghost"
-            type="button"
-            aria-label={actionLabel}
-            onClick={onAction}
-          >
-            ×
-          </button>
+          <button className="btn btn-small btn-ghost task-btn" type="button" aria-label={actionLabel} onClick={onAction}>×</button>
         ) : null}
       </div>
-      {job.status === "running" && (
-        <div className={`progress-bar compact-progress-bar${percent === null ? " progress-bar-indeterminate" : ""}`}>
-          <div
-            className="progress-bar-fill"
-            style={percent !== null ? { width: `${percent}%` } : undefined}
-          />
+
+      {/* 행 2: 메시지(좌 50%) + 프로그레스바(우 50%) — 실행/정지 중에만 표시 */}
+      {isActive ? (
+        <div className="task-row2">
+          <span className="task-msg" title={job.message}>{job.message || ""}</span>
+          <div className={`task-bar${percent === null ? " task-bar-indeterminate" : ""}`}>
+            <div
+              className="task-bar-fill"
+              style={percent !== null ? { width: `${percent}%` } : undefined}
+            />
+          </div>
         </div>
-      )}
-      {job.error ? (
-        <div className="progress-panel-error-line">{job.error}</div>
       ) : null}
+
+      {job.error ? <div className="progress-panel-error-line task-error-line">{job.error}</div> : null}
     </div>
   );
 }
