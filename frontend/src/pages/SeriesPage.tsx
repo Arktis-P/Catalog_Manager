@@ -9,7 +9,6 @@ import { downloadTextFile } from "../utils/download";
 import { danbooruSeriesWikiUrl } from "../utils/danbooruLinks";
 import { normalizeSeriesTag } from "../utils/seriesNormalize";
 import { resolveSeriesStatus, seriesStatusBadgeClass } from "../utils/seriesStatus";
-import { useWikiPanel } from "../context/WikiPanelContext";
 
 type ModalMode = "create" | "edit";
 
@@ -70,8 +69,9 @@ export function SeriesPage() {
   const [expandedSubCandidateIds, setExpandedSubCandidateIds] = useState<Set<number>>(() => new Set());
   const [subCandidateCache, setSubCandidateCache] = useState<Map<number, Series[]>>(() => new Map());
   const [loadingCandidateIds, setLoadingCandidateIds] = useState<Set<number>>(() => new Set());
+  const expandedSubCandidateIdsRef = useRef<Set<number>>(new Set());
 
-  const { openWiki } = useWikiPanel();
+  const openWiki = (url: string) => window.open(url, "_blank");
 
   const pipelineRunningJobs = useMemo(
     () => collectJobs.filter((j) => j.status === "running"),
@@ -82,16 +82,27 @@ export function SeriesPage() {
     [collectJobs],
   );
 
+  const allCandidateItems = useMemo(() => {
+    const map = new Map<number, Series>();
+    for (const item of items) map.set(item.id, item);
+    for (const candidates of subCandidateCache.values()) {
+      for (const candidate of candidates) {
+        if (!map.has(candidate.id)) map.set(candidate.id, candidate);
+      }
+    }
+    return [...map.values()];
+  }, [items, subCandidateCache]);
+
   const mergeEligibleItems = useMemo(
-    () => items.filter((series) => isSeriesMergeEligible(series)),
-    [items],
+    () => allCandidateItems.filter((series) => isSeriesMergeEligible(series)),
+    [allCandidateItems],
   );
 
   const selectableItems = useMemo(() => items.filter((series) => isSeriesSelectable(series)), [items]);
 
   const selectedCollectTargets = useMemo(
-    () => sortSeriesByPriority(items.filter((item) => selectedSeriesIds.has(item.id))),
-    [items, selectedSeriesIds],
+    () => sortSeriesByPriority(allCandidateItems.filter((item) => selectedSeriesIds.has(item.id))),
+    [allCandidateItems, selectedSeriesIds],
   );
 
   const hiddenChildCount = useMemo(
@@ -143,6 +154,17 @@ export function SeriesPage() {
       setItems(seriesResponse.items);
       setTotal(seriesResponse.total);
       setStatuses(statusList);
+
+      // 펼쳐진 정규화 후보 목록 갱신
+      const expandedIds = expandedSubCandidateIdsRef.current;
+      if (expandedIds.size > 0) {
+        for (const id of expandedIds) {
+          const series = seriesResponse.items.find((item) => item.id === id);
+          if (series) {
+            void fetchSubCandidates(series);
+          }
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load series");
     } finally {
@@ -216,6 +238,10 @@ export function SeriesPage() {
     });
     autoExpandedRef.current = fingerprint;
   }, [search, items]);
+
+  useEffect(() => {
+    expandedSubCandidateIdsRef.current = expandedSubCandidateIds;
+  }, [expandedSubCandidateIds]);
 
   useEffect(() => {
     void api
@@ -443,25 +469,13 @@ export function SeriesPage() {
     });
   };
 
-  const toggleSubCandidates = async (series: Series) => {
+  const fetchSubCandidates = async (series: Series) => {
     const id = series.id;
-    if (expandedSubCandidateIds.has(id)) {
-      setExpandedSubCandidateIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      return;
-    }
-    setExpandedSubCandidateIds((prev) => new Set(prev).add(id));
-    if (subCandidateCache.has(id)) return;
-
     const normalized = normalizeSeriesTag(series.series_tag);
     if (!normalized) {
       setSubCandidateCache((prev) => new Map(prev).set(id, []));
       return;
     }
-
     setLoadingCandidateIds((prev) => new Set(prev).add(id));
     try {
       const result = await api.listSeries({ search: series.series_tag, limit: 200 });
@@ -480,6 +494,21 @@ export function SeriesPage() {
         return next;
       });
     }
+  };
+
+  const toggleSubCandidates = async (series: Series) => {
+    const id = series.id;
+    if (expandedSubCandidateIds.has(id)) {
+      setExpandedSubCandidateIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      return;
+    }
+    setExpandedSubCandidateIds((prev) => new Set(prev).add(id));
+    if (subCandidateCache.has(id)) return;
+    await fetchSubCandidates(series);
   };
 
   const openMergeModal = (series: Series) => {
@@ -1200,7 +1229,12 @@ export function SeriesPage() {
                                             className="btn btn-small btn-primary"
                                             type="button"
                                             disabled={isProcessingSeries(candidate.id) || danbooruStatus?.ready === false}
-                                            onClick={() => void startCollect(candidate.id)}
+                                            title={
+                                              selectedSeriesIds.has(candidate.id) && selectedCollectTargets.length > 1
+                                                ? `선택한 ${selectedCollectTargets.length}개 시리즈 수집 (priority 순)`
+                                                : undefined
+                                            }
+                                            onClick={() => void handleCollectCharacters(candidate)}
                                           >
                                             {isCollectingSeries(candidate.id) ? "Collecting..." : "Collect"}
                                           </button>

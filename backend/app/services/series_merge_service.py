@@ -121,10 +121,17 @@ class SeriesMergeService:
             raise ValueError("Series with sub-series cannot be merged into another series.")
 
     @staticmethod
-    def _rank_recommendations(anchor: Series, candidates: list[Series], *, limit: int) -> list[Series]:
-        def sort_key(item: Series) -> tuple[float, int, str]:
+    def _rank_recommendations(
+        anchor: Series,
+        candidates: list[Series],
+        *,
+        limit: int,
+        has_children_ids: set[int] | None = None,
+    ) -> list[Series]:
+        def sort_key(item: Series) -> tuple[float, int, int, str]:
             sim = similarity_score(anchor, item)
-            return (-sim, -item.post_count, item.series_tag.lower())
+            has_children = 1 if (has_children_ids and item.id in has_children_ids) else 0
+            return (-sim, -has_children, -item.post_count, item.series_tag.lower())
 
         ranked = sorted(candidates, key=sort_key)
         similar = [item for item in ranked if similarity_score(anchor, item) > 0]
@@ -240,8 +247,21 @@ class SeriesMergeService:
                 if row[0] is not None
             }
             candidates = [item for item in candidates if item.id not in series_with_children]
+            return self._rank_recommendations(anchor, candidates, limit=limit)
 
-        return self._rank_recommendations(anchor, candidates, limit=limit)
+        # parent mode: 이미 하위 시리즈를 가진 시리즈를 우선 노출
+        candidate_ids = [c.id for c in candidates]
+        has_children_ids: set[int] = set()
+        if candidate_ids:
+            has_children_ids = {
+                row[0]
+                for row in self.db.query(Series.parent_series_id)
+                .filter(Series.parent_series_id.in_(candidate_ids))
+                .distinct()
+                .all()
+                if row[0] is not None
+            }
+        return self._rank_recommendations(anchor, candidates, limit=limit, has_children_ids=has_children_ids)
 
     def list_parent_candidates(
         self,
