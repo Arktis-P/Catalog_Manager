@@ -1196,6 +1196,14 @@ export function SeriesPage() {
                                             checked={selectedSeriesIds.has(candidate.id)}
                                             onChange={() => toggleSeriesSelection(candidate.id)}
                                           />
+                                          <button
+                                            className="btn btn-small btn-primary"
+                                            type="button"
+                                            disabled={isProcessingSeries(candidate.id) || danbooruStatus?.ready === false}
+                                            onClick={() => void startCollect(candidate.id)}
+                                          >
+                                            {isCollectingSeries(candidate.id) ? "Collecting..." : "Collect"}
+                                          </button>
                                           {isSeriesMergeEligible(candidate) ? (
                                             <button
                                               className="btn btn-small"

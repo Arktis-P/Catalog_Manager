@@ -236,12 +236,28 @@ button,
 }
 
 .right-sidebar-wiki {
-  flex: 0 0 48%;
-  min-height: 180px;
+  flex-shrink: 0;
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
+}
+
+.wiki-panel-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 5px;
+  cursor: ns-resize;
+  z-index: 10;
+}
+
+.wiki-panel-resize-handle:hover,
+.wiki-panel-resize-handle:active {
+  background: var(--accent);
+  opacity: 0.4;
 }
 
 .wiki-panel-header {

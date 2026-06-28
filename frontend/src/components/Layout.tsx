@@ -16,6 +16,9 @@ const navItems = [
 const DEFAULT_SIDEBAR_WIDTH = 450;
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 900;
+const DEFAULT_WIKI_HEIGHT = 320;
+const MIN_WIKI_HEIGHT = 120;
+const MAX_WIKI_HEIGHT = 900;
 
 function proxyUrl(url: string): string {
   return `/api/wiki-proxy?url=${encodeURIComponent(url)}`;
@@ -26,9 +29,13 @@ function LayoutInner() {
     useWikiPanel();
 
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
+  const [wikiHeight, setWikiHeight] = useState(DEFAULT_WIKI_HEIGHT);
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(DEFAULT_SIDEBAR_WIDTH);
+  const isWikiDragging = useRef(false);
+  const wikiDragStartY = useRef(0);
+  const wikiDragStartHeight = useRef(DEFAULT_WIKI_HEIGHT);
 
   const onResizeMouseDown = useCallback((e: React.MouseEvent) => {
     isDragging.current = true;
@@ -37,14 +44,27 @@ function LayoutInner() {
     e.preventDefault();
   }, [sidebarWidth]);
 
+  const onWikiResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    isWikiDragging.current = true;
+    wikiDragStartY.current = e.clientY;
+    wikiDragStartHeight.current = wikiHeight;
+    e.preventDefault();
+  }, [wikiHeight]);
+
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
-      if (!isDragging.current) return;
-      const delta = dragStartX.current - e.clientX;
-      const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, dragStartWidth.current + delta));
-      setSidebarWidth(newWidth);
+      if (isDragging.current) {
+        const delta = dragStartX.current - e.clientX;
+        const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, dragStartWidth.current + delta));
+        setSidebarWidth(newWidth);
+      }
+      if (isWikiDragging.current) {
+        const delta = wikiDragStartY.current - e.clientY;
+        const newHeight = Math.min(MAX_WIKI_HEIGHT, Math.max(MIN_WIKI_HEIGHT, wikiDragStartHeight.current + delta));
+        setWikiHeight(newHeight);
+      }
     };
-    const onMouseUp = () => { isDragging.current = false; };
+    const onMouseUp = () => { isDragging.current = false; isWikiDragging.current = false; };
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     return () => {
@@ -99,7 +119,8 @@ function LayoutInner() {
             <GlobalTaskBar />
           </div>
           {wikiUrl ? (
-            <div className="right-sidebar-wiki">
+            <div className="right-sidebar-wiki" style={{ height: wikiHeight }}>
+              <div className="wiki-panel-resize-handle" onMouseDown={onWikiResizeMouseDown} />
               <div className="wiki-panel-header">
                 <button
                   className="btn btn-ghost wiki-nav-btn"
