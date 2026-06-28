@@ -74,12 +74,30 @@ export function GlobalTaskBar() {
 
   const lastError = collectError || generationError;
 
+  const queuedCount = useMemo(
+    () => activeJobs.filter((j) => j.status === "queued").length,
+    [activeJobs],
+  );
+
   if (activeJobs.length === 0 && !lastError) {
     return null;
   }
 
   return (
     <section className="global-task-bar" aria-label="Background tasks">
+      {/* 고정 헤더: 항상 보임 */}
+      <div className="task-summary-bar">
+        <span className="task-summary-count">
+          대기 {queuedCount} / 전체 {activeJobs.length}
+        </span>
+        {dismissibleJobs.length > 0 ? (
+          <button className="btn btn-small" type="button" onClick={dismissAllCompleted}>
+            완료 지우기 ({dismissibleJobs.length})
+          </button>
+        ) : null}
+      </div>
+
+      {/* 스크롤 영역: 작업 목록 */}
       <div className="global-task-bar-inner">
         {lastError ? (
           <div className="error-banner global-task-error">
@@ -96,54 +114,45 @@ export function GlobalTaskBar() {
             </button>
           </div>
         ) : null}
-        {activeJobs.length > 0 ? (
-          <div className="global-task-bar-jobs">
-            {dismissibleJobs.length > 0 ? (
-              <div className="global-task-bar-actions">
-                <button className="btn btn-small" type="button" onClick={dismissAllCompleted}>
-                  완료된 작업 모두 지우기 ({dismissibleJobs.length})
-                </button>
-              </div>
-            ) : null}
-            {activeJobs.map((job) =>
-              job.job_type === "image_generation" ? (
-                <GenerationProgressPanel
-                  key={job.job_id}
-                  job={job}
-                  onCancel={
-                    job.status === "queued" || job.status === "running" || job.status === "paused"
-                      ? () => void cancelJob(job.job_id)
-                      : undefined
-                  }
-                  onPause={job.status === "running" ? () => void pauseGenerationJob(job.job_id) : undefined}
-                  onResume={job.status === "paused" ? () => void resumeGenerationJob(job.job_id) : undefined}
-                  onDismiss={
-                    job.status === "completed" || job.status === "failed" || job.status === "cancelled"
-                      ? () => dismissGenerationJob(job.job_id)
-                      : undefined
-                  }
-                />
-              ) : (
-                <CollectProgressPanel
-                  key={job.job_id}
-                  job={job}
-                  onCancel={
-                    job.status === "queued" || job.status === "running" || job.status === "paused"
-                      ? () => void cancelCollectJob(job.job_id)
-                      : undefined
-                  }
-                  onPause={job.status === "running" ? () => void pauseCollectJob(job.job_id) : undefined}
-                  onResume={job.status === "paused" ? () => void resumeCollectJob(job.job_id) : undefined}
-                  onDismiss={
-                    job.status === "completed" || job.status === "failed" || job.status === "cancelled"
-                      ? () => dismissCollectJob(job.job_id)
-                      : undefined
-                  }
-                />
-              ),
-            )}
-          </div>
-        ) : null}
+        <div className="global-task-bar-jobs">
+          {activeJobs.map((job) =>
+            job.job_type === "image_generation" ? (
+              <GenerationProgressPanel
+                key={job.job_id}
+                job={job}
+                onCancel={
+                  job.status === "queued" || job.status === "running" || job.status === "paused"
+                    ? () => void cancelJob(job.job_id)
+                    : undefined
+                }
+                onPause={job.status === "running" ? () => void pauseGenerationJob(job.job_id) : undefined}
+                onResume={job.status === "paused" ? () => void resumeGenerationJob(job.job_id) : undefined}
+                onDismiss={
+                  job.status === "completed" || job.status === "failed" || job.status === "cancelled"
+                    ? () => dismissGenerationJob(job.job_id)
+                    : undefined
+                }
+              />
+            ) : (
+              <CollectProgressPanel
+                key={job.job_id}
+                job={job}
+                onCancel={
+                  job.status === "queued" || job.status === "running" || job.status === "paused"
+                    ? () => void cancelCollectJob(job.job_id)
+                    : undefined
+                }
+                onPause={job.status === "running" ? () => void pauseCollectJob(job.job_id) : undefined}
+                onResume={job.status === "paused" ? () => void resumeCollectJob(job.job_id) : undefined}
+                onDismiss={
+                  job.status === "completed" || job.status === "failed" || job.status === "cancelled"
+                    ? () => dismissCollectJob(job.job_id)
+                    : undefined
+                }
+              />
+            ),
+          )}
+        </div>
       </div>
     </section>
   );

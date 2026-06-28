@@ -198,6 +198,39 @@ button,
 .right-sidebar-tasks {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.task-summary-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.task-summary-count {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.global-task-bar {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.global-task-bar-inner {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 8px;
 }
@@ -1448,16 +1481,6 @@ button,
 .btn-ghost:hover {
   color: var(--text);
   background: var(--bg-hover);
-}
-
-.global-task-bar {
-  background: transparent;
-}
-
-.global-task-bar-inner {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 
 /* .global-task-bar-jobs → 아래 pipeline 섹션에서 재정의 */
