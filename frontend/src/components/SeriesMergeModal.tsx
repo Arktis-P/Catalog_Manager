@@ -78,10 +78,15 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
       setError(null);
       try {
         const excludeIds = effectiveMode === "absorb_child" ? [anchorSeries.id] : undefined;
+        const bulkSourceIds =
+          isBulkMerge && effectiveMode === "into_parent"
+            ? mergeableSeries.map((s) => s.id)
+            : undefined;
         const response = await api.listSeriesMergeCandidates(anchorSeries.id, {
           mode: effectiveMode === "into_parent" ? "parent" : "child",
           search: search || undefined,
           exclude_ids: excludeIds,
+          source_ids: bulkSourceIds,
           limit: search ? 100 : 50,
         });
         if (cancelled) return;
@@ -164,15 +169,29 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
     };
   }, [selectedId, effectiveMode, childIdsForMerge, anchorSeries.id, selectedCandidate]);
 
+  const isSubmitDisabled =
+    !selectedId ||
+    previews.length === 0 ||
+    submitting ||
+    (selectedCandidate ? !selectedCandidate.mergeable : false);
+
   const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== "Enter" || candidates.length === 0) {
       return;
     }
     event.preventDefault();
+    event.stopPropagation();
     const exact = candidates.find(
       (candidate) => candidate.series_tag.toLowerCase() === search.trim().toLowerCase(),
     );
     setSelectedId(exact?.id ?? candidates[0]?.id ?? null);
+  };
+
+  const handleModalKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Enter" && !isSubmitDisabled) {
+      event.preventDefault();
+      void handleSubmit();
+    }
   };
 
   useEffect(() => {
@@ -244,7 +263,7 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
 
   return (
     <div className="modal-backdrop" onClick={handleClose}>
-      <div className="modal modal-wide modal-merge" onClick={(event) => event.stopPropagation()}>
+      <div className="modal modal-wide modal-merge" onClick={(event) => event.stopPropagation()} onKeyDown={handleModalKeyDown}>
         <div className="modal-header-row">
           <div className="modal-header-copy">
             <h2 className="modal-title">{title}</h2>
@@ -308,6 +327,7 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
               onKeyDown={handleSearchKeyDown}
               placeholder="series tag 입력 (예: fate_(series)) 후 Enter 또는 목록에서 선택"
               autoComplete="off"
+              autoFocus
             />
           </div>
         </div>
@@ -449,12 +469,7 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
             <button
               className="btn btn-primary"
               type="button"
-              disabled={
-                !selectedId ||
-                previews.length === 0 ||
-                submitting ||
-                (selectedCandidate ? !selectedCandidate.mergeable : false)
-              }
+              disabled={isSubmitDisabled}
               onClick={() => void handleSubmit()}
             >
               {submitting

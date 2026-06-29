@@ -51,5 +51,5 @@ def test_recommendations_prioritize_similarity() -> None:
         _series("unrelated_series", post_count=99999, series_id=1),
         _series("fate_(series)", post_count=1000, series_id=2),
     ]
-    ranked = SeriesMergeService._rank_recommendations(anchor, candidates, limit=10)
+    ranked = SeriesMergeService._rank_recommendations([anchor], candidates, limit=10)
     assert ranked[0].series_tag == "fate_(series)"

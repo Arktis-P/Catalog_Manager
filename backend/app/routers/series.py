@@ -16,7 +16,7 @@ from app.schemas.series import (
     SeriesUnmergeResponse,
     SeriesUpdate,
 )
-from app.services.series_merge_service import SeriesMergeService, similarity_score
+from app.services.series_merge_service import SeriesMergeService, max_similarity_score, similarity_score
 from app.services.series_service import SeriesService
 
 router = APIRouter(prefix="/series", tags=["series"])
@@ -70,6 +70,10 @@ def list_merge_candidates(
         default=None,
         description="Comma-separated series IDs to exclude from candidates",
     ),
+    source_ids: str | None = Query(
+        default=None,
+        description="Comma-separated source series IDs for multi-anchor similarity (bulk merge)",
+    ),
     service: SeriesService = Depends(get_series_service),
     merge_service: SeriesMergeService = Depends(get_merge_service),
 ):
@@ -84,14 +88,25 @@ def list_merge_candidates(
             if part.isdigit():
                 excluded.add(int(part))
 
+    source_series_list = [series]
+    if source_ids:
+        for part in source_ids.split(","):
+            part = part.strip()
+            if part.isdigit():
+                sid = int(part)
+                if sid != series_id:
+                    s = service.get_series(sid)
+                    if s:
+                        source_series_list.append(s)
+
     if mode == "parent":
         candidates = merge_service.list_parent_candidates(
             series,
             search=search,
             limit=limit,
             exclude_ids=excluded or None,
+            source_series=source_series_list if len(source_series_list) > 1 else None,
         )
-        anchor = series
     else:
         candidates = merge_service.list_child_candidates(
             series,
@@ -99,7 +114,6 @@ def list_merge_candidates(
             limit=limit,
             exclude_ids=excluded or None,
         )
-        anchor = series
 
     counts = service.get_character_counts([item.id for item in candidates])
     candidate_role = "parent" if mode == "parent" else "child"
@@ -112,7 +126,7 @@ def list_merge_candidates(
                 status=item.status,
                 post_count=item.post_count,
                 character_count=counts.get(item.id, 0),
-                similarity_score=similarity_score(anchor, item),
+                similarity_score=max_similarity_score(source_series_list, item),
                 mergeable=merge_service.candidate_is_mergeable(
                     item,
                     role=candidate_role,

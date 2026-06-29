@@ -84,6 +84,12 @@ def similarity_score(left: Series, right: Series) -> float:
     return len(overlap) / max(len(left_tokens), len(right_tokens))
 
 
+def max_similarity_score(anchors: list[Series], target: Series) -> float:
+    if not anchors:
+        return 0.0
+    return max(similarity_score(a, target) for a in anchors)
+
+
 class SeriesMergeService:
     def __init__(self, db: Session):
         self.db = db
@@ -122,19 +128,19 @@ class SeriesMergeService:
 
     @staticmethod
     def _rank_recommendations(
-        anchor: Series,
+        anchors: list[Series],
         candidates: list[Series],
         *,
         limit: int,
         has_children_ids: set[int] | None = None,
     ) -> list[Series]:
         def sort_key(item: Series) -> tuple[float, int, int, str]:
-            sim = similarity_score(anchor, item)
+            sim = max_similarity_score(anchors, item)
             has_children = 1 if (has_children_ids and item.id in has_children_ids) else 0
             return (-sim, -has_children, -item.post_count, item.series_tag.lower())
 
         ranked = sorted(candidates, key=sort_key)
-        similar = [item for item in ranked if similarity_score(anchor, item) > 0]
+        similar = [item for item in ranked if max_similarity_score(anchors, item) > 0]
         return similar[:limit] if similar else ranked[:limit]
 
     @staticmethod
@@ -211,6 +217,33 @@ class SeriesMergeService:
         ranked = self._rank_search_results(filtered.limit(limit).all(), limit=limit)
         return self._inject_exact_match(ranked, exact, limit=limit)
 
+    def _fetch_text_similar(self, anchors: list[Series], *, known_ids: set[int]) -> list[Series]:
+        """top-N 풀에 포함되지 않은 이름 유사 시리즈를 추가로 조회한다."""
+        tokens: set[str] = set()
+        for anchor in anchors:
+            tokens |= _tag_tokens(anchor.series_tag)
+            if anchor.display_name:
+                tokens |= _tag_tokens(anchor.display_name)
+        top_tokens = sorted(tokens, key=len, reverse=True)[:4]
+        if not top_tokens:
+            return []
+
+        found: dict[int, Series] = {}
+        for token in top_tokens:
+            pattern = f"%{_escape_like_pattern(token)}%"
+            base = self.db.query(Series).filter(
+                Series.parent_series_id.is_(None),
+                or_(
+                    Series.series_tag.ilike(pattern, escape="\\"),
+                    Series.display_name.ilike(pattern, escape="\\"),
+                ),
+            )
+            if known_ids:
+                base = base.filter(~Series.id.in_(known_ids))
+            for row in base.limit(100).all():
+                found[row.id] = row
+        return list(found.values())
+
     def _list_candidates(
         self,
         anchor: Series,
@@ -219,7 +252,9 @@ class SeriesMergeService:
         search: str | None = None,
         limit: int = 50,
         exclude_ids: set[int] | None = None,
+        source_series: list[Series] | None = None,
     ) -> list[Series]:
+        anchors = source_series if source_series else [anchor]
         mergeable_only = role == "child"
         query = self._base_candidate_query(anchor, exclude_ids=exclude_ids, mergeable_only=mergeable_only)
 
@@ -234,7 +269,7 @@ class SeriesMergeService:
             return self._search_candidates(query, search=search, limit=limit, exact=exact)
 
         ordered = query.order_by(Series.post_count.desc(), Series.series_tag.asc())
-        pool_size = max(limit * 8, 200)
+        pool_size = max(limit * 8, 400)
         candidates = ordered.limit(pool_size).all()
 
         if role == "child":
@@ -247,21 +282,26 @@ class SeriesMergeService:
                 if row[0] is not None
             }
             candidates = [item for item in candidates if item.id not in series_with_children]
-            return self._rank_recommendations(anchor, candidates, limit=limit)
+            return self._rank_recommendations(anchors, candidates, limit=limit)
 
-        # parent mode: 이미 하위 시리즈를 가진 시리즈를 우선 노출
-        candidate_ids = [c.id for c in candidates]
+        # parent mode: 포스트 수 상위 풀 + 이름 유사 시리즈로 풀 확장
+        pool_ids: set[int] = {c.id for c in candidates}
+        exclude_for_text = pool_ids | (exclude_ids or set()) | {anchor.id}
+        extra = self._fetch_text_similar(anchors, known_ids=exclude_for_text)
+        all_candidates = candidates + extra
+
+        all_candidate_ids = [c.id for c in all_candidates]
         has_children_ids: set[int] = set()
-        if candidate_ids:
+        if all_candidate_ids:
             has_children_ids = {
                 row[0]
                 for row in self.db.query(Series.parent_series_id)
-                .filter(Series.parent_series_id.in_(candidate_ids))
+                .filter(Series.parent_series_id.in_(all_candidate_ids))
                 .distinct()
                 .all()
                 if row[0] is not None
             }
-        return self._rank_recommendations(anchor, candidates, limit=limit, has_children_ids=has_children_ids)
+        return self._rank_recommendations(anchors, all_candidates, limit=limit, has_children_ids=has_children_ids)
 
     def list_parent_candidates(
         self,
@@ -270,6 +310,7 @@ class SeriesMergeService:
         search: str | None = None,
         limit: int = 50,
         exclude_ids: set[int] | None = None,
+        source_series: list[Series] | None = None,
     ) -> list[Series]:
         return self._list_candidates(
             child,
@@ -277,6 +318,7 @@ class SeriesMergeService:
             search=search,
             limit=limit,
             exclude_ids=exclude_ids,
+            source_series=source_series,
         )
 
     def list_child_candidates(
