@@ -471,14 +471,20 @@ export function SeriesPage() {
 
   const fetchSubCandidates = async (series: Series) => {
     const id = series.id;
-    const normalized = normalizeSeriesTag(series.series_tag);
+    // Strip _(series) or (series) suffix before normalizing so that e.g.
+    // "fate_(series)" searches by "fate" and finds "fate_stay_night_(series)" etc.
+    const tagBase = series.series_tag
+      .replace(/[_\s]*\(series\)\s*$/i, "")
+      .replace(/[_\s]+$/, "");
+    const searchBase = tagBase || series.series_tag;
+    const normalized = normalizeSeriesTag(searchBase);
     if (!normalized) {
       setSubCandidateCache((prev) => new Map(prev).set(id, []));
       return;
     }
     setLoadingCandidateIds((prev) => new Set(prev).add(id));
     try {
-      const result = await api.listSeries({ search: series.series_tag, limit: 200 });
+      const result = await api.listSeries({ search: searchBase, limit: 200 });
       const candidates = result.items.filter(
         (candidate) =>
           candidate.id !== id &&

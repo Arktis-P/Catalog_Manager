@@ -207,11 +207,11 @@ class SeriesMergeService:
         limit: int,
         exact: Series | None,
     ) -> list[Series]:
-        pattern = f"%{_escape_like_pattern(search.strip())}%"
+        search_lower = search.strip().lower()
         filtered = query.filter(
             or_(
-                Series.series_tag.ilike(pattern, escape="\\"),
-                Series.display_name.ilike(pattern, escape="\\"),
+                func.instr(func.lower(Series.series_tag), search_lower) > 0,
+                func.instr(func.lower(Series.display_name), search_lower) > 0,
             )
         ).order_by(Series.post_count.desc(), Series.series_tag.asc())
         ranked = self._rank_search_results(filtered.limit(limit).all(), limit=limit)
@@ -230,12 +230,12 @@ class SeriesMergeService:
 
         found: dict[int, Series] = {}
         for token in top_tokens:
-            pattern = f"%{_escape_like_pattern(token)}%"
+            token_lower = token.lower()
             base = self.db.query(Series).filter(
                 Series.parent_series_id.is_(None),
                 or_(
-                    Series.series_tag.ilike(pattern, escape="\\"),
-                    Series.display_name.ilike(pattern, escape="\\"),
+                    func.instr(func.lower(Series.series_tag), token_lower) > 0,
+                    func.instr(func.lower(Series.display_name), token_lower) > 0,
                 ),
             )
             if known_ids:
