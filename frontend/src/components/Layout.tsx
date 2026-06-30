@@ -4,6 +4,37 @@ import { BackendGate } from "./BackendGate";
 import { GlobalTaskBar } from "./GlobalTaskBar";
 import { ToastContainer } from "./ToastContainer";
 
+function BackendStatusDot() {
+  const [alive, setAlive] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const check = async () => {
+      try {
+        const res = await fetch("/api/health", { signal: AbortSignal.timeout(2000) });
+        if (mounted) setAlive(res.ok);
+      } catch {
+        if (mounted) setAlive(false);
+      }
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), 10_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  if (alive === null) return null;
+  return (
+    <span
+      className={`backend-status-dot ${alive ? "backend-status-dot-ok" : "backend-status-dot-err"}`}
+      title={alive ? "백엔드 연결됨" : "백엔드 연결 끊김"}
+      aria-label={alive ? "백엔드 연결됨" : "백엔드 연결 끊김"}
+    />
+  );
+}
+
 const navItems = [
   { to: "/", label: "Catalog", end: true },
   { to: "/review", label: "Review" },
@@ -54,6 +85,7 @@ export function Layout() {
             <div className="brand">
               <span className="brand-title">Catalogue Manager</span>
               <span className="brand-subtitle">Danbooru character catalog desktop app</span>
+              <BackendStatusDot />
             </div>
             <nav className="nav-links">
               {navItems.map((item) => (

@@ -469,6 +469,20 @@ export function SeriesPage() {
     });
   };
 
+  const toggleAllSubCandidates = (seriesId: number) => {
+    const candidates = subCandidateCache.get(seriesId) ?? [];
+    const allSelected = candidates.length > 0 && candidates.every((c) => selectedSeriesIds.has(c.id));
+    setSelectedSeriesIds((current) => {
+      const next = new Set(current);
+      if (allSelected) {
+        for (const c of candidates) next.delete(c.id);
+      } else {
+        for (const c of candidates) next.add(c.id);
+      }
+      return next;
+    });
+  };
+
   const fetchSubCandidates = async (series: Series) => {
     const id = series.id;
     // Strip _(series) or (series) suffix before normalizing so that e.g.
@@ -488,7 +502,7 @@ export function SeriesPage() {
       const candidates = result.items.filter(
         (candidate) =>
           candidate.id !== id &&
-          normalizeSeriesTag(candidate.series_tag).startsWith(normalized),
+          normalizeSeriesTag(candidate.series_tag).includes(normalized),
       );
       setSubCandidateCache((prev) => new Map(prev).set(id, candidates));
     } catch {
@@ -526,6 +540,33 @@ export function SeriesPage() {
     setMergingSeriesList([series]);
   };
 
+
+  const keyHandlerStateRef = useRef({ loadSeries, mergeEligibleItems, selectedSeriesIds, mergingSeriesList });
+  useEffect(() => {
+    keyHandlerStateRef.current = { loadSeries, mergeEligibleItems, selectedSeriesIds, mergingSeriesList };
+  });
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable;
+      if (event.key === "F5") {
+        event.preventDefault();
+        void keyHandlerStateRef.current.loadSeries();
+        return;
+      }
+      if (!isInput && (event.key === "m" || event.key === "M")) {
+        if (keyHandlerStateRef.current.mergingSeriesList) return;
+        const selected = keyHandlerStateRef.current.mergeEligibleItems.filter(
+          (item) => keyHandlerStateRef.current.selectedSeriesIds.has(item.id),
+        );
+        if (selected.length > 0) {
+          setMergingSeriesList(selected);
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const [autoGenerate, setAutoGenerate] = useState(false);
 
@@ -953,7 +994,27 @@ export function SeriesPage() {
                 <div className="series-pagination-controls">
                   <button className="btn btn-small" type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage(1)}>«</button>
                   <button className="btn btn-small" type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)}>‹</button>
-                  <span className="series-pagination-page">{currentPage} / {Math.ceil(total / pageSize)}</span>
+                  <input
+                    key={currentPage}
+                    className="series-pagination-page-input"
+                    type="number"
+                    min={1}
+                    max={Math.ceil(total / pageSize)}
+                    defaultValue={currentPage}
+                    aria-label="페이지 번호 입력"
+                    title={`현재 ${currentPage} / 전체 ${Math.ceil(total / pageSize)} 페이지`}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const val = parseInt(e.currentTarget.value, 10);
+                        if (!isNaN(val)) setCurrentPage(Math.max(1, Math.min(val, Math.ceil(total / pageSize))));
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const val = parseInt(e.currentTarget.value, 10);
+                      if (!isNaN(val)) setCurrentPage(Math.max(1, Math.min(val, Math.ceil(total / pageSize))));
+                    }}
+                  />
+                  <span className="series-pagination-page-total">/ {Math.ceil(total / pageSize)}</span>
                   <button className="btn btn-small" type="button" disabled={currentPage >= Math.ceil(total / pageSize)} onClick={() => setCurrentPage((p) => p + 1)}>›</button>
                   <button className="btn btn-small" type="button" disabled={currentPage >= Math.ceil(total / pageSize)} onClick={() => setCurrentPage(Math.ceil(total / pageSize))}>»</button>
                 </div>
@@ -1199,6 +1260,20 @@ export function SeriesPage() {
                           ) : (subCandidateCache.get(series.id) ?? []).length === 0 ? (
                             <span className="series-sub-candidates-empty">정규화 검색 결과 없음</span>
                           ) : (
+                            <>
+                            <div className="series-sub-candidates-header">
+                              <label className="series-sub-candidates-select-all">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    (subCandidateCache.get(series.id) ?? []).length > 0 &&
+                                    (subCandidateCache.get(series.id) ?? []).every((c) => selectedSeriesIds.has(c.id))
+                                  }
+                                  onChange={() => toggleAllSubCandidates(series.id)}
+                                />
+                                전체 선택
+                              </label>
+                            </div>
                             <table className="data-table series-sub-candidates-table">
                               <tbody>
                                 {(subCandidateCache.get(series.id) ?? []).map((candidate) => {
@@ -1260,6 +1335,7 @@ export function SeriesPage() {
                                 })}
                               </tbody>
                             </table>
+                            </>
                           )}
                         </td>
                       </tr>
@@ -1277,7 +1353,27 @@ export function SeriesPage() {
                 <div className="series-pagination-controls">
                   <button className="btn btn-small" type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage(1)}>«</button>
                   <button className="btn btn-small" type="button" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)}>‹</button>
-                  <span className="series-pagination-page">{currentPage} / {Math.ceil(total / pageSize)}</span>
+                  <input
+                    key={currentPage}
+                    className="series-pagination-page-input"
+                    type="number"
+                    min={1}
+                    max={Math.ceil(total / pageSize)}
+                    defaultValue={currentPage}
+                    aria-label="페이지 번호 입력"
+                    title={`현재 ${currentPage} / 전체 ${Math.ceil(total / pageSize)} 페이지`}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const val = parseInt(e.currentTarget.value, 10);
+                        if (!isNaN(val)) setCurrentPage(Math.max(1, Math.min(val, Math.ceil(total / pageSize))));
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const val = parseInt(e.currentTarget.value, 10);
+                      if (!isNaN(val)) setCurrentPage(Math.max(1, Math.min(val, Math.ceil(total / pageSize))));
+                    }}
+                  />
+                  <span className="series-pagination-page-total">/ {Math.ceil(total / pageSize)}</span>
                   <button className="btn btn-small" type="button" disabled={currentPage >= Math.ceil(total / pageSize)} onClick={() => setCurrentPage((p) => p + 1)}>›</button>
                   <button className="btn btn-small" type="button" disabled={currentPage >= Math.ceil(total / pageSize)} onClick={() => setCurrentPage(Math.ceil(total / pageSize))}>»</button>
                 </div>

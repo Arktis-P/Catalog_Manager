@@ -45,6 +45,12 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
     [candidates, selectedId],
   );
 
+  const displayCandidates = useMemo(() => {
+    const seriesTagged = candidates.filter((c) => /\(series\)/i.test(c.series_tag));
+    const rest = candidates.filter((c) => !/\(series\)/i.test(c.series_tag));
+    return [...seriesTagged, ...rest];
+  }, [candidates]);
+
   const childIdsForMerge = useMemo(() => {
     if (effectiveMode === "into_parent") {
       if (!selectedId) {
@@ -181,6 +187,12 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
     }
     event.preventDefault();
     event.stopPropagation();
+    // 이미 병합 가능한 상태라면 바로 병합 실행
+    if (!isSubmitDisabled) {
+      void handleSubmit();
+      return;
+    }
+    // 아니면 정확히 일치하는 후보 또는 첫 번째 후보를 선택
     const exact = candidates.find(
       (candidate) => candidate.series_tag.toLowerCase() === search.trim().toLowerCase(),
     );
@@ -346,7 +358,7 @@ export function SeriesMergeModal({ seriesList, onClose, onMerged }: SeriesMergeM
                   검색 조건에 맞는 시리즈가 없습니다. series tag를 정확히 입력해 보세요.
                 </div>
               ) : (
-                candidates.map((candidate) => {
+                displayCandidates.map((candidate) => {
                   const isSelected = candidate.id === selectedId;
                   const isExactMatch =
                     search.trim().length > 0 &&
