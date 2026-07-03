@@ -63,7 +63,7 @@ export function Layout() {
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (isDragging.current) {
-        const delta = dragStartX.current - e.clientX;
+        const delta = e.clientX - dragStartX.current;
         const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, dragStartWidth.current + delta));
         setSidebarWidth(newWidth);
       }
@@ -103,17 +103,17 @@ export function Layout() {
         </header>
       </div>
       <div className="app-body">
+        <aside className="right-sidebar" style={{ width: sidebarWidth }}>
+          <div className="right-sidebar-tasks">
+            <GlobalTaskBar />
+          </div>
+          <div className="sidebar-resize-handle" onMouseDown={onResizeMouseDown} />
+        </aside>
         <main className="page-container">
           <BackendGate>
             <Outlet />
           </BackendGate>
         </main>
-        <aside className="right-sidebar" style={{ width: sidebarWidth }}>
-          <div className="sidebar-resize-handle" onMouseDown={onResizeMouseDown} />
-          <div className="right-sidebar-tasks">
-            <GlobalTaskBar />
-          </div>
-        </aside>
       </div>
       <ToastContainer />
     </div>
