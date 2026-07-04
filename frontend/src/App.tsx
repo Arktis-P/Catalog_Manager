@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { CatalogPage } from "./pages/CatalogPage";
+import { CharactersPage } from "./pages/CharactersPage";
 import { GenerationPage } from "./pages/GenerationPage";
 import { ReviewPage } from "./pages/ReviewPage";
 import { SeriesPage } from "./pages/SeriesPage";
@@ -13,6 +14,7 @@ export default function App() {
         <Route index element={<CatalogPage />} />
         <Route path="review" element={<ReviewPage />} />
         <Route path="series" element={<SeriesPage />} />
+        <Route path="characters" element={<CharactersPage />} />
         <Route path="generation" element={<GenerationPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

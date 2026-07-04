@@ -10,10 +10,12 @@ import type {
   CatalogReviewFilterStatus,
   CatalogReviewListResponse,
   CatalogStats,
+  CatalogJob,
   CharacterCollectResult,
   CharacterListResponse,
   CollectJob,
   DanbooruStatus,
+  GlobalCharacterListResponse,
   GenerationCandidateListResponse,
   GenerationQueuePreview,
   GenerationStartPayload,
@@ -227,6 +229,50 @@ export const api = {
     request<CollectJob>(`/characters/collect/jobs/${jobId}/resume`, { method: "POST" }),
 
   listCollectJobs: () => request<{ items: CollectJob[] }>("/characters/collect/jobs"),
+
+  listGlobalCharacters: (params: {
+    search?: string;
+    gender?: string;
+    collect_status?: string;
+    series_id?: number;
+    min_post_count?: number;
+    max_post_count?: number;
+    sort_by?: string;
+    sort_order?: string;
+    skip?: number;
+    limit?: number;
+  } = {}) => request<GlobalCharacterListResponse>(`/character-catalog/characters${buildQuery(params)}`),
+
+  startCatalogListJob: (minPostCount: number, restart = false) =>
+    request<CatalogJob>("/character-catalog/list/start", {
+      method: "POST",
+      body: JSON.stringify({ min_post_count: minPostCount, restart }),
+    }),
+
+  startCatalogTagsJob: (characterIds: number[]) =>
+    request<CatalogJob>("/character-catalog/tags/start", {
+      method: "POST",
+      body: JSON.stringify({ character_ids: characterIds }),
+    }),
+
+  retryFailedCatalogTags: (limit = 500) =>
+    request<CatalogJob>("/character-catalog/tags/retry-failed", {
+      method: "POST",
+      body: JSON.stringify({ limit }),
+    }),
+
+  listCatalogJobs: () => request<{ items: CatalogJob[] }>("/character-catalog/jobs"),
+
+  getCatalogJob: (jobId: string) => request<CatalogJob>(`/character-catalog/jobs/${jobId}`),
+
+  cancelCatalogJob: (jobId: string) =>
+    request<CatalogJob>(`/character-catalog/jobs/${jobId}/cancel`, { method: "POST" }),
+
+  pauseCatalogJob: (jobId: string) =>
+    request<CatalogJob>(`/character-catalog/jobs/${jobId}/pause`, { method: "POST" }),
+
+  resumeCatalogJob: (jobId: string) =>
+    request<CatalogJob>(`/character-catalog/jobs/${jobId}/resume`, { method: "POST" }),
 
   getSettings: () => request<AppSettings>("/settings"),
 

@@ -168,6 +168,65 @@ export interface CollectJob {
   finished_at?: string | null;
 }
 
+export interface CharacterSeriesLinkInfo {
+  series_id: number | null;
+  series_tag: string | null;
+  copyright_tag: string;
+  relevance_rank: number;
+  is_primary: boolean;
+  is_auto: boolean;
+  is_user_edited: boolean;
+}
+
+export interface GlobalCharacter {
+  id: number;
+  character_tag: string;
+  display_name: string;
+  post_count: number;
+  collect_status: string;
+  appearance_status: string;
+  gender_status: string;
+  series_status: string;
+  multi_color_hair: string | null;
+  hair_color: string | null;
+  hair_shape: string | null;
+  eye_color: string | null;
+  feature_tags: string | null;
+  gender: string | null;
+  error_message: string | null;
+  retry_count: number;
+  last_collected_at: string | null;
+  primary_series_tag: string | null;
+  related_series_count: number;
+  series_links: CharacterSeriesLinkInfo[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GlobalCharacterListResponse {
+  items: GlobalCharacter[];
+  total: number;
+}
+
+export interface CatalogJob {
+  job_id: string;
+  job_type: "character_catalog_list" | "character_catalog_tags";
+  status: string;
+  phase: string;
+  message: string;
+  current: number;
+  total: number;
+  created: number;
+  updated: number;
+  success_count: number;
+  partial_count: number;
+  failed_count: number;
+  current_character_tag: string;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
 export interface GenerationCandidate {
   id: number;
   character_tag: string;

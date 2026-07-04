@@ -39,6 +39,7 @@ const navItems = [
   { to: "/", label: "Catalog", end: true },
   { to: "/review", label: "Review" },
   { to: "/series", label: "Series" },
+  { to: "/characters", label: "Characters" },
   { to: "/generation", label: "Generation" },
   { to: "/settings", label: "Settings" },
 ];

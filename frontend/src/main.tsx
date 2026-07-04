@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { CharacterCatalogJobProvider } from "./context/CharacterCatalogJobContext";
 import { CollectJobProvider } from "./context/CollectJobContext";
 import { GenerationJobProvider } from "./context/GenerationJobContext";
 import { NotificationModeProvider } from "./context/NotificationModeContext";
@@ -15,11 +16,13 @@ createRoot(document.getElementById("root")!).render(
       <BrowserRouter>
         <NotificationModeProvider>
           <CollectJobProvider>
-            <GenerationJobProvider>
-              <ReviewRegenerateProvider>
-                <App />
-              </ReviewRegenerateProvider>
-            </GenerationJobProvider>
+            <CharacterCatalogJobProvider>
+              <GenerationJobProvider>
+                <ReviewRegenerateProvider>
+                  <App />
+                </ReviewRegenerateProvider>
+              </GenerationJobProvider>
+            </CharacterCatalogJobProvider>
           </CollectJobProvider>
         </NotificationModeProvider>
       </BrowserRouter>

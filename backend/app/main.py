@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
-from app.routers import catalog, characters, generation, media, review, series, wiki_proxy
+from app.routers import catalog, character_catalog, characters, generation, media, review, series, wiki_proxy
 from app.routers import settings as settings_router
 from app.services.seed_service import seed_demo_data
 
@@ -49,6 +49,7 @@ app.add_middleware(
 app.include_router(series.router, prefix="/api")
 app.include_router(catalog.router, prefix="/api")
 app.include_router(characters.router, prefix="/api")
+app.include_router(character_catalog.router, prefix="/api")
 app.include_router(review.router, prefix="/api")
 app.include_router(generation.router, prefix="/api")
 app.include_router(media.router, prefix="/api")

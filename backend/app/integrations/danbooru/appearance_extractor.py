@@ -74,6 +74,7 @@ STREAK_COLOR_TAGS = (
 class RelatedTag:
     name: str
     frequency: float
+    category: int | None = None
 
 
 @dataclass
@@ -153,7 +154,14 @@ def parse_related_tags(payload: object) -> list[RelatedTag]:
             frequency = float(item.get("frequency") or 0.0)
         except (TypeError, ValueError):
             frequency = 0.0
-        parsed.append(RelatedTag(name=name, frequency=frequency))
+        category = tag.get("category")
+        parsed.append(
+            RelatedTag(
+                name=name,
+                frequency=frequency,
+                category=int(category) if isinstance(category, (int, float)) else None,
+            )
+        )
     return parsed
 
 
@@ -264,6 +272,16 @@ def extract_gender(related: list[RelatedTag]) -> str | None:
     if boy_score > 0:
         return "1boy"
     return None
+
+
+COPYRIGHT_CATEGORY = 3
+
+
+def extract_copyright_tags(related: list[RelatedTag], *, limit: int = 10) -> list[RelatedTag]:
+    """Copyright-category (series) tags among a character's related tags, most relevant first."""
+    matches = [item for item in related if item.category == COPYRIGHT_CATEGORY]
+    matches.sort(key=lambda item: item.frequency, reverse=True)
+    return matches[:limit]
 
 
 def extract_appearance_tags(related: list[RelatedTag]) -> AppearanceTags:

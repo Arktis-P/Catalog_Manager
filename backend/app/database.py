@@ -39,7 +39,9 @@ def get_db() -> Generator[Session, None, None]:
 def init_db() -> None:
     from app.models import (  # noqa: F401
         character,
+        character_series_link,
         generation_job,
+        global_character,
         image,
         review,
         series,

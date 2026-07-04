@@ -154,6 +154,26 @@ class DanbooruClient:
         )
         return self._ensure_list(payload, context="list_copyright_tags")
 
+    def list_character_tags(
+        self,
+        *,
+        page: int = 1,
+        limit: int = 1000,
+        hide_empty: str = "yes",
+        order: str = "count",
+    ) -> list[dict[str, Any]]:
+        payload = self._get_json(
+            "tags.json",
+            {
+                "search[category]": self.CATEGORY_CHARACTER,
+                "search[hide_empty]": hide_empty,
+                "search[order]": order,
+                "limit": limit,
+                "page": page,
+            },
+        )
+        return self._ensure_list(payload, context="list_character_tags")
+
     def list_character_tags_by_pattern(
         self,
         series_tag: str,
