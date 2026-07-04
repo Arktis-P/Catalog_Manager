@@ -5,6 +5,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.global_character import GlobalCharacter
 from app.schemas.character_catalog import (
+    CatalogCollectAllRequest,
     CatalogJobListResponse,
     CatalogJobResponse,
     CatalogListStartRequest,
@@ -98,6 +99,19 @@ def retry_failed_catalog_tags(
     ids = service.list_failed_ids(limit=payload.limit)
     if not ids:
         raise HTTPException(status_code=404, detail="No failed or partial characters to retry")
+    job = character_catalog_job_manager.start_catalog_tags(ids)
+    return CatalogJobResponse.from_state(job)
+
+
+@router.post("/tags/collect-all", response_model=CatalogJobResponse)
+def collect_all_uncollected_catalog_tags(
+    payload: CatalogCollectAllRequest,
+    service: CharacterCatalogService = Depends(get_catalog_service),
+):
+    _require_danbooru()
+    ids = service.list_uncollected_ids(limit=payload.limit)
+    if not ids:
+        raise HTTPException(status_code=404, detail="No uncollected characters remaining")
     job = character_catalog_job_manager.start_catalog_tags(ids)
     return CatalogJobResponse.from_state(job)
 

@@ -261,6 +261,12 @@ export const api = {
       body: JSON.stringify({ limit }),
     }),
 
+  collectAllUncollectedCatalogTags: (limit = 5000) =>
+    request<CatalogJob>("/character-catalog/tags/collect-all", {
+      method: "POST",
+      body: JSON.stringify({ limit }),
+    }),
+
   listCatalogJobs: () => request<{ items: CatalogJob[] }>("/character-catalog/jobs"),
 
   getCatalogJob: (jobId: string) => request<CatalogJob>(`/character-catalog/jobs/${jobId}`),

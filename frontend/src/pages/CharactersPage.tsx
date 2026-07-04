@@ -110,7 +110,7 @@ function CharacterDetailModal({ character, onClose }: { character: GlobalCharact
 }
 
 export function CharactersPage() {
-  const { jobs, startListJob, startTagsJob, retryFailed, isJobActive, lastError, clearLastError } =
+  const { jobs, startListJob, startTagsJob, retryFailed, collectAllUncollected, isJobActive, lastError, clearLastError } =
     useCharacterCatalogJobs();
 
   const [items, setItems] = useState<GlobalCharacter[]>([]);
@@ -221,6 +221,10 @@ export function CharactersPage() {
     await retryFailed();
   };
 
+  const handleCollectAllUncollected = async () => {
+    await collectAllUncollected();
+  };
+
   const listJobActive = isJobActive("character_catalog_list");
 
   return (
@@ -261,6 +265,9 @@ export function CharactersPage() {
           </button>
           <button className="btn" type="button" onClick={() => void handleRetryFailed()}>
             실패/부분완료 재시도
+          </button>
+          <button className="btn" type="button" onClick={() => void handleCollectAllUncollected()}>
+            미수집 전체 태그 수집
           </button>
         </div>
       </section>

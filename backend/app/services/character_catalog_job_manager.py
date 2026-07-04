@@ -43,6 +43,7 @@ class CatalogJobState:
     partial_count: int = 0
     failed_count: int = 0
     current_character_tag: str = ""
+    active_items: list[str] = field(default_factory=list)
     error: str | None = None
     started_at: str = field(default_factory=_utc_now)
     finished_at: str | None = None
@@ -299,6 +300,7 @@ class CharacterCatalogJobManager:
 
             state_lock = threading.Lock()
             counters = {"success": 0, "partial": 0, "failed": 0, "done": 0}
+            active_tags: dict[int, str] = {}
 
             def process_one(character_id: int) -> None:
                 worker_db = SessionLocal()
@@ -316,10 +318,15 @@ class CharacterCatalogJobManager:
                             return
 
                         character.collect_status = "collecting"
+                        with state_lock:
+                            active_tags[character_id] = character.character_tag
+                            self._update_job(job_id, active_items=list(active_tags.values()))
+
                         service = CharacterCatalogService(worker_db)
                         result = service.collect_tags_for_character(character)
 
                         with state_lock:
+                            active_tags.pop(character_id, None)
                             if result.success:
                                 counters["success"] += 1
                             elif result.appearance_ok or result.series_ok:
@@ -337,6 +344,7 @@ class CharacterCatalogJobManager:
                                 ),
                                 current=counters["done"],
                                 current_character_tag=character.character_tag,
+                                active_items=list(active_tags.values()),
                                 success_count=counters["success"],
                                 partial_count=counters["partial"],
                                 failed_count=counters["failed"],
@@ -364,17 +372,21 @@ class CharacterCatalogJobManager:
                 success_count=counters["success"],
                 partial_count=counters["partial"],
                 failed_count=counters["failed"],
+                active_items=[],
                 finished_at=_utc_now(),
             )
         except _PauseCancelledError:
+            self._update_job(job_id, active_items=[])
             return
         except DanbooruAuthError as exc:
             self._update_job(
-                job_id, status="failed", phase="failed", message="Danbooru 인증 실패", error=str(exc), finished_at=_utc_now()
+                job_id, status="failed", phase="failed", message="Danbooru 인증 실패", error=str(exc),
+                active_items=[], finished_at=_utc_now(),
             )
         except Exception as exc:
             self._update_job(
-                job_id, status="failed", phase="failed", message="통합 태그 수집 중 오류 발생", error=str(exc), finished_at=_utc_now()
+                job_id, status="failed", phase="failed", message="통합 태그 수집 중 오류 발생", error=str(exc),
+                active_items=[], finished_at=_utc_now(),
             )
 
 

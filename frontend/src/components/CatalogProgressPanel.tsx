@@ -83,6 +83,17 @@ export function CatalogProgressPanel({ job, onDismiss, onCancel, onPause, onResu
         </div>
       ) : null}
 
+      {isActive && job.active_items.length > 0 ? (
+        <ul className="task-active-items">
+          {job.active_items.map((tag) => (
+            <li key={tag} className="task-active-item">
+              <span className="job-running-indicator task-dot" aria-hidden="true" />
+              {tag}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
       {job.error ? <div className="progress-panel-error-line task-error-line">{job.error}</div> : null}
     </div>
   );

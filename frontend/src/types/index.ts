@@ -222,6 +222,7 @@ export interface CatalogJob {
   partial_count: number;
   failed_count: number;
   current_character_tag: string;
+  active_items: string[];
   error: string | null;
   started_at: string;
   finished_at: string | null;

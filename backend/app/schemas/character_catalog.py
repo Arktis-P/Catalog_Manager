@@ -101,6 +101,10 @@ class CatalogRetryFailedRequest(BaseModel):
     limit: int = Field(default=500, ge=1, le=5000)
 
 
+class CatalogCollectAllRequest(BaseModel):
+    limit: int = Field(default=5000, ge=1, le=20000)
+
+
 class CatalogJobResponse(BaseModel):
     job_id: str
     job_type: str
@@ -115,6 +119,7 @@ class CatalogJobResponse(BaseModel):
     partial_count: int
     failed_count: int
     current_character_tag: str
+    active_items: list[str]
     error: str | None
     started_at: str
     finished_at: str | None
@@ -135,6 +140,7 @@ class CatalogJobResponse(BaseModel):
             partial_count=state.partial_count,
             failed_count=state.failed_count,
             current_character_tag=state.current_character_tag,
+            active_items=list(state.active_items),
             error=state.error,
             started_at=state.started_at,
             finished_at=state.finished_at,

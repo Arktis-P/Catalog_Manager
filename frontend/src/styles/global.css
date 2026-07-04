@@ -2370,6 +2370,28 @@ button,
   margin-top: 2px;
 }
 
+.task-active-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 96px;
+  overflow-y: auto;
+}
+
+.task-active-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .generation-page .generation-layout {
   display: grid;
   grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
