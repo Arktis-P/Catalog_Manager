@@ -162,10 +162,19 @@ class CharacterCatalogService:
             payload = self.client.get_related_tags(character.character_tag, category=None)
             related = parse_related_tags(payload)
         except Exception as exc:
-            character.collect_status = "failed"
-            character.appearance_status = "failed"
-            character.gender_status = "failed"
-            character.series_status = "failed"
+            # related tags 조회 자체가 실패한 경우, 이전 수집에서 이미 completed였던
+            # 하위 상태(외형/성별/시리즈)는 이번 실패로 덮어쓰지 않고 그대로 보존한다.
+            if character.appearance_status != "completed":
+                character.appearance_status = "failed"
+            if character.gender_status != "completed":
+                character.gender_status = "failed"
+            if character.series_status != "completed":
+                character.series_status = "failed"
+            character.collect_status = (
+                "partial"
+                if character.appearance_status == "completed" or character.series_status == "completed"
+                else "failed"
+            )
             character.error_message = str(exc)
             character.retry_count += 1
             character.last_collected_at = datetime.now(timezone.utc)
@@ -173,9 +182,9 @@ class CharacterCatalogService:
             return CatalogTagResult(
                 character_tag=character.character_tag,
                 success=False,
-                appearance_ok=False,
-                gender_ok=False,
-                series_ok=False,
+                appearance_ok=character.appearance_status == "completed",
+                gender_ok=character.gender_status == "completed",
+                series_ok=character.series_status == "completed",
                 error=str(exc),
             )
 
@@ -196,8 +205,10 @@ class CharacterCatalogService:
             character.gender_status = "completed" if appearance.gender else "needs_review"
             gender_ok = appearance.gender is not None
         except Exception as exc:
-            character.appearance_status = "failed"
-            character.gender_status = "failed"
+            if character.appearance_status != "completed":
+                character.appearance_status = "failed"
+            if character.gender_status != "completed":
+                character.gender_status = "failed"
             error_parts.append(f"appearance/gender: {exc}")
 
         try:
@@ -223,7 +234,8 @@ class CharacterCatalogService:
             character.series_status = "completed" if copyright_matches else "needs_review"
             series_ok = True
         except Exception as exc:
-            character.series_status = "failed"
+            if character.series_status != "completed":
+                character.series_status = "failed"
             error_parts.append(f"series: {exc}")
 
         character.error_message = "; ".join(error_parts) or None

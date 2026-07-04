@@ -168,14 +168,17 @@ export function CharactersPage() {
   }, [search, genderFilter, statusFilter, sortBy, sortOrder, currentPage, pageSize]);
 
   // 목록/통합 수집 작업이 끝나면 목록을 자동으로 새로고침 (진행 상태 자체는 GlobalTaskBar에 표시됨)
-  const listJob = useMemo(() => jobs.find((j) => j.job_type === "character_catalog_list"), [jobs]);
-  const tagsJob = useMemo(() => jobs.find((j) => j.job_type === "character_catalog_tags"), [jobs]);
+  // 여러 태그 수집 job이 동시에 진행될 수 있으므로, 완료된 job 집합이 바뀔 때마다 새로고침한다.
+  const completedJobIds = useMemo(
+    () => jobs.filter((j) => j.status === "completed").map((j) => j.job_id).join("|"),
+    [jobs],
+  );
   useEffect(() => {
-    if (listJob?.status === "completed" || tagsJob?.status === "completed") {
+    if (completedJobIds) {
       void loadCharacters();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listJob?.status, tagsJob?.status]);
+  }, [completedJobIds]);
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
@@ -219,7 +222,6 @@ export function CharactersPage() {
   };
 
   const listJobActive = isJobActive("character_catalog_list");
-  const tagsJobActive = isJobActive("character_catalog_tags");
 
   return (
     <div className="page">
@@ -254,10 +256,10 @@ export function CharactersPage() {
           <button className="btn btn-primary" type="button" disabled={listJobActive} onClick={() => void handleStartListCollect()}>
             전체 캐릭터 목록 수집
           </button>
-          <button className="btn" type="button" disabled={selectedIds.size === 0 || tagsJobActive} onClick={() => void handleCollectSelected()}>
+          <button className="btn" type="button" disabled={selectedIds.size === 0} onClick={() => void handleCollectSelected()}>
             선택 캐릭터 통합 태그 수집 ({selectedIds.size})
           </button>
-          <button className="btn" type="button" disabled={tagsJobActive} onClick={() => void handleRetryFailed()}>
+          <button className="btn" type="button" onClick={() => void handleRetryFailed()}>
             실패/부분완료 재시도
           </button>
         </div>
@@ -418,7 +420,6 @@ export function CharactersPage() {
                         <button
                           className="btn btn-small"
                           type="button"
-                          disabled={tagsJobActive}
                           onClick={() => void handleCollectSingle(character.id)}
                         >
                           태그 수집
