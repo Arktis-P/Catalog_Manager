@@ -1,11 +1,13 @@
 import { useMemo } from "react";
+import { CatalogProgressPanel } from "./CatalogProgressPanel";
 import { CollectProgressPanel } from "./CollectProgressPanel";
 import { GenerationProgressPanel } from "./GenerationProgressPanel";
+import { useCharacterCatalogJobs } from "../context/CharacterCatalogJobContext";
 import { useCollectJobs } from "../context/CollectJobContext";
 import { useGenerationJobs } from "../context/GenerationJobContext";
-import type { CollectJob } from "../types";
+import type { CatalogJob, CollectJob } from "../types";
 
-function jobSortRank(job: CollectJob): number {
+function jobSortRank(job: { status: string }): number {
   if (job.status === "running") {
     return 0;
   }
@@ -40,10 +42,22 @@ export function GlobalTaskBar() {
     lastError: generationError,
     clearLastError: clearGenerationError,
   } = useGenerationJobs();
+  const {
+    jobs: catalogJobs,
+    cancelJob: cancelCatalogJob,
+    pauseJob: pauseCatalogJob,
+    resumeJob: resumeCatalogJob,
+    dismissJob: dismissCatalogJob,
+    lastError: catalogError,
+    clearLastError: clearCatalogError,
+  } = useCharacterCatalogJobs();
+
+  const isCatalogJob = (job: CollectJob | CatalogJob | (typeof generationJobs)[number]): job is CatalogJob =>
+    job.job_type === "character_catalog_list" || job.job_type === "character_catalog_tags";
 
   const activeJobs = useMemo(
     () =>
-      [...collectJobs, ...generationJobs]
+      [...collectJobs, ...generationJobs, ...catalogJobs]
         .filter(
           (job) =>
             job.status === "queued" ||
@@ -54,7 +68,7 @@ export function GlobalTaskBar() {
             job.status === "cancelled",
         )
         .sort((a, b) => jobSortRank(a) - jobSortRank(b) || b.started_at.localeCompare(a.started_at)),
-    [collectJobs, generationJobs],
+    [collectJobs, generationJobs, catalogJobs],
   );
 
   const dismissibleJobs = useMemo(
@@ -66,13 +80,15 @@ export function GlobalTaskBar() {
     for (const job of dismissibleJobs) {
       if (job.job_type === "image_generation") {
         dismissGenerationJob(job.job_id);
+      } else if (isCatalogJob(job)) {
+        dismissCatalogJob(job.job_id);
       } else {
         dismissCollectJob(job.job_id);
       }
     }
   };
 
-  const lastError = collectError || generationError;
+  const lastError = collectError || generationError || catalogError;
 
   const queuedCount = useMemo(
     () => activeJobs.filter((j) => j.status === "queued").length,
@@ -108,6 +124,7 @@ export function GlobalTaskBar() {
               onClick={() => {
                 clearCollectError();
                 clearGenerationError();
+                clearCatalogError();
               }}
             >
               Dismiss
@@ -130,6 +147,23 @@ export function GlobalTaskBar() {
                 onDismiss={
                   job.status === "completed" || job.status === "failed" || job.status === "cancelled"
                     ? () => dismissGenerationJob(job.job_id)
+                    : undefined
+                }
+              />
+            ) : isCatalogJob(job) ? (
+              <CatalogProgressPanel
+                key={job.job_id}
+                job={job}
+                onCancel={
+                  job.status === "queued" || job.status === "running" || job.status === "paused"
+                    ? () => void cancelCatalogJob(job.job_id)
+                    : undefined
+                }
+                onPause={job.status === "running" ? () => void pauseCatalogJob(job.job_id) : undefined}
+                onResume={job.status === "paused" ? () => void resumeCatalogJob(job.job_id) : undefined}
+                onDismiss={
+                  job.status === "completed" || job.status === "failed" || job.status === "cancelled"
+                    ? () => dismissCatalogJob(job.job_id)
                     : undefined
                 }
               />

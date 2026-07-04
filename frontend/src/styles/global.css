@@ -742,6 +742,92 @@ button,
   word-break: break-word;
 }
 
+.characters-tag-inline {
+  font-size: 0.78rem;
+}
+
+.characters-table-compact th,
+.characters-table-compact td {
+  font-size: 0.78rem;
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+
+.characters-table-compact .badge-compact {
+  padding: 1px 5px;
+  font-size: 0.68rem;
+}
+
+.characters-table-compact .col-wiki {
+  width: 30px;
+  min-width: 30px;
+  max-width: 30px;
+  text-align: center;
+}
+
+.characters-table-compact .col-character-name {
+  width: 30ch;
+  min-width: 30ch;
+  max-width: 30ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.characters-table-compact .col-character-status {
+  width: 190px;
+  min-width: 190px;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.characters-table-compact .col-character-series {
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.characters-table-compact .col-appearance {
+  width: 110px;
+  min-width: 110px;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.characters-table-compact .col-gender {
+  width: 64px;
+  min-width: 64px;
+  max-width: 64px;
+}
+
+.characters-table-compact .col-row-action {
+  width: 84px;
+  min-width: 84px;
+  max-width: 84px;
+}
+
+.badge-gender-boy {
+  color: #9fd3f5;
+  border-color: rgba(66, 148, 212, 0.4);
+  background: rgba(66, 148, 212, 0.14);
+}
+
+.badge-gender-girl {
+  color: #f5b8d3;
+  border-color: rgba(212, 66, 150, 0.4);
+  background: rgba(212, 66, 150, 0.14);
+}
+
+.badge-gender-other {
+  color: var(--text-muted);
+  border-color: var(--border);
+  background: var(--bg);
+}
+
 .tag-row {
   display: flex;
   flex-wrap: wrap;

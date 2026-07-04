@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useCharacterCatalogJobs } from "../context/CharacterCatalogJobContext";
 import type { GlobalCharacter } from "../types";
 import { collectStatusBadgeClass, collectStatusLabel } from "../utils/characterCatalogStatus";
+import { danbooruWikiUrl, openExternal } from "../utils/danbooruLinks";
 
 const PAGE_SIZE_OPTIONS = [50, 100, 200];
 const GENDER_OPTIONS = ["1girl", "1boy", "no_humans"];
@@ -19,6 +20,31 @@ function formatDate(value: string | null): string {
 
 function displayValue(value: string | null | undefined): string {
   return value && value.trim() ? value : "-";
+}
+
+// 관련도(빈도) 순으로 저장된 콤마 구분 태그 문자열에서 앞쪽 n개만 취한다.
+function firstNTags(value: string | null | undefined, n: number): string | null {
+  if (!value || !value.trim()) return null;
+  const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+  return parts.slice(0, n).join(", ");
+}
+
+function MiniStatus({ label, status }: { label: string; status: string }) {
+  return (
+    <span
+      className={`${collectStatusBadgeClass(status)} badge-compact`}
+      title={`${label}: ${collectStatusLabel(status)}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function genderBadgeClass(gender: string | null | undefined): string {
+  if (gender === "1boy") return "badge badge-gender-boy";
+  if (gender === "1girl") return "badge badge-gender-girl";
+  return "badge badge-gender-other";
 }
 
 function CharacterDetailModal({ character, onClose }: { character: GlobalCharacter; onClose: () => void }) {
@@ -84,7 +110,7 @@ function CharacterDetailModal({ character, onClose }: { character: GlobalCharact
 }
 
 export function CharactersPage() {
-  const { jobs, startListJob, startTagsJob, retryFailed, cancelJob, pauseJob, resumeJob, isJobActive, lastError, clearLastError } =
+  const { jobs, startListJob, startTagsJob, retryFailed, isJobActive, lastError, clearLastError } =
     useCharacterCatalogJobs();
 
   const [items, setItems] = useState<GlobalCharacter[]>([]);
@@ -141,7 +167,7 @@ export function CharactersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, genderFilter, statusFilter, sortBy, sortOrder, currentPage, pageSize]);
 
-  // 목록/통합 수집 작업이 끝나면 목록을 자동으로 새로고침
+  // 목록/통합 수집 작업이 끝나면 목록을 자동으로 새로고침 (진행 상태 자체는 GlobalTaskBar에 표시됨)
   const listJob = useMemo(() => jobs.find((j) => j.job_type === "character_catalog_list"), [jobs]);
   const tagsJob = useMemo(() => jobs.find((j) => j.job_type === "character_catalog_tags"), [jobs]);
   useEffect(() => {
@@ -184,6 +210,10 @@ export function CharactersPage() {
     await startTagsJob([...selectedIds]);
   };
 
+  const handleCollectSingle = async (id: number) => {
+    await startTagsJob([id]);
+  };
+
   const handleRetryFailed = async () => {
     await retryFailed();
   };
@@ -198,6 +228,7 @@ export function CharactersPage() {
           <h1 className="page-title">Characters</h1>
           <p className="page-description">
             Danbooru character 카테고리 태그 전체를 포스트 수 기준으로 수집하고, 외형·성별·시리즈 태그를 통합 수집합니다.
+            작업 진행 상태는 좌측 통합 작업 내역에서 확인할 수 있습니다.
           </p>
         </div>
       </div>
@@ -230,43 +261,6 @@ export function CharactersPage() {
             실패/부분완료 재시도
           </button>
         </div>
-
-        {listJob && (listJob.status === "running" || listJob.status === "paused" || listJob.status === "queued") ? (
-          <div className="pipeline-progress-row" style={{ marginTop: 12 }}>
-            <span className="pipeline-progress-label">목록 수집: {listJob.message}</span>
-            <div className="card-actions">
-              {listJob.status === "running" ? (
-                <button className="btn btn-small" type="button" onClick={() => void pauseJob(listJob.job_id)}>일시정지</button>
-              ) : null}
-              {listJob.status === "paused" ? (
-                <button className="btn btn-small" type="button" onClick={() => void resumeJob(listJob.job_id)}>재개</button>
-              ) : null}
-              {listJob.status === "queued" || listJob.status === "paused" ? (
-                <button className="btn btn-small btn-danger" type="button" onClick={() => void cancelJob(listJob.job_id)}>취소</button>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
-        {tagsJob && (tagsJob.status === "running" || tagsJob.status === "paused" || tagsJob.status === "queued") ? (
-          <div className="pipeline-progress-row" style={{ marginTop: 12 }}>
-            <span className="pipeline-progress-label">
-              통합 태그 수집: {tagsJob.current}/{tagsJob.total} · 성공 {tagsJob.success_count} · 부분 {tagsJob.partial_count} · 실패 {tagsJob.failed_count}
-              {tagsJob.current_character_tag ? ` · 현재: ${tagsJob.current_character_tag}` : ""}
-            </span>
-            <div className="card-actions">
-              {tagsJob.status === "running" ? (
-                <button className="btn btn-small" type="button" onClick={() => void pauseJob(tagsJob.job_id)}>일시정지</button>
-              ) : null}
-              {tagsJob.status === "paused" ? (
-                <button className="btn btn-small" type="button" onClick={() => void resumeJob(tagsJob.job_id)}>재개</button>
-              ) : null}
-              {tagsJob.status === "queued" || tagsJob.status === "paused" ? (
-                <button className="btn btn-small btn-danger" type="button" onClick={() => void cancelJob(tagsJob.job_id)}>취소</button>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
       </section>
 
       <section className="panel series-list-panel">
@@ -340,7 +334,7 @@ export function CharactersPage() {
             ) : null}
 
             <div className="series-table-scroll">
-              <table className="data-table series-table">
+              <table className="data-table series-table characters-table-compact">
                 <thead>
                   <tr>
                     <th className="col-checkbox">
@@ -350,12 +344,18 @@ export function CharactersPage() {
                         onChange={toggleAllOnPage}
                       />
                     </th>
-                    <th>Character</th>
+                    <th className="col-wiki"></th>
+                    <th className="col-character-name">Character</th>
                     <th className="col-count">Post count</th>
-                    <th className="col-status">통합 상태</th>
-                    <th>대표 시리즈</th>
-                    <th className="col-count">관련 시리즈</th>
-                    <th>마지막 수집</th>
+                    <th className="col-character-status">통합 상태</th>
+                    <th className="col-character-series">대표 시리즈</th>
+                    <th className="col-appearance">머리색</th>
+                    <th className="col-appearance">멀티컬러</th>
+                    <th className="col-appearance">머리 모양</th>
+                    <th className="col-appearance">눈색</th>
+                    <th className="col-appearance">기타 외형</th>
+                    <th className="col-gender">성별</th>
+                    <th className="col-row-action"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -364,25 +364,70 @@ export function CharactersPage() {
                       <td className="col-checkbox">
                         <input type="checkbox" checked={selectedIds.has(character.id)} onChange={() => toggleSelection(character.id)} />
                       </td>
-                      <td className="cell-ellipsis">
+                      <td className="col-wiki">
+                        <button
+                          type="button"
+                          className="series-wiki-btn"
+                          title={`Danbooru wiki: ${character.character_tag}`}
+                          onClick={() => openExternal(danbooruWikiUrl(character.character_tag))}
+                        >
+                          W
+                        </button>
+                      </td>
+                      <td className="col-character-name" title={`${character.display_name} (${character.character_tag})`}>
                         <button className="link-button" type="button" onClick={() => setViewingCharacter(character)}>
                           {character.display_name || character.character_tag}
                         </button>
-                        <div className="catalog-card-subtitle">{character.character_tag}</div>
+                        {" "}
+                        <span className="catalog-card-subtitle characters-tag-inline">{character.character_tag}</span>
                       </td>
                       <td className="col-count">{character.post_count.toLocaleString()}</td>
-                      <td className="col-status">
+                      <td className="col-character-status">
                         <span className={collectStatusBadgeClass(character.collect_status)}>
                           {collectStatusLabel(character.collect_status)}
                         </span>
+                        {" "}
+                        <MiniStatus label="외형" status={character.appearance_status} />
+                        {" "}
+                        <MiniStatus label="성별" status={character.gender_status} />
+                        {" "}
+                        <MiniStatus label="시리즈" status={character.series_status} />
                       </td>
-                      <td className="cell-ellipsis">{character.primary_series_tag ?? "-"}</td>
-                      <td className="col-count">{character.related_series_count}</td>
-                      <td>{formatDate(character.last_collected_at)}</td>
+                      <td className="col-character-series" title={character.primary_series_tag ?? "-"}>
+                        {character.primary_series_tag ?? "-"}
+                      </td>
+                      <td className="col-appearance" title={character.hair_color ?? ""}>
+                        {firstNTags(character.hair_color, 2) ?? "-"}
+                      </td>
+                      <td className="col-appearance" title={character.multi_color_hair ?? ""}>
+                        {firstNTags(character.multi_color_hair, 1) ?? "-"}
+                      </td>
+                      <td className="col-appearance" title={character.hair_shape ?? ""}>
+                        {firstNTags(character.hair_shape, 1) ?? "-"}
+                      </td>
+                      <td className="col-appearance" title={character.eye_color ?? ""}>
+                        {firstNTags(character.eye_color, 1) ?? "-"}
+                      </td>
+                      <td className="col-appearance" title={character.feature_tags ?? ""}>
+                        {firstNTags(character.feature_tags, 1) ?? "-"}
+                      </td>
+                      <td className="col-gender">
+                        {character.gender ? <span className={genderBadgeClass(character.gender)}>{character.gender}</span> : "-"}
+                      </td>
+                      <td className="col-row-action">
+                        <button
+                          className="btn btn-small"
+                          type="button"
+                          disabled={tagsJobActive}
+                          onClick={() => void handleCollectSingle(character.id)}
+                        >
+                          태그 수집
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   {items.length === 0 ? (
-                    <tr><td colSpan={7} className="empty-state">캐릭터가 없습니다. 먼저 목록 수집을 실행하세요.</td></tr>
+                    <tr><td colSpan={13} className="empty-state">캐릭터가 없습니다. 먼저 목록 수집을 실행하세요.</td></tr>
                   ) : null}
                 </tbody>
               </table>
