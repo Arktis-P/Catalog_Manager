@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -14,6 +14,7 @@ from app.integrations.naia.generation_runner import (
 )
 from app.models.character import Character
 from app.models.generation_job import GenerationJob
+from app.models.global_character import GlobalCharacter
 from app.models.series import Series
 from app.services.generation_prompt_builder import build_full_prompt
 from app.services.generation_service import GenerationService
@@ -69,6 +70,11 @@ class GenerationJobManager:
         self._lock = threading.Lock()
         self._pause_cond = threading.Condition(threading.Lock())
         self._paused_jobs: set[str] = set()
+        # 캐릭터 목록(GlobalCharacter) 중심 생성: series 기반 생성과 완전히 독립된 큐.
+        # 한 번에 하나만 실행하고, 진행 중일 때 새 요청은 대기열에서 기다린다.
+        self._character_queue: deque[str] = deque()
+        self._character_job_kwargs: dict[str, dict] = {}
+        self._active_character_job: str | None = None
 
     def get_job(self, job_id: str) -> GenerationBatchState | None:
         with self._lock:
@@ -205,6 +211,55 @@ class GenerationJobManager:
         )
         thread.start()
         return job
+
+    def start_character_generation(
+        self,
+        character_ids: list[int],
+        *,
+        prompt_level: int,
+    ) -> GenerationBatchState:
+        """캐릭터 목록(GlobalCharacter) 중심 이미지 생성. 이미 하나가 진행 중이면
+        새 작업은 대기열에 올라가 있다가 이전 작업이 끝나면 이어서 시작된다."""
+        with self._lock:
+            job = GenerationBatchState(
+                job_id=str(uuid.uuid4()),
+                series_id=0,
+                series_tag=f"캐릭터 {len(character_ids)}명",
+                queue_id="",
+                prompt_level=prompt_level,
+            )
+            self._jobs[job.job_id] = job
+            self._character_queue.append(job.job_id)
+            self._character_job_kwargs[job.job_id] = {
+                "character_ids": character_ids,
+                "prompt_level": prompt_level,
+            }
+        self._dispatch_character_job()
+        return job
+
+    def _dispatch_character_job(self) -> None:
+        to_start: tuple[str, dict] | None = None
+        with self._lock:
+            if self._active_character_job is None:
+                while self._character_queue:
+                    job_id = self._character_queue.popleft()
+                    job = self._jobs.get(job_id)
+                    if not job or job.status != "queued":
+                        continue
+                    kwargs = self._character_job_kwargs.pop(job_id, {})
+                    self._active_character_job = job_id
+                    to_start = (job_id, kwargs)
+                    break
+
+        if to_start:
+            job_id, kwargs = to_start
+            thread = threading.Thread(
+                target=self._run_character_generation,
+                args=(job_id, kwargs.get("character_ids", []), kwargs.get("prompt_level", 1)),
+                daemon=True,
+                name=f"char-generation-{job_id[:8]}",
+            )
+            thread.start()
 
     def _update_job(self, job_id: str, **fields: object) -> None:
         with self._lock:
@@ -544,6 +599,207 @@ class GenerationJobManager:
                 active_job_id = self._active_by_series.get(series_id)
                 if active_job_id == job_id:
                     self._active_by_series.pop(series_id, None)
+
+    def _run_character_generation(
+        self,
+        job_id: str,
+        character_ids: list[int],
+        prompt_level: int,
+    ) -> None:
+        """캐릭터 목록(GlobalCharacter) 중심 생성. series 상태 변경(mark_series_generating 등)이
+        전혀 없다는 점을 제외하면 _run_generation과 동일한 구조."""
+        db = SessionLocal()
+        try:
+            service = GenerationService(db)
+            status = service.naia_status()
+            if not status.get("ready"):
+                self._update_job(
+                    job_id,
+                    status="failed",
+                    phase="failed",
+                    message=str(status.get("message") or "NAIA 연결 실패"),
+                    error=str(status.get("message") or "NAIA not ready"),
+                    finished_at=_utc_now(),
+                )
+                return
+
+            self._update_job(
+                job_id, status="running", phase="preparing", message="캐릭터 목록 생성 큐 준비 중"
+            )
+
+            try:
+                queue_payload = service.prepare_queue_global(character_ids, prompt_level=prompt_level)
+            except ValueError as exc:
+                self._update_job(
+                    job_id,
+                    status="failed",
+                    phase="failed",
+                    message=str(exc),
+                    error=str(exc),
+                    finished_at=_utc_now(),
+                )
+                return
+
+            images_per_character = service.get_images_per_character()
+            jobs = service.create_generation_jobs_global(
+                queue_payload, images_per_character=images_per_character
+            )
+            if not jobs:
+                self._update_job(
+                    job_id,
+                    status="failed",
+                    phase="failed",
+                    message="생성 작업을 만들 수 없습니다.",
+                    error="No generation jobs created",
+                    finished_at=_utc_now(),
+                )
+                return
+
+            client = NaiaClient(str(status.get("base_url") or service.get_naia_base_url()))
+            known_history_ids = {
+                str(item.get("history_id") or "")
+                for item in client.list_history(page=0, per_page=20).get("images", [])
+                if isinstance(item, dict)
+            }
+            known_history_ids.discard("")
+
+            self._update_job(
+                job_id,
+                status="running",
+                phase="generating",
+                queue_id=str(queue_payload.get("queue_id") or ""),
+                message="캐릭터 목록 이미지 생성 시작",
+                total=len(jobs),
+                current=0,
+            )
+
+            completed = 0
+            failed = 0
+            auto_pass = 0
+            auto_warning = 0
+            auto_reject = 0
+            char_batch_images: dict[int, list] = defaultdict(list)
+            for index, generation_job in enumerate(jobs, start=1):
+                if self._is_cancelled(job_id):
+                    break
+                if not self._check_pause(job_id):
+                    break
+
+                if index > 1:
+                    wait_between_naia_generations()
+
+                character = (
+                    db.query(GlobalCharacter)
+                    .filter(GlobalCharacter.id == generation_job.global_character_id)
+                    .first()
+                )
+                if not character:
+                    failed += 1
+                    service.mark_job_failed_global(generation_job, "Character not found")
+                    continue
+
+                self._update_job(
+                    job_id,
+                    current=index - 1,
+                    current_character_tag=character.character_tag,
+                    message=f"{character.character_tag} 생성 중 ({index}/{len(jobs)})",
+                )
+
+                try:
+                    def _on_retry(attempt: int, exc: Exception) -> None:
+                        self._update_job(
+                            job_id,
+                            message=(
+                                f"{character.character_tag} NAIA 오류, 동일 프롬프트 재시도 "
+                                f"({attempt}회차): {exc}"
+                            ),
+                        )
+
+                    image_bytes, _ = generate_and_fetch_image(
+                        client,
+                        prompt=generation_job.prompt,
+                        negative_prompt=generation_job.negative_prompt or "",
+                        known_history_ids=known_history_ids,
+                        on_retry=_on_retry,
+                    )
+                    image = service.import_generated_image_global(
+                        character=character,
+                        generation_job=generation_job,
+                        image_bytes=image_bytes,
+                    )
+                    char_batch_images[generation_job.global_character_id].append(image)
+                    completed += 1
+                    if image.auto_status == "pass":
+                        auto_pass += 1
+                    elif image.auto_status == "warning":
+                        auto_warning += 1
+                    elif image.auto_status == "reject_candidate":
+                        auto_reject += 1
+                    self._update_job(
+                        job_id,
+                        completed=completed,
+                        failed=failed,
+                        auto_pass=auto_pass,
+                        auto_warning=auto_warning,
+                        auto_reject=auto_reject,
+                        current=index,
+                        last_image_path=image.image_path,
+                        message=f"{character.character_tag} 저장 · 자동검사 {image.auto_status} ({index}/{len(jobs)})",
+                    )
+                except Exception as exc:
+                    failed += 1
+                    service.mark_job_failed_global(generation_job, str(exc))
+                    self._update_job(
+                        job_id,
+                        completed=completed,
+                        failed=failed,
+                        current=index,
+                        message=f"{character.character_tag} 실패: {exc}",
+                    )
+
+            if not self._is_cancelled(job_id):
+                self._update_job(job_id, message="커버 이미지 자동 선택 중...")
+                for char_id, char_imgs in char_batch_images.items():
+                    if char_imgs:
+                        service.auto_select_cover_global(char_id, char_imgs)
+
+            summary = f"완료: {completed}장 저장 · 실패 {failed}"
+            if completed:
+                summary += f" · 자동검사 pass {auto_pass} / warning {auto_warning} / reject {auto_reject}"
+            if self._is_cancelled(job_id):
+                final_status = "cancelled"
+            elif completed == 0 and failed > 0:
+                final_status = "failed"
+            else:
+                final_status = "completed"
+            self._update_job(
+                job_id,
+                status=final_status,
+                phase=final_status,
+                message=summary,
+                completed=completed,
+                failed=failed,
+                auto_pass=auto_pass,
+                auto_warning=auto_warning,
+                auto_reject=auto_reject,
+                current=len(jobs),
+                finished_at=_utc_now(),
+            )
+        except Exception as exc:
+            self._update_job(
+                job_id,
+                status="failed",
+                phase="failed",
+                message="캐릭터 목록 이미지 생성 중 오류 발생",
+                error=str(exc),
+                finished_at=_utc_now(),
+            )
+        finally:
+            db.close()
+            with self._lock:
+                if self._active_character_job == job_id:
+                    self._active_character_job = None
+            self._dispatch_character_job()
 
 
 generation_job_manager = GenerationJobManager()

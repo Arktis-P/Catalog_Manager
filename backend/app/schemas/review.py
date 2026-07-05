@@ -139,3 +139,37 @@ class ReviewRegenerateJobListResponse(BaseModel):
 
 class CatalogReviewRegenerateResponse(ReviewRegenerateJobResponse):
     pass
+
+
+class GlobalCatalogReviewItemResponse(BaseModel):
+    """캐릭터 목록(GlobalCharacter) 중심 리뷰 항목. CatalogReviewItemResponse와 필드가 동일하도록
+    맞춰 프론트엔드에서 CatalogReviewRow 컴포넌트를 그대로 재사용할 수 있게 한다."""
+
+    id: int
+    series_tag: str = ""
+    series_display_name: str = ""
+    character_tag: str
+    display_name: str
+    post_count: int
+    danbooru_url: str | None = None
+    danbooru_wiki_url: str | None = None
+    multi_color_hair: str | None = None
+    hair_color: str | None = None
+    hair_shape: str | None = None
+    eye_color: str | None = None
+    feature_tags: str | None = None
+    gender: str | None = None
+    generation_prompt: str | None = None
+    character_status: str = ""
+    needs_check_reason: str | None = None
+    review_status: str | None = None
+    rating: int | None = None
+    type: str | None = None
+    final_prompt: str | None = None
+    cover_image_id: int | None = None
+    images: list[CatalogReviewImageResponse] = Field(default_factory=list)
+
+
+class GlobalCatalogReviewListResponse(BaseModel):
+    items: list[GlobalCatalogReviewItemResponse]
+    total: int

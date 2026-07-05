@@ -7,6 +7,7 @@ from pathlib import Path
 
 from collections.abc import Callable
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
@@ -19,6 +20,10 @@ from app.integrations.naia.generation_runner import (
 from app.integrations.naia.wildcard_writer import write_character_wildcard
 from app.models.character import Character
 from app.models.generation_job import GenerationJob
+from app.models.global_character import GlobalCharacter
+from app.models.global_character_generation_job import GlobalCharacterGenerationJob
+from app.models.global_character_image import GlobalCharacterImage
+from app.models.global_character_review import GlobalCharacterReview
 from app.models.image import Image
 from app.models.review import Review
 from app.models.series import Series
@@ -462,6 +467,261 @@ class GenerationService:
         review = self.db.query(Review).filter(Review.character_id == character_id).first()
         if not review:
             review = Review(character_id=character_id)
+            self.db.add(review)
+        review.cover_image_id = best.id
+        self.db.commit()
+        return best
+
+    # ── 캐릭터 목록(GlobalCharacter) 중심 생성 ──────────────────────────
+    # Character/Series 기반 생성 파이프라인과 완전히 독립적으로 동작하도록
+    # GlobalCharacter*_ 전용 테이블(global_character_images 등)만 사용한다.
+
+    def list_generation_candidates_global(
+        self,
+        *,
+        search: str | None = None,
+        limit: int = 300,
+    ) -> list[GlobalCharacter]:
+        """특징 태그 수집이 완료(collect_status == completed)되었고 아직 이미지가
+        생성되지 않은 GlobalCharacter만 반환한다."""
+        generated_ids = select(GlobalCharacterImage.global_character_id).distinct()
+        query = (
+            self.db.query(GlobalCharacter)
+            .filter(GlobalCharacter.collect_status == "completed")
+            .filter(~GlobalCharacter.id.in_(generated_ids))
+        )
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.filter(
+                (GlobalCharacter.character_tag.ilike(pattern)) | (GlobalCharacter.display_name.ilike(pattern))
+            )
+        return (
+            query.order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.id.asc())
+            .limit(limit)
+            .all()
+        )
+
+    def get_candidate_stats_global(self) -> dict[str, int]:
+        total_completed = (
+            self.db.query(GlobalCharacter).filter(GlobalCharacter.collect_status == "completed").count()
+        )
+        generated_ids = select(GlobalCharacterImage.global_character_id).distinct()
+        already_generated = (
+            self.db.query(GlobalCharacter)
+            .filter(GlobalCharacter.collect_status == "completed")
+            .filter(GlobalCharacter.id.in_(generated_ids))
+            .count()
+        )
+        return {
+            "total_completed": total_completed,
+            "already_generated": already_generated,
+            "remaining": max(0, total_completed - already_generated),
+        }
+
+    def prepare_queue_global(
+        self,
+        character_ids: list[int],
+        *,
+        prompt_level: int,
+        prompt_config: GenerationPromptConfig | None = None,
+    ) -> dict[str, object]:
+        config = prompt_config or self.get_prompt_config()
+        characters = (
+            self.db.query(GlobalCharacter)
+            .filter(GlobalCharacter.id.in_(character_ids))
+            .order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.character_tag.asc())
+            .all()
+        )
+
+        eligible: list[GlobalCharacter] = []
+        skipped: list[dict[str, object]] = []
+        for character in characters:
+            core = build_character_core(character, prompt_level)
+            if not core:
+                skipped.append(
+                    {"id": character.id, "character_tag": character.character_tag, "reason": "외형 태그 없음"}
+                )
+                continue
+            if character.collect_status != "completed":
+                skipped.append(
+                    {
+                        "id": character.id,
+                        "character_tag": character.character_tag,
+                        "reason": "특징 태그 수집 미완료",
+                    }
+                )
+                continue
+            eligible.append(character)
+
+        if not eligible:
+            raise ValueError("생성 가능한 캐릭터가 없습니다. (외형 태그 없음 또는 특징 태그 수집 미완료)")
+
+        queue_id = f"characters_{uuid.uuid4().hex[:8]}"
+        wildcard_lines = [build_character_core(character, prompt_level) or "" for character in eligible]
+        wildcard_path = write_character_wildcard(self.get_wildcards_dir(), queue_id, wildcard_lines)
+
+        sample_prompt, negative_prompt = build_full_prompt(
+            eligible[0],
+            prompt_level=prompt_level,
+            prompt_config=config,
+            queue_id=queue_id,
+            use_wildcard=True,
+        )
+        manifest = build_queue_manifest(
+            queue_id=queue_id,
+            series_tag="characters",
+            series_id=0,
+            prompt_level=prompt_level,
+            wildcard_path=wildcard_path,
+            characters=[
+                {
+                    "id": character.id,
+                    "character_tag": character.character_tag,
+                    "display_name": character.display_name,
+                    "generation_prompt": getattr(character, "generation_prompt", None),
+                    "character_core": build_character_core(character, prompt_level),
+                }
+                for character in eligible
+            ],
+            prompt_template=sample_prompt,
+            negative_prompt=negative_prompt,
+            prompt_prefix=config.prefix,
+            prompt_suffix=config.suffix,
+        )
+        manifest_path = export_queue_manifest(
+            settings.output_dir / "naia_queues" / f"{queue_id}.json",
+            manifest,
+        )
+
+        return {
+            "queue_id": queue_id,
+            "prompt_level": prompt_level,
+            "character_count": len(eligible),
+            "skipped": skipped,
+            "wildcard_path": str(wildcard_path),
+            "manifest_path": str(manifest_path),
+            "prompt_template": sample_prompt,
+            "negative_prompt": negative_prompt,
+            "prompt_prefix": config.prefix,
+            "prompt_suffix": config.suffix,
+            "characters": manifest["characters"],
+        }
+
+    def create_generation_jobs_global(
+        self,
+        queue_payload: dict[str, object],
+        *,
+        images_per_character: int,
+    ) -> list[GlobalCharacterGenerationJob]:
+        jobs: list[GlobalCharacterGenerationJob] = []
+        prompt_level = int(queue_payload.get("prompt_level") or 1)
+        stored = self.get_prompt_config()
+        config = GenerationPromptConfig(
+            prefix=str(queue_payload.get("prompt_prefix") or stored.prefix),
+            suffix=str(queue_payload.get("prompt_suffix") or stored.suffix),
+            negative_prompt=str(queue_payload.get("negative_prompt") or stored.negative_prompt),
+        )
+        negative_prompt = config.negative_prompt
+        characters = queue_payload.get("characters")
+        if not isinstance(characters, list):
+            return jobs
+
+        for item in characters:
+            if not isinstance(item, dict):
+                continue
+            character_id = item.get("id")
+            if not isinstance(character_id, int):
+                continue
+            character = self.db.query(GlobalCharacter).filter(GlobalCharacter.id == character_id).first()
+            if not character:
+                continue
+            prompt, _ = build_full_prompt(
+                character,
+                prompt_level=prompt_level,
+                prompt_config=config,
+            )
+            for _ in range(images_per_character):
+                job = GlobalCharacterGenerationJob(
+                    global_character_id=character.id,
+                    prompt_level=prompt_level,
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    count=1,
+                    status="pending",
+                )
+                self.db.add(job)
+                jobs.append(job)
+        self.db.commit()
+        for job in jobs:
+            self.db.refresh(job)
+        return jobs
+
+    def import_generated_image_global(
+        self,
+        *,
+        character: GlobalCharacter,
+        generation_job: GlobalCharacterGenerationJob,
+        image_bytes: bytes,
+        created_at: datetime | None = None,
+    ) -> GlobalCharacterImage:
+        pending_dir = self.get_pending_images_dir()
+        pending_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = (created_at or datetime.now()).strftime("%Y%m%d_%H%M%S")
+        filename = f"{timestamp}_{_safe_filename_tag(character.character_tag)}.png"
+        output_path = pending_dir / filename
+        counter = 1
+        while output_path.exists():
+            output_path = pending_dir / f"{timestamp}_{_safe_filename_tag(character.character_tag)}_{counter}.png"
+            counter += 1
+        output_path.write_bytes(image_bytes)
+
+        rel_path = output_path.relative_to(settings.project_root).as_posix()
+        check = check_generated_image(
+            output_path,
+            character=character,
+            series=None,
+            hf_token=self._settings.get_hf_token() or None,
+            hf_wd_model=self._settings.get_hf_wd_model() or None,
+        )
+        image = GlobalCharacterImage(
+            global_character_id=character.id,
+            generation_job_id=generation_job.id,
+            image_path=rel_path,
+            auto_tags=check.auto_tags,
+            auto_status=check.auto_status,
+            hair_match=check.hair_match,
+            eye_match=check.eye_match,
+            gender_pred=check.gender_pred,
+            cover_score=check.cover_score,
+        )
+        generation_job.status = "completed"
+        generation_job.output_path = rel_path
+        self.db.add(image)
+        self.db.commit()
+        self.db.refresh(image)
+        return image
+
+    def mark_job_failed_global(self, generation_job: GlobalCharacterGenerationJob, error: str) -> None:
+        generation_job.status = "failed"
+        self.db.commit()
+
+    def auto_select_cover_global(
+        self, global_character_id: int, images: list[GlobalCharacterImage]
+    ) -> GlobalCharacterImage | None:
+        """생성된 이미지 중 최고 cover_score 이미지를 커버로 자동 설정합니다."""
+        non_rejected = [img for img in images if not img.is_rejected]
+        if not non_rejected:
+            return None
+        pass_images = [img for img in non_rejected if img.auto_status == "pass"]
+        candidates = pass_images if pass_images else non_rejected
+        best = max(candidates, key=lambda img: img.cover_score or 0.0)
+        review = (
+            self.db.query(GlobalCharacterReview)
+            .filter(GlobalCharacterReview.global_character_id == global_character_id)
+            .first()
+        )
+        if not review:
+            review = GlobalCharacterReview(global_character_id=global_character_id)
             self.db.add(review)
         review.cover_image_id = best.id
         self.db.commit()

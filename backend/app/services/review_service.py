@@ -8,10 +8,13 @@ from sqlalchemy.orm import Session, contains_eager, joinedload
 from app.config import settings
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.models.character import Character
+from app.models.global_character import GlobalCharacter
+from app.models.global_character_image import GlobalCharacterImage
+from app.models.global_character_review import GlobalCharacterReview
 from app.models.image import Image
 from app.models.review import Review
 from app.models.series import Series
-from app.services.character_image_service import purge_character_images
+from app.services.character_image_service import purge_character_images, purge_global_character_images
 from app.services.db_write_queue import commit_db_session
 from app.services.prompt_service import build_generation_prompt
 
@@ -312,6 +315,133 @@ class ReviewService:
             self.db.query(Character)
             .options(joinedload(Character.images), joinedload(Character.review))
             .filter(Character.id == character_id)
+            .first()
+        )
+        if not character:
+            raise ValueError("Character not found")
+        if not character.review or character.review.review_status != "completed":
+            raise ValueError("No completed review to undo")
+
+        character.review.review_status = "pending"
+        character.review.cover_image_id = None
+        for image in character.images:
+            image.is_cover = False
+
+        commit_db_session(self.db)
+        self.db.refresh(character)
+        return character
+
+    # ── 캐릭터 목록(GlobalCharacter) 중심 리뷰 ──────────────────────────
+    # 시리즈 중심 Catalog Review와 완전히 독립적으로 GlobalCharacter*_ 테이블만 사용한다.
+
+    def _global_character_has_images(self):
+        return exists(
+            select(1).where(
+                GlobalCharacterImage.global_character_id == GlobalCharacter.id,
+                GlobalCharacterImage.is_rejected.is_(False),
+            )
+        )
+
+    def list_catalog_reviews_global(
+        self,
+        *,
+        filter_status: str = "pending",
+        search: str | None = None,
+        skip: int = 0,
+        limit: int = 30,
+    ) -> tuple[list[GlobalCharacter], int]:
+        query = (
+            self.db.query(GlobalCharacter)
+            .outerjoin(GlobalCharacterReview, GlobalCharacterReview.global_character_id == GlobalCharacter.id)
+            .options(joinedload(GlobalCharacter.images), joinedload(GlobalCharacter.review))
+            .filter(self._global_character_has_images())
+        )
+
+        if filter_status == "pending":
+            query = query.filter(
+                or_(GlobalCharacterReview.id.is_(None), GlobalCharacterReview.review_status != "completed")
+            )
+        elif filter_status == "completed":
+            query = query.filter(GlobalCharacterReview.review_status == "completed")
+
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.filter(
+                or_(GlobalCharacter.character_tag.ilike(pattern), GlobalCharacter.display_name.ilike(pattern))
+            )
+
+        total = query.order_by(None).count()
+        items = (
+            query.order_by(
+                GlobalCharacter.post_count.desc(), GlobalCharacter.character_tag.asc(), GlobalCharacter.id.asc()
+            )
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+        return items, total
+
+    def complete_catalog_review_global(
+        self,
+        global_character_id: int,
+        *,
+        cover_image_id: int | None = None,
+        gender: str | None = None,
+        rating: int | None = None,
+        final_prompt: str | None = None,
+    ) -> GlobalCharacter:
+        character = (
+            self.db.query(GlobalCharacter)
+            .options(joinedload(GlobalCharacter.images), joinedload(GlobalCharacter.review))
+            .filter(GlobalCharacter.id == global_character_id)
+            .first()
+        )
+        if not character:
+            raise ValueError("Character not found")
+
+        review = character.review
+        if not review:
+            review = GlobalCharacterReview(global_character_id=character.id)
+            self.db.add(review)
+            character.review = review
+
+        normalized_gender = normalize_gender(gender) if gender else None
+        if not normalized_gender and character.gender:
+            normalized_gender = normalize_gender(character.gender)
+        if normalized_gender:
+            review.gender = normalized_gender
+
+        if rating == 0:
+            purge_global_character_images(self.db, character)
+            review.cover_image_id = None
+        else:
+            if not cover_image_id:
+                raise ValueError("Cover image is required unless rating is 0")
+
+            cover_image = next(
+                (image for image in character.images if image.id == cover_image_id and not image.is_rejected),
+                None,
+            )
+            if not cover_image:
+                raise ValueError("Cover image not found or rejected")
+
+            review.cover_image_id = cover_image_id
+            for image in character.images:
+                image.is_cover = image.id == cover_image_id
+
+        review.rating = rating
+        review.final_prompt = final_prompt or getattr(character, "generation_prompt", None)
+        review.review_status = "completed"
+
+        commit_db_session(self.db)
+        self.db.refresh(character)
+        return character
+
+    def undo_catalog_review_global(self, global_character_id: int) -> GlobalCharacter:
+        character = (
+            self.db.query(GlobalCharacter)
+            .options(joinedload(GlobalCharacter.images), joinedload(GlobalCharacter.review))
+            .filter(GlobalCharacter.id == global_character_id)
             .first()
         )
         if not character:

@@ -333,14 +333,15 @@ class CharacterCatalogService:
         )
         return [row[0] for row in rows]
 
-    def list_uncollected_ids(self, *, limit: int = 5000) -> list[int]:
+    def list_uncollected_ids(self, *, limit: int | None = 5000) -> list[int]:
         """이미 완전히 수집 완료(collect_status == completed)된 캐릭터는 제외하고,
-        나머지(미수집/실패/부분완료/검토필요) 캐릭터의 id를 반환한다."""
-        rows = (
+        나머지(미수집/실패/부분완료/검토필요) 캐릭터의 id를 post_count desc, id asc 순으로 반환한다.
+        limit=None이면 전체를 반환한다."""
+        query = (
             self.db.query(GlobalCharacter.id)
             .filter(GlobalCharacter.collect_status != "completed")
-            .order_by(GlobalCharacter.post_count.desc())
-            .limit(limit)
-            .all()
+            .order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.id.asc())
         )
-        return [row[0] for row in rows]
+        if limit is not None:
+            query = query.limit(limit)
+        return [row[0] for row in query.all()]

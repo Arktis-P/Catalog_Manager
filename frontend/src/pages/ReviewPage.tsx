@@ -1,11 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppearanceReviewPanel } from "../components/review/AppearanceReviewPanel";
 import { CatalogReviewPanel } from "../components/review/CatalogReviewPanel";
+import { GlobalCatalogReviewPanel } from "../components/review/GlobalCatalogReviewPanel";
 import { ReviewRatingGuide } from "../components/review/ReviewRatingGuide";
 
 export function ReviewPage() {
   const [searchParams] = useSearchParams();
+  const [catalogScope, setCatalogScope] = useState<"series" | "characters">("series");
   const initialMode = searchParams.get("mode") === "appearance" ? "appearance" : "catalog";
   const initialSeriesId = useMemo(() => {
     const raw = searchParams.get("series_id");
@@ -57,7 +59,33 @@ export function ReviewPage() {
       <ReviewRatingGuide />
 
       {initialMode === "catalog" ? (
-        <CatalogReviewPanel initialSeriesId={initialSeriesId} initialCharacterId={initialCharacterId} />
+        <>
+          <div className="review-mode-tabs" role="tablist" aria-label="Catalog review scope">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={catalogScope === "series"}
+              className={`review-mode-tab${catalogScope === "series" ? " review-mode-tab--active" : ""}`}
+              onClick={() => setCatalogScope("series")}
+            >
+              시리즈
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={catalogScope === "characters"}
+              className={`review-mode-tab${catalogScope === "characters" ? " review-mode-tab--active" : ""}`}
+              onClick={() => setCatalogScope("characters")}
+            >
+              캐릭터 목록
+            </button>
+          </div>
+          {catalogScope === "series" ? (
+            <CatalogReviewPanel initialSeriesId={initialSeriesId} initialCharacterId={initialCharacterId} />
+          ) : (
+            <GlobalCatalogReviewPanel />
+          )}
+        </>
       ) : (
         <AppearanceReviewPanel />
       )}

@@ -2888,6 +2888,19 @@ button,
   pointer-events: none;
 }
 
+.global-catalog-review-row-wrapper {
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.global-catalog-review-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 4px;
+}
+
 .catalog-review-regenerate-banner {
   grid-column: 1 / -1;
   display: flex;

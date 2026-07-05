@@ -18,7 +18,7 @@ interface CharacterCatalogJobContextValue {
   startListJob: (minPostCount: number, restart?: boolean) => Promise<CatalogJob>;
   startTagsJob: (characterIds: number[]) => Promise<CatalogJob>;
   retryFailed: (limit?: number) => Promise<CatalogJob>;
-  collectAllUncollected: (limit?: number) => Promise<CatalogJob>;
+  collectAllUncollected: (limit?: number) => Promise<CatalogJob[]>;
   cancelJob: (jobId: string) => Promise<void>;
   pauseJob: (jobId: string) => Promise<void>;
   resumeJob: (jobId: string) => Promise<void>;
@@ -173,11 +173,13 @@ export function CharacterCatalogJobProvider({ children }: { children: ReactNode 
     return job;
   }, [registerStartedJob]);
 
-  const collectAllUncollected = useCallback(async (limit = 5000) => {
+  const collectAllUncollected = useCallback(async (limit?: number) => {
     setLastError(null);
-    const job = await api.collectAllUncollectedCatalogTags(limit);
-    registerStartedJob(job);
-    return job;
+    const response = await api.collectAllUncollectedCatalogTags(limit);
+    for (const job of response.items) {
+      registerStartedJob(job);
+    }
+    return response.items;
   }, [registerStartedJob]);
 
   const dismissJob = useCallback((jobId: string) => {

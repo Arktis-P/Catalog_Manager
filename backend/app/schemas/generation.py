@@ -98,3 +98,24 @@ class GenerationQueuePreviewResponse(BaseModel):
 class SuggestLevelResponse(BaseModel):
     suggested_level: int
     breakdown: dict[int, int]
+
+
+class GlobalGenerationCandidate(BaseModel):
+    id: int
+    character_tag: str
+    display_name: str
+    post_count: int
+    gender: str | None = None
+
+
+class GlobalGenerationCandidateListResponse(BaseModel):
+    items: list[GlobalGenerationCandidate]
+    total: int
+    total_completed: int = 0
+    already_generated: int = 0
+    remaining: int = 0
+
+
+class GlobalGenerationStartRequest(BaseModel):
+    character_ids: list[int] = Field(..., min_length=1, max_length=300)
+    prompt_level: int = Field(default=1, ge=1, le=5)

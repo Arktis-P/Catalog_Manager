@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { useCharacterCatalogJobs } from "../context/CharacterCatalogJobContext";
+import { useGenerationJobs } from "../context/GenerationJobContext";
 import type { GlobalCharacter } from "../types";
 import { collectStatusBadgeClass, collectStatusLabel } from "../utils/characterCatalogStatus";
 import { danbooruWikiUrl, openExternal } from "../utils/danbooruLinks";
@@ -112,6 +113,7 @@ function CharacterDetailModal({ character, onClose }: { character: GlobalCharact
 export function CharactersPage() {
   const { jobs, startListJob, startTagsJob, retryFailed, collectAllUncollected, isJobActive, lastError, clearLastError } =
     useCharacterCatalogJobs();
+  const { startCharacterGeneration, isGeneratingCharacters } = useGenerationJobs();
 
   const [items, setItems] = useState<GlobalCharacter[]>([]);
   const [total, setTotal] = useState(0);
@@ -225,6 +227,23 @@ export function CharactersPage() {
     await collectAllUncollected();
   };
 
+  const handleGenerateSelected = async () => {
+    if (selectedIds.size === 0) return;
+    await startCharacterGeneration([...selectedIds]);
+  };
+
+  const handleGenerateSingle = async (id: number) => {
+    await startCharacterGeneration([id]);
+  };
+
+  const handleGeneratePage = async () => {
+    if (items.length === 0) return;
+    const ids = items.map((item) => item.id);
+    setSelectedIds(new Set(ids));
+    await startCharacterGeneration(ids);
+    setSelectedIds(new Set());
+  };
+
   const listJobActive = isJobActive("character_catalog_list");
 
   return (
@@ -269,6 +288,16 @@ export function CharactersPage() {
           <button className="btn" type="button" onClick={() => void handleCollectAllUncollected()}>
             미수집 전체 태그 수집
           </button>
+          <span className="series-toolbar-label" style={{ marginLeft: 12 }}>이미지 생성</span>
+          <button className="btn" type="button" disabled={selectedIds.size === 0} onClick={() => void handleGenerateSelected()}>
+            선택 캐릭터 이미지 생성 ({selectedIds.size})
+          </button>
+          <button className="btn" type="button" disabled={items.length === 0} onClick={() => void handleGeneratePage()}>
+            현재 페이지 이미지 생성
+          </button>
+          {isGeneratingCharacters() ? (
+            <span className="badge badge-info">캐릭터 목록 이미지 생성 진행/대기 중</span>
+          ) : null}
         </div>
       </section>
 
@@ -430,6 +459,20 @@ export function CharactersPage() {
                           onClick={() => void handleCollectSingle(character.id)}
                         >
                           태그 수집
+                        </button>
+                        {" "}
+                        <button
+                          className="btn btn-small"
+                          type="button"
+                          disabled={character.collect_status !== "completed"}
+                          title={
+                            character.collect_status !== "completed"
+                              ? "특징 태그 수집이 완료되어야 이미지 생성이 가능합니다"
+                              : undefined
+                          }
+                          onClick={() => void handleGenerateSingle(character.id)}
+                        >
+                          이미지 생성
                         </button>
                       </td>
                     </tr>

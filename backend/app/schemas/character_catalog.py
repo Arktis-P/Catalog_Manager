@@ -102,7 +102,8 @@ class CatalogRetryFailedRequest(BaseModel):
 
 
 class CatalogCollectAllRequest(BaseModel):
-    limit: int = Field(default=5000, ge=1, le=20000)
+    limit: int | None = Field(default=None, ge=1, le=200000)
+    chunk_size: int = Field(default=5000, ge=1, le=5000)
 
 
 class CatalogJobResponse(BaseModel):

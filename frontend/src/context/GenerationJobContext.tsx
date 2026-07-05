@@ -19,11 +19,13 @@ interface GenerationJobContextValue {
     seriesId: number,
     payload?: { character_ids?: number[]; prompt_level?: number; require_confirmed?: boolean },
   ) => Promise<CollectJob>;
+  startCharacterGeneration: (characterIds: number[], promptLevel?: number) => Promise<CollectJob>;
   cancelJob: (jobId: string) => Promise<void>;
   pauseJob: (jobId: string) => Promise<void>;
   resumeJob: (jobId: string) => Promise<void>;
   dismissJob: (jobId: string) => void;
   isGeneratingSeries: (seriesId: number) => boolean;
+  isGeneratingCharacters: () => boolean;
   lastError: string | null;
   clearLastError: () => void;
 }
@@ -203,6 +205,18 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
     [registerStartedJob],
   );
 
+  const startCharacterGeneration = useCallback(
+    async (characterIds: number[], promptLevel = 1) => {
+      setLastError(null);
+      const job = normalizeGenerationJob(
+        await api.startCharacterGenerationJob({ character_ids: characterIds, prompt_level: promptLevel }),
+      );
+      registerStartedJob(job);
+      return job;
+    },
+    [registerStartedJob],
+  );
+
   const cancelJob = useCallback(async (jobId: string) => {
     const job = normalizeGenerationJob(await api.cancelGenerationJob(jobId));
     setJobs((current) => upsertJob(current, job));
@@ -243,19 +257,43 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
     [visibleJobs],
   );
 
+  const isGeneratingCharacters = useCallback(
+    () =>
+      visibleJobs.some(
+        (job) =>
+          job.series_id === 0 &&
+          job.job_type === "image_generation" &&
+          (job.status === "queued" || job.status === "running" || job.status === "paused"),
+      ),
+    [visibleJobs],
+  );
+
   const value = useMemo(
     () => ({
       jobs: visibleJobs,
       startGeneration,
+      startCharacterGeneration,
       cancelJob,
       pauseJob,
       resumeJob,
       dismissJob,
       isGeneratingSeries,
+      isGeneratingCharacters,
       lastError,
       clearLastError: () => setLastError(null),
     }),
-    [visibleJobs, startGeneration, cancelJob, pauseJob, resumeJob, dismissJob, isGeneratingSeries, lastError],
+    [
+      visibleJobs,
+      startGeneration,
+      startCharacterGeneration,
+      cancelJob,
+      pauseJob,
+      resumeJob,
+      dismissJob,
+      isGeneratingSeries,
+      isGeneratingCharacters,
+      lastError,
+    ],
   );
 
   return <GenerationJobContext.Provider value={value}>{children}</GenerationJobContext.Provider>;

@@ -287,6 +287,27 @@ export interface SuggestLevelResponse {
   breakdown: Record<number, number>;
 }
 
+export interface GlobalGenerationCandidate {
+  id: number;
+  character_tag: string;
+  display_name: string;
+  post_count: number;
+  gender: string | null;
+}
+
+export interface GlobalGenerationCandidateListResponse {
+  items: GlobalGenerationCandidate[];
+  total: number;
+  total_completed: number;
+  already_generated: number;
+  remaining: number;
+}
+
+export interface GlobalGenerationStartPayload {
+  character_ids: number[];
+  prompt_level?: number;
+}
+
 export type NotificationMode = "each" | "all_done" | "none";
 export type NotificationDisplay = "toast" | "browser" | "both";
 
@@ -383,6 +404,11 @@ export interface CatalogReviewListResponse {
   total: number;
   series_id: number;
   series_tag: string;
+}
+
+export interface GlobalCatalogReviewListResponse {
+  items: CatalogReviewItem[];
+  total: number;
 }
 
 export interface CatalogReviewCompletePayload {

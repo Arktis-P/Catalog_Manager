@@ -12,6 +12,9 @@ from app.schemas.generation import (
     GenerationPreviewResponse,
     GenerationQueuePreviewResponse,
     GenerationStartRequest,
+    GlobalGenerationCandidate,
+    GlobalGenerationCandidateListResponse,
+    GlobalGenerationStartRequest,
     NaiaStatusResponse,
     SuggestLevelResponse,
 )
@@ -50,6 +53,43 @@ def _job_to_schema(job) -> GenerationJobState:
 @router.get("/naia/status", response_model=NaiaStatusResponse)
 def get_naia_status(db: Session = Depends(get_db)):
     return GenerationService(db).naia_status()
+
+
+@router.get("/characters/candidates", response_model=GlobalGenerationCandidateListResponse)
+def list_global_generation_candidates(
+    search: str | None = Query(default=None),
+    limit: int = Query(default=300, ge=1, le=300),
+    db: Session = Depends(get_db),
+):
+    """캐릭터 목록(GlobalCharacter) 중심 생성 후보: 특징 태그 수집 완료 + 아직 이미지 미생성."""
+    service = GenerationService(db)
+    items = service.list_generation_candidates_global(search=search, limit=limit)
+    stats = service.get_candidate_stats_global()
+    return GlobalGenerationCandidateListResponse(
+        items=[
+            GlobalGenerationCandidate(
+                id=character.id,
+                character_tag=character.character_tag,
+                display_name=character.display_name,
+                post_count=character.post_count,
+                gender=character.gender,
+            )
+            for character in items
+        ],
+        total=len(items),
+        **stats,
+    )
+
+
+@router.post("/characters/start", response_model=GenerationJobState)
+def start_global_character_generation(payload: GlobalGenerationStartRequest):
+    """캐릭터 목록 중심 이미지 생성 시작. 이미 진행 중인 캐릭터 목록 생성 job이 있으면
+    새 job은 대기열에 올라가 이전 job이 끝난 뒤 자동으로 시작된다."""
+    job = generation_job_manager.start_character_generation(
+        payload.character_ids,
+        prompt_level=payload.prompt_level,
+    )
+    return _job_to_schema(job)
 
 
 @router.get("/series/{series_id}/candidates", response_model=GenerationCandidateListResponse)

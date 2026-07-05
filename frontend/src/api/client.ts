@@ -10,6 +10,7 @@ import type {
   CatalogReviewFilterStatus,
   CatalogReviewListResponse,
   CatalogStats,
+  GlobalCatalogReviewListResponse,
   CatalogJob,
   CharacterCollectResult,
   CharacterListResponse,
@@ -19,6 +20,8 @@ import type {
   GenerationCandidateListResponse,
   GenerationQueuePreview,
   GenerationStartPayload,
+  GlobalGenerationCandidateListResponse,
+  GlobalGenerationStartPayload,
   NaiaStatus,
   NotificationDisplay,
   NotificationMode,
@@ -261,10 +264,10 @@ export const api = {
       body: JSON.stringify({ limit }),
     }),
 
-  collectAllUncollectedCatalogTags: (limit = 5000) =>
-    request<CatalogJob>("/character-catalog/tags/collect-all", {
+  collectAllUncollectedCatalogTags: (limit?: number, chunkSize = 5000) =>
+    request<{ items: CatalogJob[] }>("/character-catalog/tags/collect-all", {
       method: "POST",
-      body: JSON.stringify({ limit }),
+      body: JSON.stringify({ limit: limit ?? null, chunk_size: chunkSize }),
     }),
 
   listCatalogJobs: () => request<{ items: CatalogJob[] }>("/character-catalog/jobs"),
@@ -375,6 +378,29 @@ export const api = {
   getReviewRegenerateJob: (jobId: string) =>
     request<ReviewRegenerateJob>(`/review/catalog/regenerate/jobs/${jobId}`),
 
+  listCatalogReviewsGlobal: (
+    params: { filter_status?: CatalogReviewFilterStatus; search?: string; skip?: number; limit?: number } = {},
+  ) => request<GlobalCatalogReviewListResponse>(`/review/catalog-global${buildQuery(params)}`),
+
+  completeCatalogReviewGlobal: (globalCharacterId: number, payload: CatalogReviewCompletePayload) =>
+    request<{
+      id: number;
+      review_status: string;
+      cover_image_id: number | null;
+      gender: string | null;
+      rating: number | null;
+      final_prompt: string | null;
+    }>(`/review/catalog-global/${globalCharacterId}/complete`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  undoCatalogReviewGlobal: (globalCharacterId: number) =>
+    request<{ id: number; review_status: string; cover_image_id: number | null }>(
+      `/review/catalog-global/${globalCharacterId}/undo`,
+      { method: "POST" },
+    ),
+
   dismissCatalogNeedsCheck: (characterId: number) =>
     request<{ id: number; character_status: string; needs_check_reason: string | null }>(
       `/review/catalog/${characterId}/dismiss-needs-check`,
@@ -466,6 +492,15 @@ export const api = {
 
   startGenerationJob: (seriesId: number, payload: GenerationStartPayload) =>
     request<CollectJob>(`/generation/series/${seriesId}/start`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  listGlobalGenerationCandidates: (params: { search?: string; limit?: number } = {}) =>
+    request<GlobalGenerationCandidateListResponse>(`/generation/characters/candidates${buildQuery(params)}`),
+
+  startCharacterGenerationJob: (payload: GlobalGenerationStartPayload) =>
+    request<CollectJob>("/generation/characters/start", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

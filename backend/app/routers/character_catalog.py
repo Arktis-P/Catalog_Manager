@@ -103,17 +103,21 @@ def retry_failed_catalog_tags(
     return CatalogJobResponse.from_state(job)
 
 
-@router.post("/tags/collect-all", response_model=CatalogJobResponse)
+@router.post("/tags/collect-all", response_model=CatalogJobListResponse)
 def collect_all_uncollected_catalog_tags(
     payload: CatalogCollectAllRequest,
     service: CharacterCatalogService = Depends(get_catalog_service),
 ):
+    """미수집(collect_status != completed) 캐릭터 전체를 post_count desc, id asc 순으로 모아
+    chunk_size(기본 5000)개씩 나눠 각각 하나의 통합 태그 수집 job으로 작업 목록에 올린다."""
     _require_danbooru()
     ids = service.list_uncollected_ids(limit=payload.limit)
     if not ids:
         raise HTTPException(status_code=404, detail="No uncollected characters remaining")
-    job = character_catalog_job_manager.start_catalog_tags(ids)
-    return CatalogJobResponse.from_state(job)
+    chunk_size = payload.chunk_size
+    chunks = [ids[i : i + chunk_size] for i in range(0, len(ids), chunk_size)]
+    jobs = [character_catalog_job_manager.start_catalog_tags(chunk) for chunk in chunks]
+    return CatalogJobListResponse(items=[CatalogJobResponse.from_state(job) for job in jobs])
 
 
 @router.get("/jobs", response_model=CatalogJobListResponse)

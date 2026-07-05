@@ -48,10 +48,13 @@ def _split_tags(raw: str | None) -> list[str]:
 
 
 def build_character_core(character: Character, prompt_level: int) -> str | None:
+    """character는 series-scoped Character 또는 GlobalCharacter일 수 있다.
+    GlobalCharacter에는 generation_prompt 캐시 필드가 없으므로 getattr로 안전하게 접근한다."""
     level = max(1, min(5, prompt_level))
     if level == 1:
-        if character.generation_prompt:
-            return character.generation_prompt
+        cached_prompt = getattr(character, "generation_prompt", None)
+        if cached_prompt:
+            return cached_prompt
         return build_generation_prompt(character)
 
     base = build_generation_prompt(character)

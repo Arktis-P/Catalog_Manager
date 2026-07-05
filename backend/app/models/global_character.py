@@ -49,3 +49,12 @@ class GlobalCharacter(Base):
         cascade="all, delete-orphan",
         order_by="CharacterSeriesLink.relevance_rank",
     )
+    images = relationship(
+        "GlobalCharacterImage", back_populates="global_character", cascade="all, delete-orphan"
+    )
+    generation_jobs = relationship(
+        "GlobalCharacterGenerationJob", back_populates="global_character", cascade="all, delete-orphan"
+    )
+    review = relationship(
+        "GlobalCharacterReview", back_populates="global_character", uselist=False, cascade="all, delete-orphan"
+    )

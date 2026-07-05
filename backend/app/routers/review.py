@@ -16,10 +16,11 @@ from app.schemas.review import (
     CatalogReviewRegenerateRequest,
     CatalogReviewRegenerateResponse,
     CatalogReviewUndoResponse,
+    GlobalCatalogReviewListResponse,
     ReviewRegenerateJobListResponse,
     ReviewRegenerateJobResponse,
 )
-from app.services.review_catalog_serializer import to_catalog_item
+from app.services.review_catalog_serializer import to_catalog_item, to_catalog_item_global
 from app.services.review_regenerate_job_manager import (
     ReviewRegenerateJobState,
     review_regenerate_job_manager,
@@ -251,3 +252,70 @@ def get_review_regenerate_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Regenerate job not found")
     return _job_to_response(job)
+
+
+# ── 캐릭터 목록(GlobalCharacter) 중심 리뷰 ──────────────────────────────
+
+
+@router.get("/catalog-global", response_model=GlobalCatalogReviewListResponse)
+def list_catalog_reviews_global(
+    filter_status: str = Query(default="pending", pattern="^(pending|completed|all)$"),
+    search: str | None = None,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=30, ge=1, le=100),
+    service: ReviewService = Depends(get_review_service),
+):
+    items, total = service.list_catalog_reviews_global(
+        filter_status=filter_status,
+        search=search,
+        skip=skip,
+        limit=limit,
+    )
+    return GlobalCatalogReviewListResponse(
+        items=[to_catalog_item_global(character) for character in items],
+        total=total,
+    )
+
+
+@router.post("/catalog-global/{global_character_id}/complete", response_model=CatalogReviewCompleteResponse)
+def complete_catalog_review_global(
+    global_character_id: int,
+    payload: CatalogReviewCompleteRequest,
+    service: ReviewService = Depends(get_review_service),
+):
+    try:
+        character = service.complete_catalog_review_global(
+            global_character_id,
+            cover_image_id=payload.cover_image_id,
+            gender=payload.gender,
+            rating=payload.rating,
+            final_prompt=payload.final_prompt,
+        )
+        review = character.review
+        return CatalogReviewCompleteResponse(
+            id=character.id,
+            review_status=review.review_status if review else "pending",
+            cover_image_id=review.cover_image_id if review else None,
+            gender=normalize_gender(review.gender) if review and review.gender else None,
+            rating=review.rating if review else None,
+            final_prompt=review.final_prompt if review else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/catalog-global/{global_character_id}/undo", response_model=CatalogReviewUndoResponse)
+def undo_catalog_review_global(
+    global_character_id: int,
+    service: ReviewService = Depends(get_review_service),
+):
+    try:
+        character = service.undo_catalog_review_global(global_character_id)
+        review = character.review
+        return CatalogReviewUndoResponse(
+            id=character.id,
+            review_status=review.review_status if review else "pending",
+            cover_image_id=review.cover_image_id if review else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

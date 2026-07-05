@@ -8,7 +8,17 @@ import {
 } from "../components/GenerationPromptPipeline";
 import { SeriesSearchSelect } from "../components/SeriesSearchSelect";
 import { useGenerationJobs } from "../context/GenerationJobContext";
-import type { AppSettings, GenerationCandidate, GenerationQueuePreview, NaiaStatus, Series, SuggestLevelResponse } from "../types";
+import type {
+  AppSettings,
+  GenerationCandidate,
+  GenerationQueuePreview,
+  GlobalGenerationCandidate,
+  NaiaStatus,
+  Series,
+  SuggestLevelResponse,
+} from "../types";
+
+const MAX_GLOBAL_SELECTION = 300;
 
 function pendingReviewImageUrl(imagePath: string | null | undefined): string | null {
   if (!imagePath) {
@@ -19,7 +29,23 @@ function pendingReviewImageUrl(imagePath: string | null | undefined): string | n
 }
 
 export function GenerationPage() {
-  const { jobs, startGeneration, cancelJob, dismissJob, isGeneratingSeries } = useGenerationJobs();
+  const {
+    jobs,
+    startGeneration,
+    startCharacterGeneration,
+    cancelJob,
+    dismissJob,
+    isGeneratingSeries,
+    isGeneratingCharacters,
+  } = useGenerationJobs();
+  const [mode, setMode] = useState<"series" | "characters">("series");
+  const [globalCandidates, setGlobalCandidates] = useState<GlobalGenerationCandidate[]>([]);
+  const [globalStats, setGlobalStats] = useState({ total_completed: 0, already_generated: 0, remaining: 0 });
+  const [globalSelectedIds, setGlobalSelectedIds] = useState<Set<number>>(() => new Set());
+  const [globalSearch, setGlobalSearch] = useState("");
+  const [globalPromptLevel, setGlobalPromptLevel] = useState(1);
+  const [loadingGlobalCandidates, setLoadingGlobalCandidates] = useState(false);
+  const [startingGlobal, setStartingGlobal] = useState(false);
   const [selectedSeries, setSelectedSeries] = useState<Series | null>(null);
   const [selectedSeriesId, setSelectedSeriesId] = useState<number | "">("");
   const [candidates, setCandidates] = useState<GenerationCandidate[]>([]);
@@ -66,6 +92,71 @@ export function GenerationPage() {
         .slice(0, 5),
     [jobs],
   );
+
+  const activeCharacterJob = useMemo(
+    () =>
+      jobs.find(
+        (job) =>
+          job.job_type === "image_generation" &&
+          job.series_id === 0 &&
+          (job.status === "queued" || job.status === "running" || job.status === "paused"),
+      ) ?? null,
+    [jobs],
+  );
+
+  useEffect(() => {
+    if (mode !== "characters") {
+      return;
+    }
+    void (async () => {
+      setLoadingGlobalCandidates(true);
+      setError(null);
+      try {
+        const response = await api.listGlobalGenerationCandidates({
+          search: globalSearch || undefined,
+          limit: MAX_GLOBAL_SELECTION,
+        });
+        setGlobalCandidates(response.items);
+        setGlobalStats({
+          total_completed: response.total_completed,
+          already_generated: response.already_generated,
+          remaining: response.remaining,
+        });
+        setGlobalSelectedIds(new Set(response.items.map((item) => item.id)));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "캐릭터 목록을 불러오지 못했습니다.");
+      } finally {
+        setLoadingGlobalCandidates(false);
+      }
+    })();
+  }, [mode, globalSearch]);
+
+  const toggleGlobalCandidate = (id: number) => {
+    setGlobalSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else if (next.size < MAX_GLOBAL_SELECTION) {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleStartCharacterGeneration = async () => {
+    if (globalSelectedIds.size === 0) {
+      return;
+    }
+    setStartingGlobal(true);
+    setError(null);
+    try {
+      await startCharacterGeneration(Array.from(globalSelectedIds), globalPromptLevel);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "이미지 생성 시작 실패");
+    } finally {
+      setStartingGlobal(false);
+    }
+  };
 
   useEffect(() => {
     void (async () => {
@@ -246,6 +337,27 @@ export function GenerationPage() {
 
       {error ? <div className="error-banner">{error}</div> : null}
 
+      <div className="review-mode-tabs" role="tablist" aria-label="Generation mode">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "series"}
+          className={`review-mode-tab${mode === "series" ? " review-mode-tab--active" : ""}`}
+          onClick={() => setMode("series")}
+        >
+          시리즈
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "characters"}
+          className={`review-mode-tab${mode === "characters" ? " review-mode-tab--active" : ""}`}
+          onClick={() => setMode("characters")}
+        >
+          캐릭터 목록
+        </button>
+      </div>
+
       <div className="generation-layout">
         <div className="panel generation-controls">
           <h2 className="section-title">NAIA 연결</h2>
@@ -277,6 +389,61 @@ export function GenerationPage() {
             <div className="empty-state">NAIA 상태 확인 중...</div>
           )}
 
+          {mode === "characters" ? (
+            <>
+              <h2 className="section-title">생성 대상 · 캐릭터 목록</h2>
+              <div className="form-grid">
+                <div className="field full-width">
+                  <label htmlFor="generation-global-search">캐릭터 검색</label>
+                  <input
+                    id="generation-global-search"
+                    value={globalSearch}
+                    onChange={(event) => setGlobalSearch(event.target.value)}
+                    placeholder="character tag"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="generation-global-level">Prompt Level</label>
+                  <select
+                    id="generation-global-level"
+                    value={globalPromptLevel}
+                    onChange={(event) => setGlobalPromptLevel(Number(event.target.value))}
+                  >
+                    <option value={1}>Level 1</option>
+                    <option value={2}>Level 2</option>
+                    <option value={3}>Level 3</option>
+                    <option value={4}>Level 4</option>
+                    <option value={5}>Level 5</option>
+                  </select>
+                </div>
+                <div className="field full-width">
+                  <p className="field-help">
+                    특징 태그 수집 완료 + 아직 이미지가 생성되지 않은 캐릭터만 표시됩니다. 수집 완료{" "}
+                    {globalStats.total_completed}명 · 이미 생성됨 {globalStats.already_generated}명 · 남음{" "}
+                    {globalStats.remaining}명. 최대 {MAX_GLOBAL_SELECTION}개까지 선택 가능 (선택{" "}
+                    {globalSelectedIds.size}개).
+                  </p>
+                </div>
+              </div>
+              <div className="modal-actions">
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  disabled={
+                    globalSelectedIds.size === 0 || !naiaStatus?.ready || startingGlobal || isGeneratingCharacters()
+                  }
+                  onClick={() => void handleStartCharacterGeneration()}
+                >
+                  {startingGlobal
+                    ? "시작 중..."
+                    : isGeneratingCharacters()
+                      ? "다른 캐릭터 목록 생성이 진행 중 · 대기열에 추가됨"
+                      : "이미지 생성 시작"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
           <h2 className="section-title">생성 대상</h2>
           <div className="form-grid">
             <div className="field full-width">
@@ -388,9 +555,57 @@ export function GenerationPage() {
               {starting ? "시작 중..." : "이미지 생성 시작"}
             </button>
           </div>
+            </>
+          )}
         </div>
 
         <div className="panel generation-candidates">
+          {mode === "characters" ? (
+            <>
+              <div className="section-header-row">
+                <h2 className="section-title">캐릭터 목록</h2>
+                {globalCandidates.length > 0 ? (
+                  <button
+                    className="btn btn-small"
+                    type="button"
+                    onClick={() =>
+                      setGlobalSelectedIds((current) =>
+                        current.size === globalCandidates.length
+                          ? new Set()
+                          : new Set(globalCandidates.slice(0, MAX_GLOBAL_SELECTION).map((item) => item.id)),
+                      )
+                    }
+                  >
+                    {globalSelectedIds.size === globalCandidates.length ? "전체 해제" : "전체 선택"}
+                  </button>
+                ) : null}
+              </div>
+              {loadingGlobalCandidates ? <div className="empty-state">캐릭터 불러오는 중...</div> : null}
+              {!loadingGlobalCandidates && globalCandidates.length === 0 ? (
+                <div className="empty-state">
+                  생성 가능한 캐릭터가 없습니다. (특징 태그 수집 완료 + 미생성 캐릭터만 표시)
+                </div>
+              ) : null}
+              {!loadingGlobalCandidates && globalCandidates.length > 0 ? (
+                <div className="generation-candidate-list">
+                  {globalCandidates.map((candidate) => (
+                    <label key={candidate.id} className="generation-candidate-item">
+                      <input
+                        type="checkbox"
+                        checked={globalSelectedIds.has(candidate.id)}
+                        onChange={() => toggleGlobalCandidate(candidate.id)}
+                      />
+                      <div>
+                        <strong>{candidate.character_tag}</strong>
+                        <span className="field-help"> · {candidate.post_count.toLocaleString()} posts</span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <>
           <div className="section-header-row">
             <h2 className="section-title">
               캐릭터 목록
@@ -460,6 +675,8 @@ export function GenerationPage() {
               ))}
             </div>
           ) : null}
+            </>
+          )}
         </div>
       </div>
 
@@ -518,7 +735,14 @@ export function GenerationPage() {
         </div>
       ) : null}
 
-      {activeJob ? (
+      {mode === "characters" ? (
+        activeCharacterJob ? (
+          <GenerationProgressPanel
+            job={activeCharacterJob}
+            onCancel={() => void cancelJob(activeCharacterJob.job_id)}
+          />
+        ) : null
+      ) : activeJob ? (
         <GenerationProgressPanel
           job={activeJob}
           onCancel={() => void cancelJob(activeJob.job_id)}
