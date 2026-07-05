@@ -3,6 +3,8 @@ from __future__ import annotations
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.models.character import Character
 
+NAME_WEIGHT = "1.2"
+
 MULTI_COLOR_PROMPT_TAGS = frozenset(
     {
         "red_streaks",
@@ -61,7 +63,7 @@ def build_generation_prompt(character: Character) -> str | None:
 
     inner = ", ".join(prompt_parts)
     name = character_tag_to_prompt_name(character.character_tag)
-    return f"{{{{{name}, [[{inner}]]}}}}"
+    return f"{NAME_WEIGHT}::{name}::, {inner}"
 
 
 def mask_appearance_for_catalog(character: Character) -> dict[str, str | None]:

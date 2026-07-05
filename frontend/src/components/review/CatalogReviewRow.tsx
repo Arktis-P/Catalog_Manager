@@ -3,8 +3,10 @@ import { danbooruPostsUrl, danbooruWikiUrl } from "../../utils/danbooruLinks";
 import {
   appearanceTagChips,
   buildFinalPrompt,
+  cycleGender,
   defaultEnabledTagKeys,
   genderChipClass,
+  genderChipLabel,
   resolveFinalPrompt,
 } from "../../utils/reviewPrompt";
 import { LazyReviewImage } from "./LazyReviewImage";
@@ -36,6 +38,7 @@ interface CatalogReviewRowProps {
   onDeleteCharacter?: () => void;
   onMoveSeries?: () => void;
   onRegenerate?: () => void;
+  onComplete?: () => void;
   regenerating?: boolean;
 }
 
@@ -103,6 +106,7 @@ export function CatalogReviewRow({
   onDeleteCharacter,
   onMoveSeries,
   onRegenerate,
+  onComplete,
   regenerating = false,
 }: CatalogReviewRowProps) {
   const chips = appearanceTagChips(item);
@@ -199,13 +203,14 @@ export function CatalogReviewRow({
 
         <div className="catalog-review-tags-stack">
           <div className="catalog-review-tags catalog-review-tags--hair">
-            {displayGender ? (
-              <button type="button" className={genderChipClass(displayGender)} disabled={locked}>
-                {displayGender}
-              </button>
-            ) : (
-              <span className="review-tag review-tag--muted">gender ?</span>
-            )}
+            <button
+              type="button"
+              className={genderChipClass(displayGender)}
+              disabled={locked}
+              onClick={() => onDraftChange({ ...draft, gender: cycleGender(displayGender) })}
+            >
+              {genderChipLabel(displayGender)}
+            </button>
             {hairRowChips.map((chip) => (
               <button
                 key={chip.key}
@@ -280,9 +285,22 @@ export function CatalogReviewRow({
                 promptEdited: true,
               })
             }
-            placeholder="e.g. {{hakurei reimu, [[light brown hair, red eyes]]}}"
+            placeholder="e.g. 1.2::hakurei reimu::, light brown hair, red eyes"
           />
         </div>
+
+        {onComplete ? (
+          <div className="catalog-review-complete-row">
+            <button
+              className="btn btn-primary btn-small"
+              type="button"
+              disabled={locked}
+              onClick={onComplete}
+            >
+              결정
+            </button>
+          </div>
+        ) : null}
       </aside>
     </article>
   );

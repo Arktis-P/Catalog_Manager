@@ -3,13 +3,14 @@ import { api } from "../../api/client";
 import { useReviewRegenerateJobs } from "../../context/ReviewRegenerateContext";
 import type { CatalogReviewFilterStatus, CatalogReviewItem, Series } from "../../types";
 import { danbooruPostsUrl, danbooruWikiUrl, openExternal } from "../../utils/danbooruLinks";
-import { appearanceTagChips, defaultEnabledTagKeys, resolveFinalPrompt } from "../../utils/reviewPrompt";
+import { appearanceTagChips, cycleGender, defaultEnabledTagKeys, resolveFinalPrompt } from "../../utils/reviewPrompt";
 import { pendingReviewImageUrl } from "../../utils/reviewImages";
 import { SeriesSearchSelect } from "../SeriesSearchSelect";
 import { CatalogReviewRow, createDraftForItem, type CharacterDraft } from "./CatalogReviewRow";
 import { ReviewImagePreview } from "./ReviewImagePreview";
 import { ReviewMoveSeriesModal } from "./ReviewMoveSeriesModal";
 import { toggleRating } from "./ReviewRatingStars";
+import { ReviewShortcutGuide } from "./ReviewShortcutGuide";
 
 const ROW_HEIGHT = 360;
 const ROW_HEIGHT_QUAD = 608;
@@ -623,17 +624,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
       const key = event.key.toLowerCase();
       if (key === "g") {
         event.preventDefault();
-        updateDraft(focusedItem.id, { ...focusedDraft, gender: "1girl" });
-        return;
-      }
-      if (key === "b") {
-        event.preventDefault();
-        updateDraft(focusedItem.id, { ...focusedDraft, gender: "1boy" });
-        return;
-      }
-      if (key === "n") {
-        event.preventDefault();
-        updateDraft(focusedItem.id, { ...focusedDraft, gender: "no_humans" });
+        updateDraft(focusedItem.id, { ...focusedDraft, gender: cycleGender(focusedDraft.gender) });
         return;
       }
       if (key === "r") {
@@ -725,21 +716,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
             Refresh
           </button>
         </div>
-      </div>
-
-      <div className="review-shortcut-bar">
-        <span className="review-rating-guide-inline">
-          평점: -1 대상 아님 · 0 생성 불가 · 1~2 보통 · 3 잠재 · 4 검증 · 5~6 선호
-        </span>
-        <span>←→ 이미지</span>
-        <span>↑↓ 캐릭터</span>
-        <span>0-6 / - 레이팅 (재입력 시 해제)</span>
-        <span>Enter 완료</span>
-        <span>g/b/n 성별</span>
-        <span>r 재생성 (NAIA · 기존 이미지 교체)</span>
-        <span>Ctrl+Z 취소</span>
-        <span>q/w Danbooru</span>
-        <span>Space 확대</span>
+        <ReviewShortcutGuide includeUndo />
       </div>
 
       {selectedSeries ? (
@@ -802,6 +779,9 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
                     }
                     onRegenerate={
                       rowIndex === focusIndex ? () => void regenerateFocused() : undefined
+                    }
+                    onComplete={
+                      rowIndex === focusIndex ? () => void completeFocused() : undefined
                     }
                     regenerating={locked}
                   />

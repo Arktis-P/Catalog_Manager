@@ -7,7 +7,7 @@ from app.config import settings
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.integrations.naia.wildcard_writer import wildcard_token_name
 from app.models.character import Character
-from app.services.prompt_service import build_generation_prompt, tag_to_prompt_text
+from app.services.prompt_service import NAME_WEIGHT, build_generation_prompt, tag_to_prompt_text
 
 
 @dataclass
@@ -84,7 +84,7 @@ def build_character_core(character: Character, prompt_level: int) -> str | None:
     inner = ", ".join(dict.fromkeys(inner_parts))
     if not inner:
         return base
-    return f"{{{{{name}, [[{inner}]]}}}}"
+    return f"{NAME_WEIGHT}::{name}::, {inner}"
 
 
 def _gender_tag(character: Character) -> str:

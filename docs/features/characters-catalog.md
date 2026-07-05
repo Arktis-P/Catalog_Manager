@@ -176,17 +176,18 @@ series 전용 테이블(`characters`, `images`, `generation_jobs`, `reviews`)은
 
 #### 프롬프트/와일드카드 생성 규칙
 
-캐릭터 1명은 `build_character_core()`가 `{{이름, [[태그들]]}}` 형태로 압축한다. 프롬프트
+캐릭터 1명은 `build_character_core()`가 `{가중치}::{이름}::, {태그들}` 형태로 압축한다
+(이름에 `NAME_WEIGHT`="1.2" 고정 가중치를 적용하고, 태그는 뒤에 콤마로 나열). 프롬프트
 레벨(1~5)에 따라 포함되는 외형 정보가 늘어난다 (예: `hatsune_miku`,
 `hair_color=aqua_hair`, `hair_shape=twintails, long_hair`, `eye_color=aqua_eyes`,
 `feature_tags=hair_ornament, headphones`):
 
 | 레벨 | 포함 정보 | 결과 예시 |
 |---|---|---|
-| 1 | 캐시된 `generation_prompt`가 있으면 그대로, 없으면 레벨2와 동일 (GlobalCharacter는 캐시 필드가 없어 항상 즉석 계산) | `{{hatsune miku, [[aqua hair]]}}` |
-| 2 | 머리색만 | `{{hatsune miku, [[aqua hair]]}}` |
-| 3 | + 머리 모양, 눈 색 | `{{hatsune miku, [[aqua hair, twintails, long hair, aqua eyes]]}}` |
-| 4~5 | + 특징 태그(feature_tags) | `{{hatsune miku, [[aqua hair, twintails, long hair, aqua eyes, hair ornament, headphones]]}}` |
+| 1 | 캐시된 `generation_prompt`가 있으면 그대로, 없으면 레벨2와 동일 (GlobalCharacter는 캐시 필드가 없어 항상 즉석 계산) | `1.2::hatsune miku::, aqua hair` |
+| 2 | 머리색만 | `1.2::hatsune miku::, aqua hair` |
+| 3 | + 머리 모양, 눈 색 | `1.2::hatsune miku::, aqua hair, twintails, long hair, aqua eyes` |
+| 4~5 | + 특징 태그(feature_tags) | `1.2::hatsune miku::, aqua hair, twintails, long hair, aqua eyes, hair ornament, headphones` |
 
 밑줄(`_`)은 공백으로 치환되고, `multi_color_hair`가 있으면 `streaked_hair`를 제외한 태그가
 머리색 뒤에 추가된다.
@@ -203,7 +204,7 @@ __set_artists_4.5.2__, __set_qualityTags__,
 
 1girl,,
 
-{{hatsune miku, [[aqua hair, twintails, long hair, aqua eyes]]}},
+1.2::hatsune miku::, aqua hair, twintails, long hair, aqua eyes,
 
 solo, solo focus, portrait, smile
 ```
@@ -213,9 +214,9 @@ solo, solo focus, portrait, smile
 만들어 캐릭터당 한 줄씩 기록한다:
 
 ```
-{{hatsune miku, [[aqua hair, twintails, long hair, aqua eyes]]}}
-{{kagamine rin, [[blonde hair, short hair, orange eyes]]}}
-{{megurine luka, [[pink hair, long hair, aqua eyes]]}}
+1.2::hatsune miku::, aqua hair, twintails, long hair, aqua eyes
+1.2::kagamine rin::, blonde hair, short hair, orange eyes
+1.2::megurine luka::, pink hair, long hair, aqua eyes
 ```
 
 이때 실제 프롬프트의 캐릭터 코어 자리에는 `__*catalogue_manager/{queue_id 슬러그}_characters__`

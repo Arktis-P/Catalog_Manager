@@ -78,10 +78,6 @@ export function buildFinalPrompt(
   enabledTagKeys: Set<string>,
   chips: ReturnType<typeof appearanceTagChips>,
 ): string | null {
-  if (!basePrompt) {
-    return null;
-  }
-
   const innerParts: string[] = [];
   for (const chip of chips) {
     if (!enabledTagKeys.has(chip.key)) {
@@ -97,8 +93,10 @@ export function buildFinalPrompt(
     return basePrompt;
   }
 
+  // generation_prompt가 비어 있어도(예: 아직 이미지 생성 job이 캐시하지 않은 GlobalCharacter)
+  // 항목에 표시된 외형 태그만으로 기본 프롬프트를 구성해 보여준다.
   const name = characterTagToPromptName(characterTag);
-  return `{{${name}, [[${innerParts.join(", ")}]]}}`;
+  return `1.2::${name}::, ${innerParts.join(", ")}`;
 }
 
 export function defaultEnabledTagKeys(chips: ReturnType<typeof appearanceTagChips>): Set<string> {
@@ -131,7 +129,22 @@ export function genderChipClass(gender: string | null | undefined): string {
   if (gender === "no_humans") {
     return "review-tag review-tag--nonhuman";
   }
-  return "review-tag";
+  return "review-tag review-tag--muted";
+}
+
+export function genderChipLabel(gender: string | null | undefined): string {
+  if (gender === "1girl" || gender === "1boy" || gender === "no_humans") {
+    return gender;
+  }
+  return "gender ?";
+}
+
+const GENDER_CYCLE: Array<string | null> = ["1girl", "1boy", "no_humans", null];
+
+export function cycleGender(gender: string | null | undefined): string | null {
+  const index = GENDER_CYCLE.indexOf(gender ?? null);
+  const nextIndex = (index + 1) % GENDER_CYCLE.length;
+  return GENDER_CYCLE[nextIndex];
 }
 
 export function resolveFinalPrompt(

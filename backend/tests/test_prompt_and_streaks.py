@@ -22,7 +22,7 @@ def test_generation_prompt_basic():
         hair_color="black_hair",
         multi_color_hair=None,
     )
-    assert build_generation_prompt(character) == "{{hakurei reimu, [[black hair]]}}"
+    assert build_generation_prompt(character) == "1.2::hakurei reimu::, black hair"
 
 
 def test_generation_prompt_with_streaks():
@@ -33,5 +33,5 @@ def test_generation_prompt_with_streaks():
     )
     assert (
         build_generation_prompt(character)
-        == "{{tokai teio (umamusume), [[brown hair, white streaks]]}}"
+        == "1.2::tokai teio (umamusume)::, brown hair, white streaks"
     )
