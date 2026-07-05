@@ -810,6 +810,14 @@ button,
   max-width: 84px;
 }
 
+.characters-table-compact .col-character-image {
+  width: 160px;
+  min-width: 160px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .badge-gender-boy {
   color: #9fd3f5;
   border-color: rgba(66, 148, 212, 0.4);

@@ -36,6 +36,8 @@ class GlobalCharacterResponse(BaseModel):
     primary_series_tag: str | None
     related_series_count: int
     series_links: list[CharacterSeriesLinkResponse]
+    image_count: int
+    has_cover_image: bool
     created_at: datetime
     updated_at: datetime
 
@@ -46,6 +48,7 @@ class GlobalCharacterResponse(BaseModel):
         primary_tag = None
         if primary is not None:
             primary_tag = primary.series.series_tag if primary.series else primary.copyright_tag
+        review = character.review
         return cls(
             id=character.id,
             character_tag=character.character_tag,
@@ -66,6 +69,8 @@ class GlobalCharacterResponse(BaseModel):
             last_collected_at=character.last_collected_at,
             primary_series_tag=primary_tag,
             related_series_count=len(links),
+            image_count=len(character.images),
+            has_cover_image=bool(review and review.cover_image_id is not None),
             series_links=[
                 CharacterSeriesLinkResponse(
                     series_id=link.series_id,

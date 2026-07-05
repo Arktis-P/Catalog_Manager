@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import or_
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.integrations.danbooru.appearance_extractor import (
@@ -17,6 +17,8 @@ from app.integrations.danbooru.client import DanbooruClient
 from app.integrations.danbooru.series_collector import tag_to_display_name
 from app.models.character_series_link import CharacterSeriesLink
 from app.models.global_character import GlobalCharacter
+from app.models.global_character_image import GlobalCharacterImage
+from app.models.global_character_review import GlobalCharacterReview
 from app.models.series import Series
 from app.models.setting import Setting
 from app.services.db_write_queue import commit_db_session
@@ -263,7 +265,11 @@ class CharacterCatalogService:
     def get_character(self, character_id: int) -> GlobalCharacter | None:
         return (
             self.db.query(GlobalCharacter)
-            .options(selectinload(GlobalCharacter.series_links).selectinload(CharacterSeriesLink.series))
+            .options(
+                selectinload(GlobalCharacter.series_links).selectinload(CharacterSeriesLink.series),
+                selectinload(GlobalCharacter.images),
+                selectinload(GlobalCharacter.review),
+            )
             .filter(GlobalCharacter.id == character_id)
             .first()
         )
@@ -277,13 +283,17 @@ class CharacterCatalogService:
         series_id: int | None = None,
         min_post_count: int | None = None,
         max_post_count: int | None = None,
+        has_image: bool | None = None,
+        has_cover: bool | None = None,
         sort_by: str = "post_count",
         sort_order: str = "desc",
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[list[GlobalCharacter], int]:
         query = self.db.query(GlobalCharacter).options(
-            selectinload(GlobalCharacter.series_links).selectinload(CharacterSeriesLink.series)
+            selectinload(GlobalCharacter.series_links).selectinload(CharacterSeriesLink.series),
+            selectinload(GlobalCharacter.images),
+            selectinload(GlobalCharacter.review),
         )
 
         if search:
@@ -307,6 +317,25 @@ class CharacterCatalogService:
             query = query.filter(GlobalCharacter.post_count <= max_post_count)
         if series_id is not None:
             query = query.join(CharacterSeriesLink).filter(CharacterSeriesLink.series_id == series_id)
+
+        image_exists = exists(
+            select(1).where(GlobalCharacterImage.global_character_id == GlobalCharacter.id)
+        )
+        if has_image is True:
+            query = query.filter(image_exists)
+        elif has_image is False:
+            query = query.filter(~image_exists)
+
+        cover_exists = exists(
+            select(1).where(
+                GlobalCharacterReview.global_character_id == GlobalCharacter.id,
+                GlobalCharacterReview.cover_image_id.isnot(None),
+            )
+        )
+        if has_cover is True:
+            query = query.filter(cover_exists)
+        elif has_cover is False:
+            query = query.filter(~cover_exists)
 
         sort_columns = {
             "post_count": GlobalCharacter.post_count,

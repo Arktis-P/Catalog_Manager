@@ -97,6 +97,14 @@ function CharacterDetailModal({ character, onClose }: { character: GlobalCharact
                   </ul>
                 </td>
               </tr>
+              <tr>
+                <td>이미지</td>
+                <td>
+                  {character.image_count > 0 ? `생성됨 (${character.image_count}장)` : "미생성"}
+                  {" · "}
+                  {character.has_cover_image ? "커버 선택됨" : "커버 미선택"}
+                </td>
+              </tr>
               <tr><td>마지막 수집</td><td>{formatDate(character.last_collected_at)}</td></tr>
               <tr><td>재시도 횟수</td><td>{character.retry_count}</td></tr>
               {character.error_message ? (
@@ -124,6 +132,8 @@ export function CharactersPage() {
   const [search, setSearch] = useState("");
   const [genderFilter, setGenderFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [imageFilter, setImageFilter] = useState<"" | "yes" | "no">("");
+  const [coverFilter, setCoverFilter] = useState<"" | "yes" | "no">("");
   const [sortBy, setSortBy] = useState("post_count");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [pageSize, setPageSize] = useState(100);
@@ -140,7 +150,7 @@ export function CharactersPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, genderFilter, statusFilter, pageSize, sortBy, sortOrder]);
+  }, [search, genderFilter, statusFilter, imageFilter, coverFilter, pageSize, sortBy, sortOrder]);
 
   const loadCharacters = async () => {
     setLoading(true);
@@ -150,6 +160,8 @@ export function CharactersPage() {
         search: search || undefined,
         gender: genderFilter || undefined,
         collect_status: statusFilter || undefined,
+        has_image: imageFilter ? imageFilter === "yes" : undefined,
+        has_cover: coverFilter ? coverFilter === "yes" : undefined,
         sort_by: sortBy,
         sort_order: sortOrder,
         skip: (currentPage - 1) * pageSize,
@@ -167,7 +179,7 @@ export function CharactersPage() {
   useEffect(() => {
     void loadCharacters();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, genderFilter, statusFilter, sortBy, sortOrder, currentPage, pageSize]);
+  }, [search, genderFilter, statusFilter, imageFilter, coverFilter, sortBy, sortOrder, currentPage, pageSize]);
 
   // 목록/통합 수집 작업이 끝나면 목록을 자동으로 새로고침 (진행 상태 자체는 GlobalTaskBar에 표시됨)
   // 여러 태그 수집 job이 동시에 진행될 수 있으므로, 완료된 job 집합이 바뀔 때마다 새로고침한다.
@@ -327,6 +339,26 @@ export function CharactersPage() {
               <option value="">All</option>
               {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{collectStatusLabel(s)}</option>)}
             </select>
+            <label className="series-toolbar-label" htmlFor="image-filter">이미지 생성</label>
+            <select
+              id="image-filter"
+              value={imageFilter}
+              onChange={(e) => setImageFilter(e.target.value as "" | "yes" | "no")}
+            >
+              <option value="">All</option>
+              <option value="yes">생성됨</option>
+              <option value="no">미생성</option>
+            </select>
+            <label className="series-toolbar-label" htmlFor="cover-filter">커버 선택</label>
+            <select
+              id="cover-filter"
+              value={coverFilter}
+              onChange={(e) => setCoverFilter(e.target.value as "" | "yes" | "no")}
+            >
+              <option value="">All</option>
+              <option value="yes">선택됨</option>
+              <option value="no">미선택</option>
+            </select>
             <label className="series-toolbar-label" htmlFor="sort-by">Sort</label>
             <select id="sort-by" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
               <option value="post_count">post count</option>
@@ -393,6 +425,7 @@ export function CharactersPage() {
                     <th className="col-appearance">눈색</th>
                     <th className="col-appearance">기타 외형</th>
                     <th className="col-gender">성별</th>
+                    <th className="col-character-image">이미지</th>
                     <th className="col-row-action"></th>
                   </tr>
                 </thead>
@@ -452,6 +485,15 @@ export function CharactersPage() {
                       <td className="col-gender">
                         {character.gender ? <span className={genderBadgeClass(character.gender)}>{character.gender}</span> : "-"}
                       </td>
+                      <td className="col-character-image">
+                        <span className={`badge ${character.image_count > 0 ? "badge-success" : "badge-muted"}`}>
+                          {character.image_count > 0 ? `생성됨 (${character.image_count})` : "미생성"}
+                        </span>
+                        {" "}
+                        <span className={`badge ${character.has_cover_image ? "badge-success" : "badge-muted"}`}>
+                          {character.has_cover_image ? "커버 선택됨" : "커버 미선택"}
+                        </span>
+                      </td>
                       <td className="col-row-action">
                         <button
                           className="btn btn-small"
@@ -478,7 +520,7 @@ export function CharactersPage() {
                     </tr>
                   ))}
                   {items.length === 0 ? (
-                    <tr><td colSpan={13} className="empty-state">캐릭터가 없습니다. 먼저 목록 수집을 실행하세요.</td></tr>
+                    <tr><td colSpan={14} className="empty-state">캐릭터가 없습니다. 먼저 목록 수집을 실행하세요.</td></tr>
                   ) : null}
                 </tbody>
               </table>

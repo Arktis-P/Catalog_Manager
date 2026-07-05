@@ -240,6 +240,8 @@ export const api = {
     series_id?: number;
     min_post_count?: number;
     max_post_count?: number;
+    has_image?: boolean;
+    has_cover?: boolean;
     sort_by?: string;
     sort_order?: string;
     skip?: number;

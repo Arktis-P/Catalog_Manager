@@ -199,6 +199,8 @@ export interface GlobalCharacter {
   primary_series_tag: string | null;
   related_series_count: number;
   series_links: CharacterSeriesLinkInfo[];
+  image_count: number;
+  has_cover_image: boolean;
   created_at: string;
   updated_at: string;
 }
