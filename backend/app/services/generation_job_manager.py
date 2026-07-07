@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import uuid
 from collections import defaultdict, deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -15,6 +16,9 @@ from app.integrations.naia.generation_runner import (
 from app.models.character import Character
 from app.models.generation_job import GenerationJob
 from app.models.global_character import GlobalCharacter
+from app.models.global_character_generation_job import GlobalCharacterGenerationJob
+from app.models.image import Image
+from app.models.global_character_image import GlobalCharacterImage
 from app.models.series import Series
 from app.services.generation_prompt_builder import build_full_prompt
 from app.services.generation_service import GenerationService
@@ -28,11 +32,57 @@ from app.services.series_generation_status import (
 _MAX_PROMPT_LEVEL = 5
 _MAX_ESCALATIONS = 2
 
+# 저장/자동검사(WD 태거 등 외부 호출 포함)를 NAIA 다음 요청과 겹쳐서 실행하기 위한 후처리 전용 풀.
+# NAIA 호출 자체는 여전히 순차적이지만, 후처리는 다음 이미지 생성 요청을 막지 않는다.
+_POSTPROCESS_WORKERS = 2
+
 JOB_TYPE_IMAGE_GENERATION = "image_generation"
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _postprocess_character_image(character_id: int, generation_job_id: int, image_bytes: bytes) -> Image:
+    """시리즈(Character) 이미지 저장 + 자동검사. 메인 생성 스레드와 별도 세션/스레드에서 실행된다."""
+    db = SessionLocal()
+    try:
+        character = db.query(Character).filter(Character.id == character_id).first()
+        generation_job = db.query(GenerationJob).filter(GenerationJob.id == generation_job_id).first()
+        if not character or not generation_job:
+            raise ValueError("Character 또는 GenerationJob을 찾을 수 없습니다.")
+        service = GenerationService(db)
+        return service.import_generated_image(
+            character=character,
+            generation_job=generation_job,
+            image_bytes=image_bytes,
+        )
+    finally:
+        db.close()
+
+
+def _postprocess_global_character_image(
+    character_id: int, generation_job_id: int, image_bytes: bytes
+) -> GlobalCharacterImage:
+    """캐릭터 목록(GlobalCharacter) 이미지 저장 + 자동검사. 메인 생성 스레드와 별도 세션/스레드에서 실행된다."""
+    db = SessionLocal()
+    try:
+        character = db.query(GlobalCharacter).filter(GlobalCharacter.id == character_id).first()
+        generation_job = (
+            db.query(GlobalCharacterGenerationJob)
+            .filter(GlobalCharacterGenerationJob.id == generation_job_id)
+            .first()
+        )
+        if not character or not generation_job:
+            raise ValueError("GlobalCharacter 또는 GenerationJob을 찾을 수 없습니다.")
+        service = GenerationService(db)
+        return service.import_generated_image_global(
+            character=character,
+            generation_job=generation_job,
+            image_bytes=image_bytes,
+        )
+    finally:
+        db.close()
 
 
 @dataclass
@@ -75,6 +125,9 @@ class GenerationJobManager:
         self._character_queue: deque[str] = deque()
         self._character_job_kwargs: dict[str, dict] = {}
         self._active_character_job: str | None = None
+        self._postprocess_executor = ThreadPoolExecutor(
+            max_workers=_POSTPROCESS_WORKERS, thread_name_prefix="gen-postprocess"
+        )
 
     def get_job(self, job_id: str) -> GenerationBatchState | None:
         with self._lock:
@@ -269,9 +322,50 @@ class GenerationJobManager:
             for key, value in fields.items():
                 setattr(job, key, value)
 
+    def _increment_job(self, job_id: str, **deltas: int) -> None:
+        """후처리 콜백(별도 스레드)에서 완료/실패/자동검사 카운터를 안전하게 증가시킨다."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return
+            for key, delta in deltas.items():
+                setattr(job, key, getattr(job, key) + delta)
+
     def _is_cancelled(self, job_id: str) -> bool:
         with self._lock:
             return job_id in self._cancelled
+
+    def _make_postprocess_callback(self, job_id: str, character_tag: str, index: int, total: int):
+        """후처리(파일저장·자동검사) future 완료 시 진행률/카운터를 갱신하는 콜백을 만든다.
+
+        콜백은 후처리 워커 스레드에서 실행되므로 공유 상태는 반드시 락을 타는
+        _increment_job/_update_job을 통해서만 건드린다.
+        """
+
+        def _callback(future: Future) -> None:
+            try:
+                image = future.result()
+            except Exception as exc:
+                self._increment_job(job_id, failed=1)
+                self._update_job(job_id, message=f"{character_tag} 실패: {exc}")
+                return
+            status_field = {
+                "pass": "auto_pass",
+                "warning": "auto_warning",
+                "reject_candidate": "auto_reject",
+            }.get(image.auto_status)
+            deltas: dict[str, int] = {"completed": 1}
+            if status_field:
+                deltas[status_field] = 1
+            self._increment_job(job_id, **deltas)
+            self._update_job(
+                job_id,
+                current=index,
+                last_image_path=image.image_path,
+                message=f"{character_tag} 저장 · 자동검사 {image.auto_status} ({index}/{total})",
+            )
+
+        return _callback
 
     def _run_generation(
         self,
@@ -365,12 +459,7 @@ class GenerationJobManager:
                 current=0,
             )
 
-            completed = 0
-            failed = 0
-            auto_pass = 0
-            auto_warning = 0
-            auto_reject = 0
-            char_batch_images: dict[int, list] = defaultdict(list)
+            pending_futures: list[tuple[int, Future]] = []
             for index, generation_job in enumerate(jobs, start=1):
                 if self._is_cancelled(job_id):
                     restore_series_status(db, series, status_before_generation)
@@ -386,7 +475,7 @@ class GenerationJobManager:
 
                 character = db.query(Character).filter(Character.id == generation_job.character_id).first()
                 if not character:
-                    failed += 1
+                    self._increment_job(job_id, failed=1)
                     service.mark_job_failed(generation_job, "Character not found")
                     continue
 
@@ -414,40 +503,41 @@ class GenerationJobManager:
                         known_history_ids=known_history_ids,
                         on_retry=_on_retry,
                     )
-                    image = service.import_generated_image(
-                        character=character,
-                        generation_job=generation_job,
-                        image_bytes=image_bytes,
+                    # 저장·자동검사(HF 태거 호출 포함)는 별도 스레드로 넘기고, 메인 루프는
+                    # 곧바로 다음 NAIA 요청으로 넘어간다 (후처리와 다음 생성이 겹쳐 실행됨).
+                    future = self._postprocess_executor.submit(
+                        _postprocess_character_image, character.id, generation_job.id, image_bytes
                     )
-                    char_batch_images[generation_job.character_id].append(image)
-                    completed += 1
-                    if image.auto_status == "pass":
-                        auto_pass += 1
-                    elif image.auto_status == "warning":
-                        auto_warning += 1
-                    elif image.auto_status == "reject_candidate":
-                        auto_reject += 1
-                    self._update_job(
-                        job_id,
-                        completed=completed,
-                        failed=failed,
-                        auto_pass=auto_pass,
-                        auto_warning=auto_warning,
-                        auto_reject=auto_reject,
-                        current=index,
-                        last_image_path=image.image_path,
-                        message=f"{character.character_tag} 저장 · 자동검사 {image.auto_status} ({index}/{len(jobs)})",
+                    future.add_done_callback(
+                        self._make_postprocess_callback(job_id, character.character_tag, index, len(jobs))
                     )
+                    pending_futures.append((generation_job.character_id, future))
                 except Exception as exc:
-                    failed += 1
+                    self._increment_job(job_id, failed=1)
                     service.mark_job_failed(generation_job, str(exc))
                     self._update_job(
                         job_id,
-                        completed=completed,
-                        failed=failed,
                         current=index,
                         message=f"{character.character_tag} 실패: {exc}",
                     )
+
+            # 에스컬레이션/커버 선택은 이번 배치의 자동검사 결과가 필요하므로, 아직 끝나지
+            # 않은 후처리(태깅 등)가 있다면 여기서 완료를 기다린다.
+            char_batch_images: dict[int, list] = defaultdict(list)
+            for char_id, future in pending_futures:
+                try:
+                    char_batch_images[char_id].append(future.result())
+                except Exception:
+                    pass  # 실패 카운트는 완료 콜백에서 이미 반영됨
+
+            # 이후 에스컬레이션/최종 요약에서 이어서 누적할 수 있도록 후처리 콜백이
+            # 반영한 카운터를 로컬 변수로 동기화한다.
+            job_snapshot = self.get_job(job_id)
+            completed = job_snapshot.completed if job_snapshot else 0
+            failed = job_snapshot.failed if job_snapshot else 0
+            auto_pass = job_snapshot.auto_pass if job_snapshot else 0
+            auto_warning = job_snapshot.auto_warning if job_snapshot else 0
+            auto_reject = job_snapshot.auto_reject if job_snapshot else 0
 
             # ── 자동 레벨 에스컬레이션 ──────────────────────────────────────
             escalation_chars = [
@@ -673,12 +763,7 @@ class GenerationJobManager:
                 current=0,
             )
 
-            completed = 0
-            failed = 0
-            auto_pass = 0
-            auto_warning = 0
-            auto_reject = 0
-            char_batch_images: dict[int, list] = defaultdict(list)
+            pending_futures: list[tuple[int, Future]] = []
             for index, generation_job in enumerate(jobs, start=1):
                 if self._is_cancelled(job_id):
                     break
@@ -694,7 +779,7 @@ class GenerationJobManager:
                     .first()
                 )
                 if not character:
-                    failed += 1
+                    self._increment_job(job_id, failed=1)
                     service.mark_job_failed_global(generation_job, "Character not found")
                     continue
 
@@ -722,40 +807,38 @@ class GenerationJobManager:
                         known_history_ids=known_history_ids,
                         on_retry=_on_retry,
                     )
-                    image = service.import_generated_image_global(
-                        character=character,
-                        generation_job=generation_job,
-                        image_bytes=image_bytes,
+                    # 저장·자동검사(HF 태거 호출 포함)는 별도 스레드로 넘기고, 메인 루프는
+                    # 곧바로 다음 NAIA 요청으로 넘어간다.
+                    future = self._postprocess_executor.submit(
+                        _postprocess_global_character_image, character.id, generation_job.id, image_bytes
                     )
-                    char_batch_images[generation_job.global_character_id].append(image)
-                    completed += 1
-                    if image.auto_status == "pass":
-                        auto_pass += 1
-                    elif image.auto_status == "warning":
-                        auto_warning += 1
-                    elif image.auto_status == "reject_candidate":
-                        auto_reject += 1
-                    self._update_job(
-                        job_id,
-                        completed=completed,
-                        failed=failed,
-                        auto_pass=auto_pass,
-                        auto_warning=auto_warning,
-                        auto_reject=auto_reject,
-                        current=index,
-                        last_image_path=image.image_path,
-                        message=f"{character.character_tag} 저장 · 자동검사 {image.auto_status} ({index}/{len(jobs)})",
+                    future.add_done_callback(
+                        self._make_postprocess_callback(job_id, character.character_tag, index, len(jobs))
                     )
+                    pending_futures.append((generation_job.global_character_id, future))
                 except Exception as exc:
-                    failed += 1
+                    self._increment_job(job_id, failed=1)
                     service.mark_job_failed_global(generation_job, str(exc))
                     self._update_job(
                         job_id,
-                        completed=completed,
-                        failed=failed,
                         current=index,
                         message=f"{character.character_tag} 실패: {exc}",
                     )
+
+            # 커버 자동 선택에 필요한 자동검사 결과를 위해 남은 후처리 완료를 기다린다.
+            char_batch_images: dict[int, list] = defaultdict(list)
+            for char_id, future in pending_futures:
+                try:
+                    char_batch_images[char_id].append(future.result())
+                except Exception:
+                    pass  # 실패 카운트는 완료 콜백에서 이미 반영됨
+
+            job_snapshot = self.get_job(job_id)
+            completed = job_snapshot.completed if job_snapshot else 0
+            failed = job_snapshot.failed if job_snapshot else 0
+            auto_pass = job_snapshot.auto_pass if job_snapshot else 0
+            auto_warning = job_snapshot.auto_warning if job_snapshot else 0
+            auto_reject = job_snapshot.auto_reject if job_snapshot else 0
 
             if not self._is_cancelled(job_id):
                 self._update_job(job_id, message="커버 이미지 자동 선택 중...")
