@@ -30,9 +30,13 @@ function displayValue(value: string | null | undefined): string {
 }
 
 // 관련도(빈도) 순으로 저장된 콤마 구분 태그 문자열에서 앞쪽 n개만 취한다.
-function firstNTags(value: string | null | undefined, n: number): string | null {
+function firstNTags(value: string | null | undefined, n: number, stripSuffix?: string): string | null {
   if (!value || !value.trim()) return null;
-  const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+  const parts = value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => (stripSuffix && part.endsWith(stripSuffix) ? part.slice(0, -stripSuffix.length) : part));
   if (parts.length === 0) return null;
   return parts.slice(0, n).join(", ");
 }
@@ -501,16 +505,16 @@ export function CharactersPage() {
                         {character.primary_series_tag ?? "-"}
                       </td>
                       <td className="col-appearance" title={character.hair_color ?? ""}>
-                        {firstNTags(character.hair_color, 2) ?? "-"}
+                        {firstNTags(character.hair_color, 2, "_hair") ?? "-"}
                       </td>
                       <td className="col-appearance" title={character.multi_color_hair ?? ""}>
-                        {firstNTags(character.multi_color_hair, 1) ?? "-"}
+                        {firstNTags(character.multi_color_hair, 1, "_hair") ?? "-"}
                       </td>
                       <td className="col-appearance" title={character.hair_shape ?? ""}>
                         {firstNTags(character.hair_shape, 1) ?? "-"}
                       </td>
                       <td className="col-appearance" title={character.eye_color ?? ""}>
-                        {firstNTags(character.eye_color, 1) ?? "-"}
+                        {firstNTags(character.eye_color, 1, "_eyes") ?? "-"}
                       </td>
                       <td className="col-appearance" title={character.feature_tags ?? ""}>
                         {firstNTags(character.feature_tags, 1) ?? "-"}

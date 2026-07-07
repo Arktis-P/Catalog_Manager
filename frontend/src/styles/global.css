@@ -791,9 +791,9 @@ button,
 }
 
 .characters-table-compact .col-appearance {
-  width: 110px;
-  min-width: 110px;
-  max-width: 110px;
+  width: 55px;
+  min-width: 55px;
+  max-width: 55px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
