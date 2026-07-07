@@ -92,6 +92,15 @@ export interface CatalogListResponse {
   total: number;
 }
 
+export interface GlobalCatalogItem extends Omit<CatalogItem, "series_id"> {
+  series_id: number | null;
+}
+
+export interface GlobalCatalogListResponse {
+  items: GlobalCatalogItem[];
+  total: number;
+}
+
 export interface CatalogStats {
   series_count: number;
   character_count: number;
@@ -455,6 +464,7 @@ export interface CatalogReviewCompletePayload {
   gender?: string | null;
   rating?: number | null;
   final_prompt?: string | null;
+  selected_tags?: string | null;
 }
 
 export interface ReviewRegenerateJob {
@@ -462,6 +472,7 @@ export interface ReviewRegenerateJob {
   character_id: number;
   character_tag: string;
   series_tag: string;
+  scope: string;
   status: string;
   phase: string;
   message: string;

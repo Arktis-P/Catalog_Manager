@@ -119,6 +119,25 @@ export function defaultEnabledTagKeys(chips: ReturnType<typeof appearanceTagChip
   return enabled;
 }
 
+export function selectedTagsPayload(
+  item: {
+    gender: string | null;
+    multi_color_hair: string | null;
+    hair_color: string | null;
+    hair_shape: string | null;
+    eye_color: string | null;
+    feature_tags: string | null;
+  },
+  enabledTagKeys: Set<string>,
+): string | null {
+  const chips = appearanceTagChips(item);
+  const enabled = enabledTagKeys.size > 0 ? enabledTagKeys : defaultEnabledTagKeys(chips);
+  const rawTags = chips
+    .filter((chip) => chip.group !== "gender" && enabled.has(chip.key))
+    .map((chip) => chip.key.slice(chip.key.indexOf(":") + 1));
+  return rawTags.length > 0 ? rawTags.join(",") : null;
+}
+
 export function genderChipClass(gender: string | null | undefined): string {
   if (gender === "1girl") {
     return "review-tag review-tag--girl";

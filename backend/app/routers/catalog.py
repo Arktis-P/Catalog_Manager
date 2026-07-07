@@ -8,6 +8,7 @@ from app.schemas.character import (
     CatalogItemResponse,
     CatalogItemUpdateRequest,
     CatalogListResponse,
+    GlobalCatalogListResponse,
 )
 from app.services.catalog_service import CatalogService
 
@@ -167,6 +168,25 @@ def list_catalog(
         limit=limit,
     )
     return CatalogListResponse(items=items, total=total)
+
+
+@router.get("/global", response_model=GlobalCatalogListResponse)
+def list_global_catalog(
+    rating: int | None = Query(default=None, ge=-1, le=6),
+    gender: str | None = None,
+    search: str | None = None,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+    service: CatalogService = Depends(get_catalog_service),
+):
+    items, total = service.list_global_catalog(
+        rating=rating,
+        gender=gender,
+        search=search,
+        skip=skip,
+        limit=limit,
+    )
+    return GlobalCatalogListResponse(items=items, total=total)
 
 
 @router.patch("/{character_id}", response_model=CatalogItemResponse)

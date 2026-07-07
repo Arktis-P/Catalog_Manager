@@ -228,6 +228,7 @@ class ReviewService:
         gender: str | None = None,
         rating: int | None = None,
         final_prompt: str | None = None,
+        selected_tags: str | None = None,
     ) -> Character:
         character = (
             self.db.query(Character)
@@ -251,12 +252,15 @@ class ReviewService:
             character.gender = normalized_gender
             review.gender = normalized_gender
 
-        if rating == 0:
-            purge_character_images(self.db, character)
+        if rating in (0, -1):
+            if rating == 0:
+                # -1점은 카탈로그에 노출되지 않지만 이미지는 삭제하지 않는다. 0점만
+                # "생성 실패/사용 불가"로 간주해 이미지를 완전히 삭제한다.
+                purge_character_images(self.db, character)
             review.cover_image_id = None
         else:
             if not cover_image_id:
-                raise ValueError("Cover image is required unless rating is 0")
+                raise ValueError("Cover image is required unless rating is 0 or -1")
 
             cover_image = next(
                 (image for image in character.images if image.id == cover_image_id and not image.is_rejected),
@@ -270,7 +274,10 @@ class ReviewService:
                 image.is_cover = image.id == cover_image_id
 
         review.rating = rating
-        review.final_prompt = final_prompt or character.generation_prompt
+        # 0/-1점은 카탈로그에 이미지 없이 성별+기본 태그만 노출되어야 하므로,
+        # 검수 화면에서 선택 반영된 프롬프트/태그가 아니라 항상 기본 프롬프트를 저장한다.
+        review.final_prompt = character.generation_prompt if rating in (0, -1) else (final_prompt or character.generation_prompt)
+        review.selected_tags = None if rating in (0, -1) else (selected_tags or None)
         review.review_status = "completed"
 
         commit_db_session(self.db)
@@ -306,6 +313,21 @@ class ReviewService:
 
         return review_regenerate_job_manager.enqueue(
             character_id,
+            prompt=prompt,
+            gender=gender,
+        )
+
+    def regenerate_catalog_images_global(
+        self,
+        global_character_id: int,
+        *,
+        prompt: str,
+        gender: str | None = None,
+    ):
+        from app.services.review_regenerate_job_manager import review_regenerate_job_manager
+
+        return review_regenerate_job_manager.enqueue_global(
+            global_character_id,
             prompt=prompt,
             gender=gender,
         )
@@ -394,6 +416,7 @@ class ReviewService:
         gender: str | None = None,
         rating: int | None = None,
         final_prompt: str | None = None,
+        selected_tags: str | None = None,
     ) -> GlobalCharacter:
         character = (
             self.db.query(GlobalCharacter)
@@ -416,12 +439,13 @@ class ReviewService:
         if normalized_gender:
             review.gender = normalized_gender
 
-        if rating == 0:
-            purge_global_character_images(self.db, character)
+        if rating in (0, -1):
+            if rating == 0:
+                purge_global_character_images(self.db, character)
             review.cover_image_id = None
         else:
             if not cover_image_id:
-                raise ValueError("Cover image is required unless rating is 0")
+                raise ValueError("Cover image is required unless rating is 0 or -1")
 
             cover_image = next(
                 (image for image in character.images if image.id == cover_image_id and not image.is_rejected),
@@ -435,7 +459,11 @@ class ReviewService:
                 image.is_cover = image.id == cover_image_id
 
         review.rating = rating
-        review.final_prompt = final_prompt or getattr(character, "generation_prompt", None)
+        base_prompt = getattr(character, "generation_prompt", None)
+        # 0/-1점은 카탈로그에 이미지 없이 성별+기본 태그만 노출되어야 하므로,
+        # 검수 화면에서 선택 반영된 프롬프트/태그가 아니라 항상 기본 프롬프트를 저장한다.
+        review.final_prompt = base_prompt if rating in (0, -1) else (final_prompt or base_prompt)
+        review.selected_tags = None if rating in (0, -1) else (selected_tags or None)
         review.review_status = "completed"
 
         commit_db_session(self.db)

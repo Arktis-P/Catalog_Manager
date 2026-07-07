@@ -4,7 +4,13 @@ import { CharacterLinkModal } from "../CharacterLinkModal";
 import { useReviewRegenerateJobs } from "../../context/ReviewRegenerateContext";
 import type { CatalogReviewFilterStatus, CatalogReviewItem, LinkableCharacterSummary } from "../../types";
 import { danbooruPostsUrl, danbooruWikiUrl, openExternal } from "../../utils/danbooruLinks";
-import { appearanceTagChips, cycleGender, defaultEnabledTagKeys, resolveFinalPrompt } from "../../utils/reviewPrompt";
+import {
+  appearanceTagChips,
+  cycleGender,
+  defaultEnabledTagKeys,
+  resolveFinalPrompt,
+  selectedTagsPayload,
+} from "../../utils/reviewPrompt";
 import { pendingReviewImageUrl } from "../../utils/reviewImages";
 import { CatalogReviewRow, createDraftForItem, type CharacterDraft } from "./CatalogReviewRow";
 import { ReviewImagePreview } from "./ReviewImagePreview";
@@ -35,11 +41,17 @@ function toLinkableSummary(item: CatalogReviewItem): LinkableCharacterSummary {
   };
 }
 
-export function GlobalCatalogReviewPanel() {
+interface GlobalCatalogReviewPanelProps {
+  initialCharacterId?: number | null;
+}
+
+export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCatalogReviewPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [items, setItems] = useState<CatalogReviewItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [filterStatus, setFilterStatus] = useState<CatalogReviewFilterStatus>("pending");
+  const [filterStatus, setFilterStatus] = useState<CatalogReviewFilterStatus>(
+    initialCharacterId ? "all" : "pending",
+  );
   const [search, setSearch] = useState("");
   const [skip, setSkip] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -53,10 +65,11 @@ export function GlobalCatalogReviewPanel() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewPosition, setPreviewPosition] = useState<{ top: number; left: number } | null>(null);
   const [linkingItem, setLinkingItem] = useState<CatalogReviewItem | null>(null);
+  const [pendingCharacterId, setPendingCharacterId] = useState<number | null>(initialCharacterId);
   const appliedRegenerateJobIdsRef = useRef<Set<string>>(new Set());
 
   const {
-    enqueueRegenerate,
+    enqueueRegenerateGlobal,
     isCharacterRegenerating,
     getCharacterJob,
     lastCompletedJob,
@@ -84,7 +97,15 @@ export function GlobalCatalogReviewPanel() {
       });
       setItems(response.items);
       setTotal(response.total);
-      setFocusIndex(0);
+      let nextFocus = 0;
+      if (pendingCharacterId) {
+        const found = response.items.findIndex((item) => item.id === pendingCharacterId);
+        if (found >= 0) {
+          nextFocus = found;
+        }
+        setPendingCharacterId(null);
+      }
+      setFocusIndex(nextFocus);
       setDrafts(Object.fromEntries(response.items.map((item) => [item.id, createDraftForItem(item)])));
     } catch (err) {
       setError(err instanceof Error ? err.message : "카탈로그 검수 목록을 불러오지 못했습니다.");
@@ -129,7 +150,7 @@ export function GlobalCatalogReviewPanel() {
 
   const completeItem = async (item: CatalogReviewItem) => {
     const draft = drafts[item.id] ?? createDraftForItem(item);
-    const isRatingZero = draft.rating === 0;
+    const isRatingZero = draft.rating === 0 || draft.rating === -1;
     const image = item.images[draft.imageIndex];
     if (!isRatingZero && !image) {
       setActionMessage("선택할 이미지가 없습니다.");
@@ -147,6 +168,7 @@ export function GlobalCatalogReviewPanel() {
         gender: draft.gender,
         rating: draft.rating,
         final_prompt: finalPrompt,
+        selected_tags: isRatingZero ? null : selectedTagsPayload(item, enabledTags),
       });
       setActionMessage(`${item.character_tag} 완료`);
       await loadReviews();
@@ -189,7 +211,7 @@ export function GlobalCatalogReviewPanel() {
   }, []);
 
   useEffect(() => {
-    if (!lastCompletedJob?.result) {
+    if (!lastCompletedJob?.result || lastCompletedJob.scope !== "global") {
       return;
     }
     if (appliedRegenerateJobIdsRef.current.has(lastCompletedJob.job_id)) {
@@ -213,7 +235,7 @@ export function GlobalCatalogReviewPanel() {
   const focusedItem = items[focusIndex] ?? null;
   const focusedDraft = focusedItem ? drafts[focusedItem.id] ?? createDraftForItem(focusedItem) : null;
   const focusedLocked = focusedItem
-    ? submittingId === focusedItem.id || isCharacterRegenerating(focusedItem.id)
+    ? submittingId === focusedItem.id || isCharacterRegenerating(focusedItem.id, "global")
     : false;
   const focusedImage = focusedItem?.images[focusedDraft?.imageIndex ?? 0] ?? null;
   const previewSrc = focusedImage
@@ -309,7 +331,7 @@ export function GlobalCatalogReviewPanel() {
     }
     setError(null);
     try {
-      const job = await enqueueRegenerate(focusedItem.id, {
+      const job = await enqueueRegenerateGlobal(focusedItem.id, {
         prompt: finalPrompt,
         gender: focusedDraft.gender,
       });
@@ -319,7 +341,7 @@ export function GlobalCatalogReviewPanel() {
       setError(err instanceof Error ? err.message : "재생성에 실패했습니다.");
       setActionMessage(null);
     }
-  }, [enqueueRegenerate, focusedDraft, focusedItem]);
+  }, [enqueueRegenerateGlobal, focusedDraft, focusedItem]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -479,8 +501,8 @@ export function GlobalCatalogReviewPanel() {
           {items.map((item, rowIndex) => {
             const draft = drafts[item.id] ?? createDraftForItem(item);
             const focused = rowIndex === focusIndex;
-            const locked = submittingId === item.id || isCharacterRegenerating(item.id);
-            const regenerateJob = getCharacterJob(item.id);
+            const locked = submittingId === item.id || isCharacterRegenerating(item.id, "global");
+            const regenerateJob = getCharacterJob(item.id, "global");
             return (
               <div
                 key={item.id}

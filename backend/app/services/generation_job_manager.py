@@ -169,6 +169,18 @@ class GenerationJobManager:
             self._pause_cond.notify_all()
         return True
 
+    def pause_all_running(self) -> list[str]:
+        """현재 실행 중인 모든 생성 작업(series/character 큐 공통)을 일시정지하고,
+        실제로 일시정지 요청을 건 job_id 목록을 반환한다. 리뷰 재생성처럼 NAIA를
+        선점해야 하는 작업이 시작되기 전에 호출한다."""
+        with self._lock:
+            running_ids = [job_id for job_id, job in self._jobs.items() if job.status == "running"]
+        return [job_id for job_id in running_ids if self.pause_job(job_id)]
+
+    def resume_jobs(self, job_ids: list[str]) -> None:
+        for job_id in job_ids:
+            self.resume_job(job_id)
+
     def _check_pause(self, job_id: str) -> bool:
         """체크포인트. 일시정지 요청 시 재개될 때까지 블록. 취소되면 False 반환."""
         if job_id not in self._paused_jobs:

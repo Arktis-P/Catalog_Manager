@@ -16,6 +16,7 @@ from app.schemas.review import (
     CatalogReviewRegenerateRequest,
     CatalogReviewRegenerateResponse,
     CatalogReviewUndoResponse,
+    GlobalCatalogReviewItemResponse,
     GlobalCatalogReviewListResponse,
     ReviewRegenerateJobListResponse,
     ReviewRegenerateJobResponse,
@@ -60,12 +61,19 @@ def _to_catalog_item(character) -> CatalogReviewItemResponse:
 
 
 def _job_to_response(job: ReviewRegenerateJobState) -> ReviewRegenerateJobResponse:
-    result = CatalogReviewItemResponse(**job.result) if job.result else None
+    result = None
+    if job.result:
+        result = (
+            GlobalCatalogReviewItemResponse(**job.result)
+            if job.scope == "global"
+            else CatalogReviewItemResponse(**job.result)
+        )
     return ReviewRegenerateJobResponse(
         job_id=job.job_id,
         character_id=job.character_id,
         character_tag=job.character_tag,
         series_tag=job.series_tag,
+        scope=job.scope,
         status=job.status,
         phase=job.phase,
         message=job.message,
@@ -176,6 +184,7 @@ def complete_catalog_review(
             gender=payload.gender,
             rating=payload.rating,
             final_prompt=payload.final_prompt,
+            selected_tags=payload.selected_tags,
         )
         review = character.review
         return CatalogReviewCompleteResponse(
@@ -290,6 +299,7 @@ def complete_catalog_review_global(
             gender=payload.gender,
             rating=payload.rating,
             final_prompt=payload.final_prompt,
+            selected_tags=payload.selected_tags,
         )
         review = character.review
         return CatalogReviewCompleteResponse(
@@ -302,6 +312,23 @@ def complete_catalog_review_global(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/catalog-global/{global_character_id}/regenerate", response_model=CatalogReviewRegenerateResponse)
+def regenerate_catalog_character_global(
+    global_character_id: int,
+    payload: CatalogReviewRegenerateRequest,
+    service: ReviewService = Depends(get_review_service),
+):
+    try:
+        job = service.regenerate_catalog_images_global(
+            global_character_id,
+            prompt=payload.prompt.strip(),
+            gender=payload.gender,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _job_to_response(job)
 
 
 @router.post("/catalog-global/{global_character_id}/undo", response_model=CatalogReviewUndoResponse)

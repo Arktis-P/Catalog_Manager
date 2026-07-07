@@ -62,6 +62,7 @@ def init_db() -> None:
     _migrate_series_columns()
     _migrate_character_columns()
     _migrate_global_character_columns()
+    _migrate_review_columns()
 
 
 def _migrate_character_columns() -> None:
@@ -97,6 +98,19 @@ def _migrate_global_character_columns() -> None:
         for column_name, statement in migrations.items():
             if column_name not in existing:
                 connection.execute(text(statement))
+
+
+def _migrate_review_columns() -> None:
+    inspector = inspect(engine)
+    with engine.begin() as connection:
+        if "reviews" in inspector.get_table_names():
+            existing = {column["name"] for column in inspector.get_columns("reviews")}
+            if "selected_tags" not in existing:
+                connection.execute(text("ALTER TABLE reviews ADD COLUMN selected_tags TEXT"))
+        if "global_character_reviews" in inspector.get_table_names():
+            existing = {column["name"] for column in inspector.get_columns("global_character_reviews")}
+            if "selected_tags" not in existing:
+                connection.execute(text("ALTER TABLE global_character_reviews ADD COLUMN selected_tags TEXT"))
 
 
 def _migrate_series_columns() -> None:

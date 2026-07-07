@@ -8,6 +8,7 @@ interface CatalogCardProps {
   onEdit?: (item: CatalogItem) => void;
   onChangeSeries?: (item: CatalogItem) => void;
   onRegenerate?: (item: CatalogItem) => void;
+  isGlobal?: boolean;
 }
 
 function statusBadgeClass(status: string): string {
@@ -39,11 +40,11 @@ function genderTagLabel(gender: string): string {
   return gender;
 }
 
-export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: CatalogCardProps) {
+export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate, isGlobal }: CatalogCardProps) {
   const appearance = formatAppearance(item);
   const ratingText = ratingLabel(item.rating);
   const promptToCopy = item.final_prompt || item.generation_prompt;
-  const isRatingZero = item.rating === 0;
+  const isRatingZero = item.rating === 0 || item.rating === -1;
   const coverUrl = isRatingZero ? null : catalogCoverImageUrl(item.cover_image);
 
   const copyPrompt = async () => {
@@ -57,7 +58,9 @@ export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: Cata
         {coverUrl ? (
           <img src={coverUrl} alt={item.display_name} loading="lazy" decoding="async" />
         ) : isRatingZero ? (
-          <span className="catalog-card-image-failed">Image generation failed</span>
+          <span className="catalog-card-image-failed">
+            {item.rating === -1 ? "No image (rating -1)" : "Image generation failed"}
+          </span>
         ) : (
           <span>No cover image</span>
         )}
@@ -65,7 +68,9 @@ export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: Cata
       <div className="catalog-card-body">
         <div className="catalog-card-header">
           <h3 className="catalog-card-title">{item.character_tag}</h3>
-          <div className="catalog-card-subtitle">{item.series_display_name || item.series_tag}</div>
+          <div className="catalog-card-subtitle">
+            {isGlobal ? item.series_display_name || item.series_tag || "series 미연결" : item.series_display_name || item.series_tag}
+          </div>
         </div>
 
         <div className="tag-row">
@@ -119,7 +124,7 @@ export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: Cata
           <button className="btn btn-small" type="button" onClick={() => void copyPrompt()} disabled={!promptToCopy}>
             Copy Prompt
           </button>
-          {onChangeSeries ? (
+          {onChangeSeries && !isGlobal ? (
             <button className="btn btn-small" type="button" onClick={() => onChangeSeries(item)}>
               Series
             </button>
@@ -131,7 +136,11 @@ export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate }: Cata
           ) : null}
           <Link
             className="btn btn-small"
-            to={`/review?mode=catalog&series_id=${item.series_id}&character_id=${item.id}`}
+            to={
+              isGlobal
+                ? `/review?mode=catalog&scope=characters&character_id=${item.id}`
+                : `/review?mode=catalog&series_id=${item.series_id}&character_id=${item.id}`
+            }
           >
             Review
           </Link>

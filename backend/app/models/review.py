@@ -20,6 +20,9 @@ class Review(Base):
     type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
     final_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 검수 화면에서 사용자가 켠(선택한) 외형 태그만 콤마로 저장. 카탈로그 탭에서
+    # 표지 이미지가 선택된 경우 이 태그만 노출하기 위함. 0/-1점이면 None으로 비운다.
+    selected_tags: Mapped[str | None] = mapped_column(Text, nullable=True)
     review_status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)

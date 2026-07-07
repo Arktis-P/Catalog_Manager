@@ -2,10 +2,12 @@ import { useMemo } from "react";
 import { CatalogProgressPanel } from "./CatalogProgressPanel";
 import { CollectProgressPanel } from "./CollectProgressPanel";
 import { GenerationProgressPanel } from "./GenerationProgressPanel";
+import { ReviewRegenerateProgressPanel } from "./ReviewRegenerateProgressPanel";
 import { useCharacterCatalogJobs } from "../context/CharacterCatalogJobContext";
 import { useCollectJobs } from "../context/CollectJobContext";
 import { useGenerationJobs } from "../context/GenerationJobContext";
-import type { CatalogJob, CollectJob } from "../types";
+import { useReviewRegenerateJobs } from "../context/ReviewRegenerateContext";
+import type { CatalogJob, CollectJob, ReviewRegenerateJob } from "../types";
 
 function jobSortRank(job: { status: string }): number {
   if (job.status === "running") {
@@ -51,13 +53,18 @@ export function GlobalTaskBar() {
     lastError: catalogError,
     clearLastError: clearCatalogError,
   } = useCharacterCatalogJobs();
+  const { jobs: regenerateJobs } = useReviewRegenerateJobs();
 
   const isCatalogJob = (job: CollectJob | CatalogJob | (typeof generationJobs)[number]): job is CatalogJob =>
     job.job_type === "character_catalog_list" || job.job_type === "character_catalog_tags";
 
+  const isRegenerateJob = (
+    job: CollectJob | CatalogJob | ReviewRegenerateJob | (typeof generationJobs)[number],
+  ): job is ReviewRegenerateJob => "job_id" in job && !("job_type" in job);
+
   const activeJobs = useMemo(
     () =>
-      [...collectJobs, ...generationJobs, ...catalogJobs]
+      [...collectJobs, ...generationJobs, ...catalogJobs, ...regenerateJobs]
         .filter(
           (job) =>
             job.status === "queued" ||
@@ -68,7 +75,7 @@ export function GlobalTaskBar() {
             job.status === "cancelled",
         )
         .sort((a, b) => jobSortRank(a) - jobSortRank(b) || b.started_at.localeCompare(a.started_at)),
-    [collectJobs, generationJobs, catalogJobs],
+    [collectJobs, generationJobs, catalogJobs, regenerateJobs],
   );
 
   const dismissibleJobs = useMemo(
@@ -78,7 +85,9 @@ export function GlobalTaskBar() {
 
   const dismissAllCompleted = () => {
     for (const job of dismissibleJobs) {
-      if (job.job_type === "image_generation") {
+      if (isRegenerateJob(job)) {
+        continue;
+      } else if (job.job_type === "image_generation") {
         dismissGenerationJob(job.job_id);
       } else if (isCatalogJob(job)) {
         dismissCatalogJob(job.job_id);
@@ -133,7 +142,9 @@ export function GlobalTaskBar() {
         ) : null}
         <div className="global-task-bar-jobs">
           {activeJobs.map((job) =>
-            job.job_type === "image_generation" ? (
+            isRegenerateJob(job) ? (
+              <ReviewRegenerateProgressPanel key={job.job_id} job={job} />
+            ) : job.job_type === "image_generation" ? (
               <GenerationProgressPanel
                 key={job.job_id}
                 job={job}

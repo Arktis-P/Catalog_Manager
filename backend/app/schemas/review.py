@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pydantic import BaseModel, Field
 
 
@@ -89,6 +91,7 @@ class CatalogReviewCompleteRequest(BaseModel):
     gender: str | None = None
     rating: int | None = Field(default=None, ge=-1, le=6)
     final_prompt: str | None = None
+    selected_tags: str | None = None
 
 
 class CatalogReviewCompleteResponse(BaseModel):
@@ -122,13 +125,14 @@ class ReviewRegenerateJobResponse(BaseModel):
     character_id: int
     character_tag: str
     series_tag: str = ""
+    scope: str = "series"
     status: str
     phase: str
     message: str
     current: int = 0
     total: int = 0
     error: str | None = None
-    result: CatalogReviewItemResponse | None = None
+    result: CatalogReviewItemResponse | GlobalCatalogReviewItemResponse | None = None
     started_at: str
     finished_at: str | None = None
 

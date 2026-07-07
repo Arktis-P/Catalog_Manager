@@ -11,6 +11,7 @@ import type {
   CatalogReviewListResponse,
   CatalogStats,
   GlobalCatalogReviewListResponse,
+  GlobalCatalogListResponse,
   CatalogJob,
   CharacterCollectResult,
   CharacterLinkCandidate,
@@ -130,6 +131,9 @@ export const api = {
 
   listCatalog: (filters: CatalogFilters = {}) =>
     request<CatalogListResponse>(`/catalog${buildQuery(filters as Record<string, string | number | boolean | undefined>)}`),
+
+  listGlobalCatalog: (filters: Pick<CatalogFilters, "rating" | "gender" | "search" | "skip" | "limit"> = {}) =>
+    request<GlobalCatalogListResponse>(`/catalog/global${buildQuery(filters as Record<string, string | number | boolean | undefined>)}`),
 
   getRandomCatalogCharacter: (filters: Omit<CatalogFilters, "skip" | "limit"> = {}) =>
     request<CatalogItem>(`/catalog/random${buildQuery(filters as Record<string, string | number | boolean | undefined>)}`),
@@ -396,6 +400,15 @@ export const api = {
     payload: { prompt: string; gender?: string | null },
   ) =>
     request<ReviewRegenerateJob>(`/review/catalog/${characterId}/regenerate`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  regenerateGlobalCatalogCharacter: (
+    globalCharacterId: number,
+    payload: { prompt: string; gender?: string | null },
+  ) =>
+    request<ReviewRegenerateJob>(`/review/catalog-global/${globalCharacterId}/regenerate`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),

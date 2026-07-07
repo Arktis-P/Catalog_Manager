@@ -3,7 +3,13 @@ import { api } from "../../api/client";
 import { useReviewRegenerateJobs } from "../../context/ReviewRegenerateContext";
 import type { CatalogReviewFilterStatus, CatalogReviewItem, Series } from "../../types";
 import { danbooruPostsUrl, danbooruWikiUrl, openExternal } from "../../utils/danbooruLinks";
-import { appearanceTagChips, cycleGender, defaultEnabledTagKeys, resolveFinalPrompt } from "../../utils/reviewPrompt";
+import {
+  appearanceTagChips,
+  cycleGender,
+  defaultEnabledTagKeys,
+  resolveFinalPrompt,
+  selectedTagsPayload,
+} from "../../utils/reviewPrompt";
 import { pendingReviewImageUrl } from "../../utils/reviewImages";
 import { SeriesSearchSelect } from "../SeriesSearchSelect";
 import { CatalogReviewRow, createDraftForItem, type CharacterDraft } from "./CatalogReviewRow";
@@ -308,7 +314,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
   }, []);
 
   useEffect(() => {
-    if (!lastCompletedJob?.result) {
+    if (!lastCompletedJob?.result || lastCompletedJob.scope !== "series") {
       return;
     }
     if (appliedRegenerateJobIdsRef.current.has(lastCompletedJob.job_id)) {
@@ -340,7 +346,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
       return;
     }
 
-    const isRatingZero = focusedDraft.rating === 0;
+    const isRatingZero = focusedDraft.rating === 0 || focusedDraft.rating === -1;
     const image = focusedItem.images[focusedDraft.imageIndex];
     if (!isRatingZero && !image) {
       setActionMessage("선택할 이미지가 없습니다.");
@@ -363,6 +369,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
         gender: focusedDraft.gender,
         rating: focusedDraft.rating,
         final_prompt: finalPrompt,
+        selected_tags: isRatingZero ? null : selectedTagsPayload(focusedItem, enabledTags),
       });
       setUndoStack((stack) => [focusedItem.id, ...stack].slice(0, 20));
       setItems((current) => {

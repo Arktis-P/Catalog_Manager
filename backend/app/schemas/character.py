@@ -107,6 +107,43 @@ class CatalogListResponse(BaseModel):
     total: int
 
 
+class GlobalCatalogItemResponse(BaseModel):
+    """'캐릭터 목록'(GlobalCharacter) 리뷰 완료 결과를 카탈로그 탭에 노출하기 위한 항목.
+    시리즈가 아직 연결되지 않았을 수 있어 series_id/series_tag는 비어 있을 수 있다."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    series_id: int | None = None
+    series_tag: str = ""
+    series_display_name: str = ""
+    character_tag: str
+    display_name: str
+    post_count: int = 0
+    danbooru_url: str | None = None
+    cover_image: str | None = None
+    gender: str | None = None
+    type: str | None = None
+    rating: int | None = None
+    multi_color_hair: str | None = None
+    hair_color: str | None = None
+    hair_shape: str | None = None
+    eye_color: str | None = None
+    feature_tags: str | None = None
+    generation_prompt: str | None = None
+    final_prompt: str | None = None
+    character_status: str
+    catalog_status: str
+    has_cover_image: bool = False
+    needs_review: bool = False
+    needs_regen: bool = False
+
+
+class GlobalCatalogListResponse(BaseModel):
+    items: list[GlobalCatalogItemResponse]
+    total: int
+
+
 class CatalogItemUpdateRequest(BaseModel):
     multi_color_hair: str | None = None
     hair_color: str | None = None

@@ -87,3 +87,28 @@ def mask_appearance_for_catalog(character: Character) -> dict[str, str | None]:
         "gender": normalize_gender(character.gender),
         "generation_prompt": character.generation_prompt,
     }
+
+
+def mask_appearance_for_global_catalog(character) -> dict[str, str | None]:
+    """`mask_appearance_for_catalog`의 GlobalCharacter(캐릭터 목록) 버전.
+    appearance_confirmed 대신 appearance_status == 'completed'로 확인 여부를 판단한다."""
+    if character.appearance_status != "completed":
+        return {
+            "multi_color_hair": None,
+            "hair_color": None,
+            "hair_shape": None,
+            "eye_color": None,
+            "feature_tags": None,
+            "gender": None,
+            "generation_prompt": None,
+        }
+
+    return {
+        "multi_color_hair": character.multi_color_hair,
+        "hair_color": character.hair_color,
+        "hair_shape": character.hair_shape,
+        "eye_color": character.eye_color,
+        "feature_tags": character.feature_tags,
+        "gender": normalize_gender(character.gender),
+        "generation_prompt": getattr(character, "generation_prompt", None),
+    }

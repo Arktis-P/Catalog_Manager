@@ -4,18 +4,26 @@ import io
 from pathlib import Path
 
 from sqlalchemy import Float, and_, case, exists, func, or_, select
-from sqlalchemy.orm import Session, contains_eager
+from sqlalchemy.orm import Session, contains_eager, selectinload
 
 from app.config import settings
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.models.character import Character
+from app.models.character_series_link import CharacterSeriesLink
+from app.models.global_character import GlobalCharacter
+from app.models.global_character_image import GlobalCharacterImage
+from app.models.global_character_review import GlobalCharacterReview
 from app.models.image import Image
 from app.models.review import Review
 from app.models.series import Series
 from app.schemas.character import CATALOG_EXPORT_COLUMNS
-from app.services.character_image_service import purge_character_images
+from app.services.character_image_service import purge_character_images, purge_global_character_images
 from app.services.db_write_queue import commit_db_session
-from app.services.prompt_service import build_generation_prompt, mask_appearance_for_catalog
+from app.services.prompt_service import (
+    build_generation_prompt,
+    mask_appearance_for_catalog,
+    mask_appearance_for_global_catalog,
+)
 
 
 def catalog_status_expression():
@@ -31,7 +39,7 @@ def catalog_status_expression():
         (
             and_(
                 Review.review_status == "completed",
-                or_(has_cover, Review.rating == 0),
+                or_(has_cover, Review.rating.in_((0, -1))),
             ),
             "completed",
         ),
@@ -177,14 +185,33 @@ class CatalogService:
         return normalize_gender(raw) if raw else None
 
     @staticmethod
+    def _filter_appearance_by_selected_tags(appearance: dict[str, str | None], selected_tags: str | None) -> dict[str, str | None]:
+        if not selected_tags:
+            return appearance
+        selected = {tag.strip() for tag in selected_tags.split(",") if tag.strip()}
+        if not selected:
+            return appearance
+        filtered = dict(appearance)
+        for field in ("multi_color_hair", "hair_color", "hair_shape", "eye_color", "feature_tags"):
+            value = appearance.get(field)
+            if not value:
+                continue
+            kept = [tag.strip() for tag in value.split(",") if tag.strip() in selected]
+            filtered[field] = ", ".join(kept) or None
+        return filtered
+
+    @staticmethod
     def _build_catalog_item(character: Character, catalog_status: str, has_cover: bool, cover_image: Image | None) -> dict:
         review = character.review
         rating = review.rating if review else None
-        if rating == 0:
+        if rating in (0, -1):
             cover_image = None
             has_cover = False
 
         appearance = mask_appearance_for_catalog(character)
+        if cover_image is not None and review:
+            # 표지 이미지가 선택된 경우, 검수 화면에서 사용자가 켠 태그만 카탈로그에 노출한다.
+            appearance = CatalogService._filter_appearance_by_selected_tags(appearance, review.selected_tags)
         return {
             "id": character.id,
             "series_id": character.series_id,
@@ -294,6 +321,144 @@ class CatalogService:
 
         return items, total
 
+    # ── 캐릭터 목록(GlobalCharacter) 리뷰 결과 병행 표시 ──────────────────────
+    # 시리즈 기반 카탈로그와 완전히 독립된 데이터 소스라, 카탈로그 탭에서 함께 보여주기
+    # 위해 별도 목록/아이템 빌더를 둔다. 시리즈에 아직 연결되지 않았을 수 있으므로
+    # series_id/series_tag는 CharacterSeriesLink의 대표(primary) 시리즈로 채운다.
+
+    def _global_cover_map(self, character_ids: list[int]) -> dict[int, GlobalCharacterImage]:
+        if not character_ids:
+            return {}
+        rows = (
+            self.db.query(GlobalCharacterImage)
+            .filter(
+                GlobalCharacterImage.global_character_id.in_(character_ids),
+                GlobalCharacterImage.is_cover.is_(True),
+            )
+            .all()
+        )
+        return {row.global_character_id: row for row in rows}
+
+    @staticmethod
+    def _build_global_catalog_item(
+        character: GlobalCharacter, cover_image: GlobalCharacterImage | None
+    ) -> dict:
+        review = character.review
+        rating = review.rating if review else None
+        has_cover = cover_image is not None
+        if rating in (0, -1):
+            cover_image = None
+            has_cover = False
+
+        appearance = mask_appearance_for_global_catalog(character)
+        if cover_image is not None and review:
+            appearance = CatalogService._filter_appearance_by_selected_tags(appearance, review.selected_tags)
+
+        primary_link = next(
+            (link for link in character.series_links if link.is_primary and link.series),
+            next((link for link in character.series_links if link.series), None),
+        )
+
+        if review and review.review_status == "completed" and (has_cover or rating in (0, -1)):
+            catalog_status = "completed"
+        elif not character.images:
+            catalog_status = "missing_image"
+        else:
+            catalog_status = "needs_review"
+
+        gender_source = (review.gender if review and review.gender else character.gender)
+
+        return {
+            "id": character.id,
+            "series_id": primary_link.series_id if primary_link else None,
+            "series_tag": primary_link.series.series_tag if primary_link and primary_link.series else "",
+            "series_display_name": (
+                primary_link.series.display_name if primary_link and primary_link.series else ""
+            ),
+            "character_tag": character.character_tag,
+            "display_name": character.display_name or character.character_tag,
+            "post_count": character.post_count,
+            "danbooru_url": None,
+            "cover_image": cover_image.image_path if cover_image else None,
+            "type": review.type if review else None,
+            "rating": review.rating if review else None,
+            **appearance,
+            "gender": normalize_gender(gender_source) if gender_source else None,
+            "final_prompt": review.final_prompt if review else None,
+            "character_status": character.collect_status,
+            "catalog_status": catalog_status,
+            "has_cover_image": bool(has_cover),
+            "needs_review": catalog_status == "needs_review",
+            "needs_regen": False,
+        }
+
+    def list_global_catalog(
+        self,
+        *,
+        rating: int | None = None,
+        gender: str | None = None,
+        search: str | None = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[dict], int]:
+        has_image = exists(
+            select(1).where(GlobalCharacterImage.global_character_id == GlobalCharacter.id)
+        )
+        query = (
+            self.db.query(GlobalCharacter)
+            .outerjoin(GlobalCharacterReview, GlobalCharacterReview.global_character_id == GlobalCharacter.id)
+            .options(
+                selectinload(GlobalCharacter.review),
+                selectinload(GlobalCharacter.images),
+                selectinload(GlobalCharacter.series_links).selectinload(CharacterSeriesLink.series),
+            )
+            .filter(has_image)
+        )
+        if rating is not None:
+            query = query.filter(GlobalCharacterReview.rating == rating)
+        if gender:
+            query = query.filter(GlobalCharacter.gender.ilike(f"%{gender}%"))
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    GlobalCharacter.character_tag.ilike(pattern),
+                    GlobalCharacter.display_name.ilike(pattern),
+                )
+            )
+
+        total = query.order_by(None).with_entities(func.count(GlobalCharacter.id)).scalar() or 0
+
+        rows = (
+            query.order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.id.asc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+        character_ids = [character.id for character in rows]
+        purged_any = False
+        for character in rows:
+            review = character.review
+            if review and review.rating == 0 and character.images:
+                purge_global_character_images(self.db, character)
+                purged_any = True
+        if purged_any:
+            commit_db_session(self.db)
+            rows = (
+                query.order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.id.asc())
+                .offset(skip)
+                .limit(limit)
+                .all()
+            )
+            character_ids = [character.id for character in rows]
+
+        cover_map = self._global_cover_map(character_ids)
+        items = [
+            self._build_global_catalog_item(character, cover_map.get(character.id)) for character in rows
+        ]
+        return items, total
+
     def get_stats(self) -> dict[str, int]:
         series_count = self.db.query(Series).count()
         character_count = self.db.query(Character).count()
@@ -301,7 +466,7 @@ class CatalogService:
         cover_count = (
             self.db.query(Image)
             .join(Review, Review.character_id == Image.character_id)
-            .filter(Image.is_cover.is_(True), or_(Review.rating.is_(None), Review.rating != 0))
+            .filter(Image.is_cover.is_(True), or_(Review.rating.is_(None), ~Review.rating.in_((0, -1))))
             .count()
         )
         return {

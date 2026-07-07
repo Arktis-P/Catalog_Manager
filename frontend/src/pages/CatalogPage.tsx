@@ -1,12 +1,14 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api, waitForBackend } from "../api/client";
 import { useReviewRegenerateJobs } from "../context/ReviewRegenerateContext";
-import type { CatalogFilters, CatalogItem, CatalogStats, Series } from "../types";
+import type { CatalogFilters, CatalogItem, CatalogStats, GlobalCatalogItem, Series } from "../types";
+import { CatalogCard } from "../components/CatalogCard";
 import { CatalogEditModal } from "../components/CatalogEditModal";
 import { CatalogRandomPanel } from "../components/CatalogRandomPanel";
 import { CatalogVirtualGrid } from "../components/CatalogVirtualGrid";
 
 const PAGE_SIZE = 96;
+const GLOBAL_PAGE_SIZE = 48;
 
 const emptyStats: CatalogStats = {
   series_count: 0,
@@ -37,8 +39,18 @@ export function CatalogPage() {
   const [seriesChangeSearch, setSeriesChangeSearch] = useState("");
   const [seriesPickerItems, setSeriesPickerItems] = useState<Series[]>([]);
   const [seriesChangeSaving, setSeriesChangeSaving] = useState(false);
-  const { jobs, enqueueRegenerate, isCharacterRegenerating, lastCompletedJob, clearLastCompletedJob } =
-    useReviewRegenerateJobs();
+  const [globalItems, setGlobalItems] = useState<GlobalCatalogItem[]>([]);
+  const [globalTotal, setGlobalTotal] = useState(0);
+  const [globalLoading, setGlobalLoading] = useState(true);
+  const [globalLoadingMore, setGlobalLoadingMore] = useState(false);
+  const {
+    jobs,
+    enqueueRegenerate,
+    enqueueRegenerateGlobal,
+    isCharacterRegenerating,
+    lastCompletedJob,
+    clearLastCompletedJob,
+  } = useReviewRegenerateJobs();
 
   const activeRegenerateJobs = useMemo(
     () => jobs.filter((job) => job.status === "queued" || job.status === "running"),
@@ -53,6 +65,11 @@ export function CatalogPage() {
         ([key, value]) => !["skip", "limit"].includes(key) && value !== undefined && value !== "",
       ).length,
     [filters],
+  );
+
+  const globalListFilters = useMemo(
+    () => ({ rating: filters.rating, gender: filters.gender, search: filters.search }),
+    [filters.rating, filters.gender, filters.search],
   );
 
   const loadInitial = useCallback(async () => {
@@ -78,6 +95,43 @@ export function CatalogPage() {
       setLoading(false);
     }
   }, [listFilters]);
+
+  const loadGlobalInitial = useCallback(async () => {
+    setGlobalLoading(true);
+    try {
+      const response = await api.listGlobalCatalog({ ...globalListFilters, skip: 0, limit: GLOBAL_PAGE_SIZE });
+      setGlobalItems(response.items);
+      setGlobalTotal(response.total);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load character-list catalog");
+    } finally {
+      setGlobalLoading(false);
+    }
+  }, [globalListFilters]);
+
+  const loadMoreGlobal = useCallback(async () => {
+    if (globalLoading || globalLoadingMore || globalItems.length >= globalTotal) {
+      return;
+    }
+    setGlobalLoadingMore(true);
+    try {
+      const response = await api.listGlobalCatalog({
+        ...globalListFilters,
+        skip: globalItems.length,
+        limit: GLOBAL_PAGE_SIZE,
+      });
+      setGlobalItems((current) => {
+        const existing = new Set(current.map((entry) => entry.id));
+        const appended = response.items.filter((entry) => !existing.has(entry.id));
+        return [...current, ...appended];
+      });
+      setGlobalTotal(response.total);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load more character-list catalog items");
+    } finally {
+      setGlobalLoadingMore(false);
+    }
+  }, [globalItems.length, globalListFilters, globalLoading, globalLoadingMore, globalTotal]);
 
   const loadMore = useCallback(async () => {
     if (loading || loadingMore || items.length >= total) {
@@ -106,6 +160,10 @@ export function CatalogPage() {
   useEffect(() => {
     void loadInitial();
   }, [loadInitial]);
+
+  useEffect(() => {
+    void loadGlobalInitial();
+  }, [loadGlobalInitial]);
 
   useEffect(() => {
     if (!seriesChangeTarget) return;
@@ -137,13 +195,35 @@ export function CatalogPage() {
       setError("재생성할 프롬프트가 없습니다.");
       return;
     }
-    if (isCharacterRegenerating(item.id)) {
+    if (isCharacterRegenerating(item.id, "series")) {
       setExportMessage(`${item.character_tag} 재생성이 이미 진행 중입니다.`);
       return;
     }
     setError(null);
     try {
       const job = await enqueueRegenerate(item.id, {
+        prompt,
+        gender: item.gender,
+      });
+      setExportMessage(job.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to regenerate images");
+    }
+  };
+
+  const handleRegenerateGlobal = async (item: GlobalCatalogItem) => {
+    const prompt = item.final_prompt || item.generation_prompt;
+    if (!prompt?.trim()) {
+      setError("재생성할 프롬프트가 없습니다.");
+      return;
+    }
+    if (isCharacterRegenerating(item.id, "global")) {
+      setExportMessage(`${item.character_tag} 재생성이 이미 진행 중입니다.`);
+      return;
+    }
+    setError(null);
+    try {
+      const job = await enqueueRegenerateGlobal(item.id, {
         prompt,
         gender: item.gender,
       });
@@ -160,9 +240,13 @@ export function CatalogPage() {
     setExportMessage(
       `${lastCompletedJob.character_tag} 이미지 ${lastCompletedJob.result.images.length}장 재생성 완료`,
     );
-    void loadInitial();
+    if (lastCompletedJob.scope === "global") {
+      void loadGlobalInitial();
+    } else {
+      void loadInitial();
+    }
     clearLastCompletedJob();
-  }, [clearLastCompletedJob, lastCompletedJob, loadInitial]);
+  }, [clearLastCompletedJob, lastCompletedJob, loadInitial, loadGlobalInitial]);
 
   const handleExport = async () => {
     setError(null);
@@ -255,6 +339,50 @@ export function CatalogPage() {
       </div>
 
       <CatalogRandomPanel filters={listFilters} />
+
+      <section className="panel">
+        <div className="page-header" style={{ marginBottom: 8 }}>
+          <div>
+            <h2 className="catalog-section-title">캐릭터 목록 리뷰 결과</h2>
+            <p className="catalog-card-subtitle">
+              '리뷰 - 캐릭터 목록' 탭에서 완료한 항목입니다 ({globalTotal.toLocaleString()}개).
+            </p>
+          </div>
+        </div>
+        {globalLoading && globalItems.length === 0 ? (
+          <div className="empty-state">Loading...</div>
+        ) : globalItems.length === 0 ? (
+          <div className="empty-state">캐릭터 목록에서 완료된 리뷰 항목이 없습니다.</div>
+        ) : (
+          <>
+            <div className="catalog-grid">
+              {globalItems.map((item) => (
+                <CatalogCard
+                  key={`global-${item.id}`}
+                  item={item as CatalogItem}
+                  isGlobal
+                  onRegenerate={(entry) => void handleRegenerateGlobal(entry as GlobalCatalogItem)}
+                />
+              ))}
+            </div>
+            {globalItems.length < globalTotal ? (
+              <div className="pagination-bar">
+                <span className="catalog-card-subtitle">
+                  {globalItems.length.toLocaleString()} / {globalTotal.toLocaleString()} loaded
+                </span>
+                <button
+                  className="btn btn-small"
+                  type="button"
+                  disabled={globalLoadingMore}
+                  onClick={() => void loadMoreGlobal()}
+                >
+                  {globalLoadingMore ? "Loading..." : "Load more"}
+                </button>
+              </div>
+            ) : null}
+          </>
+        )}
+      </section>
 
       <section className="panel">
         <div className="toolbar catalog-toolbar">

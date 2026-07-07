@@ -727,7 +727,7 @@ class GenerationService:
         self.db.commit()
         return best
 
-    def _resolve_review_gender(self, character: Character, gender: str | None) -> str:
+    def _resolve_review_gender(self, character: Character | GlobalCharacter, gender: str | None) -> str:
         if gender:
             normalized = normalize_gender(gender)
             if normalized in {"1girl", "1boy", "no_humans"}:
@@ -883,5 +883,158 @@ class GenerationService:
         # 재생성 완료 후 최고 점수 이미지를 커버로 자동 선택
         if refreshed.images:
             self.auto_select_cover(character_id, list(refreshed.images))
+
+        return refreshed
+
+    def _clear_global_character_review_images(self, character: GlobalCharacter) -> int:
+        removed = 0
+        images = (
+            self.db.query(GlobalCharacterImage)
+            .filter(
+                GlobalCharacterImage.global_character_id == character.id,
+                GlobalCharacterImage.is_rejected.is_(False),
+            )
+            .all()
+        )
+        for image in images:
+            file_path = settings.project_root / image.image_path
+            if file_path.is_file():
+                file_path.unlink()
+            self.db.delete(image)
+            removed += 1
+
+        review = character.review
+        if not review and removed:
+            review = GlobalCharacterReview(global_character_id=character.id)
+            self.db.add(review)
+            character.review = review
+        if review:
+            review.cover_image_id = None
+            review.review_status = "pending"
+
+        if removed:
+            self.db.flush()
+        return removed
+
+    def regenerate_review_images_global(
+        self,
+        global_character_id: int,
+        *,
+        prompt_core: str,
+        gender: str | None = None,
+        progress_callback: Callable[[dict[str, object]], None] | None = None,
+    ) -> GlobalCharacter:
+        """`regenerate_review_images`의 GlobalCharacter(캐릭터 목록) 버전.
+        '캐릭터 목록' 리뷰 탭은 series 전용 Character 테이블이 아니라 GlobalCharacter를
+        다루므로, 이 메서드가 없으면 재생성 요청이 엉뚱한(id가 우연히 겹치는) series
+        캐릭터에 적용되는 문제가 생긴다."""
+        character = (
+            self.db.query(GlobalCharacter)
+            .options(joinedload(GlobalCharacter.images), joinedload(GlobalCharacter.review))
+            .filter(GlobalCharacter.id == global_character_id)
+            .first()
+        )
+        if not character:
+            raise ValueError("Character not found")
+
+        status = self.naia_status()
+        if not status.get("ready"):
+            raise ValueError(str(status.get("message") or "NAIA가 준비되지 않았습니다."))
+
+        resolved_gender = self._resolve_review_gender(character, gender)
+        if gender:
+            character.gender = resolved_gender
+
+        prompt, negative_prompt = build_prompt_from_character_core(
+            prompt_core,
+            gender=resolved_gender,
+            prompt_config=self.get_prompt_config(),
+        )
+        image_count = self.get_images_per_character()
+        self._clear_global_character_review_images(character)
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "generating",
+                    "message": f"{character.character_tag} 기존 이미지 교체 · 생성 0/{image_count}",
+                    "current": 0,
+                    "total": image_count,
+                }
+            )
+
+        client = NaiaClient(self.get_naia_base_url())
+        known_history_ids = {
+            str(item.get("history_id") or "")
+            for item in client.list_history(page=0, per_page=20).get("images", [])
+            if isinstance(item, dict)
+        }
+        known_history_ids.discard("")
+
+        for index in range(image_count):
+            if index > 0:
+                wait_between_naia_generations()
+
+            if progress_callback:
+                progress_callback(
+                    {
+                        "phase": "generating",
+                        "message": f"{character.character_tag} NAIA 생성 {index + 1}/{image_count}",
+                        "current": index,
+                        "total": image_count,
+                    }
+                )
+
+            generation_job = GlobalCharacterGenerationJob(
+                global_character_id=character.id,
+                prompt_level=1,
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                count=1,
+                status="pending",
+            )
+            self.db.add(generation_job)
+            self.db.flush()
+
+            try:
+                image_bytes, _ = generate_and_fetch_image(
+                    client,
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    known_history_ids=known_history_ids,
+                )
+            except Exception as exc:
+                self.mark_job_failed_global(generation_job, str(exc))
+                raise ValueError(f"NAIA 이미지 생성 실패 ({index + 1}/{image_count}): {exc}") from exc
+
+            self.import_generated_image_global(
+                character=character,
+                generation_job=generation_job,
+                image_bytes=image_bytes,
+            )
+
+            if progress_callback:
+                progress_callback(
+                    {
+                        "phase": "generating",
+                        "message": f"{character.character_tag} 저장 완료 {index + 1}/{image_count}",
+                        "current": index + 1,
+                        "total": image_count,
+                    }
+                )
+
+        self.db.commit()
+
+        refreshed = (
+            self.db.query(GlobalCharacter)
+            .options(joinedload(GlobalCharacter.images), joinedload(GlobalCharacter.review))
+            .filter(GlobalCharacter.id == global_character_id)
+            .first()
+        )
+        if not refreshed:
+            raise ValueError("Character not found after regenerate")
+
+        if refreshed.images:
+            self.auto_select_cover_global(global_character_id, list(refreshed.images))
 
         return refreshed

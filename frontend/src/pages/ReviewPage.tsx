@@ -7,7 +7,9 @@ import { ReviewRatingGuide } from "../components/review/ReviewRatingGuide";
 
 export function ReviewPage() {
   const [searchParams] = useSearchParams();
-  const [catalogScope, setCatalogScope] = useState<"series" | "characters">("series");
+  const [catalogScope, setCatalogScope] = useState<"series" | "characters">(
+    searchParams.get("scope") === "characters" ? "characters" : "series",
+  );
   const initialMode = searchParams.get("mode") === "appearance" ? "appearance" : "catalog";
   const initialSeriesId = useMemo(() => {
     const raw = searchParams.get("series_id");
@@ -90,7 +92,7 @@ export function ReviewPage() {
         catalogScope === "series" ? (
           <CatalogReviewPanel initialSeriesId={initialSeriesId} initialCharacterId={initialCharacterId} />
         ) : (
-          <GlobalCatalogReviewPanel />
+          <GlobalCatalogReviewPanel initialCharacterId={initialCharacterId} />
         )
       ) : (
         <AppearanceReviewPanel />

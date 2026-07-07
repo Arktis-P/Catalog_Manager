@@ -38,7 +38,7 @@ export function CatalogRandomPanel({ filters }: CatalogRandomPanelProps) {
   };
 
   const coverUrl =
-    item && item.rating !== 0 ? catalogCoverImageUrl(item.cover_image, 512) : null;
+    item && item.rating !== 0 && item.rating !== -1 ? catalogCoverImageUrl(item.cover_image, 512) : null;
 
   return (
     <section className="panel catalog-random-panel">
@@ -59,8 +59,10 @@ export function CatalogRandomPanel({ filters }: CatalogRandomPanelProps) {
           <div className="catalog-random-image">
             {coverUrl ? (
               <img src={coverUrl} alt={item.display_name} />
-            ) : item.rating === 0 ? (
-              <span className="catalog-card-image-failed">Image generation failed</span>
+            ) : item.rating === 0 || item.rating === -1 ? (
+              <span className="catalog-card-image-failed">
+                {item.rating === -1 ? "No image (rating -1)" : "Image generation failed"}
+              </span>
             ) : (
               <span>No cover image</span>
             )}

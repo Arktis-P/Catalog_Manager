@@ -17,8 +17,12 @@ interface ReviewRegenerateContextValue {
     characterId: number,
     payload: { prompt: string; gender?: string | null },
   ) => Promise<ReviewRegenerateJob>;
-  isCharacterRegenerating: (characterId: number) => boolean;
-  getCharacterJob: (characterId: number) => ReviewRegenerateJob | null;
+  enqueueRegenerateGlobal: (
+    globalCharacterId: number,
+    payload: { prompt: string; gender?: string | null },
+  ) => Promise<ReviewRegenerateJob>;
+  isCharacterRegenerating: (characterId: number, scope?: string) => boolean;
+  getCharacterJob: (characterId: number, scope?: string) => ReviewRegenerateJob | null;
   lastError: string | null;
   clearLastError: () => void;
   lastCompletedJob: ReviewRegenerateJob | null;
@@ -130,20 +134,34 @@ export function ReviewRegenerateProvider({ children }: { children: ReactNode }) 
     [registerStartedJob],
   );
 
+  const enqueueRegenerateGlobal = useCallback(
+    async (globalCharacterId: number, payload: { prompt: string; gender?: string | null }) => {
+      setLastError(null);
+      const job = await api.regenerateGlobalCatalogCharacter(globalCharacterId, payload);
+      registerStartedJob(job);
+      return job;
+    },
+    [registerStartedJob],
+  );
+
   const isCharacterRegenerating = useCallback(
-    (characterId: number) =>
+    (characterId: number, scope: string = "series") =>
       jobs.some(
         (job) =>
-          job.character_id === characterId && (job.status === "queued" || job.status === "running"),
+          job.character_id === characterId &&
+          job.scope === scope &&
+          (job.status === "queued" || job.status === "running"),
       ),
     [jobs],
   );
 
   const getCharacterJob = useCallback(
-    (characterId: number) =>
+    (characterId: number, scope: string = "series") =>
       jobs.find(
         (job) =>
-          job.character_id === characterId && (job.status === "queued" || job.status === "running"),
+          job.character_id === characterId &&
+          job.scope === scope &&
+          (job.status === "queued" || job.status === "running"),
       ) ?? null,
     [jobs],
   );
@@ -152,6 +170,7 @@ export function ReviewRegenerateProvider({ children }: { children: ReactNode }) 
     () => ({
       jobs,
       enqueueRegenerate,
+      enqueueRegenerateGlobal,
       isCharacterRegenerating,
       getCharacterJob,
       lastError,
@@ -159,7 +178,15 @@ export function ReviewRegenerateProvider({ children }: { children: ReactNode }) 
       lastCompletedJob,
       clearLastCompletedJob: () => setLastCompletedJob(null),
     }),
-    [jobs, enqueueRegenerate, isCharacterRegenerating, getCharacterJob, lastError, lastCompletedJob],
+    [
+      jobs,
+      enqueueRegenerate,
+      enqueueRegenerateGlobal,
+      isCharacterRegenerating,
+      getCharacterJob,
+      lastError,
+      lastCompletedJob,
+    ],
   );
 
   return <ReviewRegenerateContext.Provider value={value}>{children}</ReviewRegenerateContext.Provider>;

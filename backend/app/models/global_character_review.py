@@ -22,6 +22,7 @@ class GlobalCharacterReview(Base):
     type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
     final_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selected_tags: Mapped[str | None] = mapped_column(Text, nullable=True)
     review_status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)

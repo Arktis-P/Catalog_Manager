@@ -10,8 +10,9 @@ from datetime import datetime, timezone
 from app.database import SessionLocal
 from app.integrations.naia.generation_runner import wait_between_naia_generations
 from app.models.character import Character
+from app.models.global_character import GlobalCharacter
 from app.services.generation_service import GenerationService
-from app.services.review_catalog_serializer import to_catalog_item
+from app.services.review_catalog_serializer import to_catalog_item, to_catalog_item_global
 from sqlalchemy.orm import joinedload
 
 ProgressCallback = Callable[[dict[str, object]], None]
@@ -29,6 +30,7 @@ class ReviewRegenerateJobState:
     prompt: str
     gender: str | None = None
     series_tag: str = ""
+    scope: str = "series"
     status: str = "queued"
     phase: str = "queued"
     message: str = "재생성 대기 중..."
@@ -41,9 +43,13 @@ class ReviewRegenerateJobState:
 
 
 class ReviewRegenerateJobManager:
+    """시리즈(Character) 재생성과 캐릭터 목록(GlobalCharacter) 재생성을 하나의 큐로
+    직렬 처리한다. 두 테이블의 id 공간이 서로 겹칠 수 있으므로 활성 작업 추적은
+    반드시 (scope, character_id) 조합으로 구분해야 한다."""
+
     def __init__(self) -> None:
         self._jobs: dict[str, ReviewRegenerateJobState] = {}
-        self._active_by_character: dict[int, str] = {}
+        self._active_by_character: dict[tuple[str, int], str] = {}
         self._job_queue: deque[str] = deque()
         self._running = False
         self._lock = threading.Lock()
@@ -53,15 +59,15 @@ class ReviewRegenerateJobManager:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def get_active_job_for_character(self, character_id: int) -> ReviewRegenerateJobState | None:
+    def get_active_job_for_character(self, character_id: int, *, scope: str = "series") -> ReviewRegenerateJobState | None:
         with self._lock:
-            job_id = self._active_by_character.get(character_id)
+            job_id = self._active_by_character.get((scope, character_id))
             if not job_id:
                 return None
             return self._jobs.get(job_id)
 
-    def is_character_busy(self, character_id: int) -> bool:
-        job = self.get_active_job_for_character(character_id)
+    def is_character_busy(self, character_id: int, *, scope: str = "series") -> bool:
+        job = self.get_active_job_for_character(character_id, scope=scope)
         return bool(job and job.status in {"queued", "running"})
 
     def list_visible_jobs(self, *, limit: int = 30) -> list[ReviewRegenerateJobState]:
@@ -70,14 +76,45 @@ class ReviewRegenerateJobManager:
         jobs.sort(key=lambda job: job.started_at, reverse=True)
         return jobs[:limit]
 
-    def enqueue(self, character_id: int, *, prompt: str, gender: str | None) -> ReviewRegenerateJobState:
+    def _enqueue(
+        self,
+        character_id: int,
+        *,
+        prompt: str,
+        gender: str | None,
+        scope: str,
+        character_tag: str,
+        series_tag: str,
+        images_per_character: int,
+    ) -> ReviewRegenerateJobState:
         with self._lock:
-            existing_job_id = self._active_by_character.get(character_id)
+            existing_job_id = self._active_by_character.get((scope, character_id))
             if existing_job_id:
                 existing = self._jobs.get(existing_job_id)
                 if existing and existing.status in {"queued", "running"}:
                     return existing
 
+        job = ReviewRegenerateJobState(
+            job_id=str(uuid.uuid4()),
+            character_id=character_id,
+            character_tag=character_tag,
+            series_tag=series_tag,
+            scope=scope,
+            prompt=prompt.strip(),
+            gender=gender,
+            total=images_per_character,
+        )
+        with self._lock:
+            self._jobs[job.job_id] = job
+            self._active_by_character[(scope, character_id)] = job.job_id
+            self._job_queue.append(job.job_id)
+            self._refresh_queue_messages()
+
+        self._dispatch_next()
+        return job
+
+    def enqueue(self, character_id: int, *, prompt: str, gender: str | None) -> ReviewRegenerateJobState:
+        """시리즈 기반(Character) 재생성."""
         db = SessionLocal()
         try:
             service = GenerationService(db)
@@ -94,25 +131,43 @@ class ReviewRegenerateJobManager:
             if not character:
                 raise ValueError("Character not found")
 
-            job = ReviewRegenerateJobState(
-                job_id=str(uuid.uuid4()),
-                character_id=character_id,
+            return self._enqueue(
+                character_id,
+                prompt=prompt,
+                gender=gender,
+                scope="series",
                 character_tag=character.character_tag,
                 series_tag=character.series.series_tag if character.series else "",
-                prompt=prompt.strip(),
-                gender=gender,
-                total=service.get_images_per_character(),
+                images_per_character=service.get_images_per_character(),
             )
-            with self._lock:
-                self._jobs[job.job_id] = job
-                self._active_by_character[character_id] = job.job_id
-                self._job_queue.append(job.job_id)
-                self._refresh_queue_messages()
         finally:
             db.close()
 
-        self._dispatch_next()
-        return job
+    def enqueue_global(self, global_character_id: int, *, prompt: str, gender: str | None) -> ReviewRegenerateJobState:
+        """캐릭터 목록(GlobalCharacter) 재생성. 시리즈 재생성과 id 공간이 다르므로
+        절대 `enqueue()`(series 전용)로 대체 호출하면 안 된다."""
+        db = SessionLocal()
+        try:
+            service = GenerationService(db)
+            status = service.naia_status()
+            if not status.get("ready"):
+                raise ValueError(str(status.get("message") or "NAIA가 준비되지 않았습니다."))
+
+            character = db.query(GlobalCharacter).filter(GlobalCharacter.id == global_character_id).first()
+            if not character:
+                raise ValueError("Character not found")
+
+            return self._enqueue(
+                global_character_id,
+                prompt=prompt,
+                gender=gender,
+                scope="global",
+                character_tag=character.character_tag,
+                series_tag="",
+                images_per_character=service.get_images_per_character(),
+            )
+        finally:
+            db.close()
 
     def _refresh_queue_messages(self) -> None:
         queue_index = 0
@@ -168,7 +223,16 @@ class ReviewRegenerateJobManager:
             prompt = job.prompt
             gender = job.gender
             character_id = job.character_id
+            scope = job.scope
             needs_gap = self._needs_inter_character_gap
+
+        # 메인 생성 큐(시리즈/캐릭터 목록)가 NAIA를 점유 중이면 재생성이 그 결과와
+        # 뒤섞이지 않도록 먼저 일시정지시키고, 재생성이 끝나면 반드시 재개한다.
+        from app.services.generation_job_manager import generation_job_manager
+
+        paused_job_ids = generation_job_manager.pause_all_running()
+        if paused_job_ids:
+            self._update_job(job_id, message="다른 생성 작업 일시정지 중...")
 
         try:
             if needs_gap:
@@ -195,13 +259,22 @@ class ReviewRegenerateJobManager:
             db = SessionLocal()
             try:
                 service = GenerationService(db)
-                refreshed = service.regenerate_review_images(
-                    character_id,
-                    prompt_core=prompt,
-                    gender=gender,
-                    progress_callback=on_progress,
-                )
-                result = to_catalog_item(refreshed).model_dump()
+                if scope == "global":
+                    refreshed = service.regenerate_review_images_global(
+                        character_id,
+                        prompt_core=prompt,
+                        gender=gender,
+                        progress_callback=on_progress,
+                    )
+                    result = to_catalog_item_global(refreshed).model_dump()
+                else:
+                    refreshed = service.regenerate_review_images(
+                        character_id,
+                        prompt_core=prompt,
+                        gender=gender,
+                        progress_callback=on_progress,
+                    )
+                    result = to_catalog_item(refreshed).model_dump()
                 with self._lock:
                     current_job = self._jobs.get(job_id)
                     total = current_job.total if current_job else len(result.get("images", []))
@@ -226,10 +299,12 @@ class ReviewRegenerateJobManager:
                 finished_at=_utc_now(),
             )
         finally:
+            if paused_job_ids:
+                generation_job_manager.resume_jobs(paused_job_ids)
             with self._lock:
                 self._needs_inter_character_gap = True
-                if self._active_by_character.get(character_id) == job_id:
-                    self._active_by_character.pop(character_id, None)
+                if self._active_by_character.get((scope, character_id)) == job_id:
+                    self._active_by_character.pop((scope, character_id), None)
                 self._running = False
                 self._refresh_queue_messages()
             self._dispatch_next()
