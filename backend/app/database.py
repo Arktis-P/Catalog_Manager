@@ -61,6 +61,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_series_columns()
     _migrate_character_columns()
+    _migrate_global_character_columns()
 
 
 def _migrate_character_columns() -> None:
@@ -76,6 +77,21 @@ def _migrate_character_columns() -> None:
             "ALTER TABLE characters ADD COLUMN appearance_confirmed BOOLEAN NOT NULL DEFAULT 0"
         ),
         "source_series_id": "ALTER TABLE characters ADD COLUMN source_series_id INTEGER",
+    }
+    with engine.begin() as connection:
+        for column_name, statement in migrations.items():
+            if column_name not in existing:
+                connection.execute(text(statement))
+
+
+def _migrate_global_character_columns() -> None:
+    inspector = inspect(engine)
+    if "global_characters" not in inspector.get_table_names():
+        return
+
+    existing = {column["name"] for column in inspector.get_columns("global_characters")}
+    migrations = {
+        "parent_character_id": "ALTER TABLE global_characters ADD COLUMN parent_character_id INTEGER",
     }
     with engine.begin() as connection:
         for column_name, statement in migrations.items():

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import { CharacterLinkModal } from "../components/CharacterLinkModal";
 import { useCharacterCatalogJobs } from "../context/CharacterCatalogJobContext";
 import { useGenerationJobs } from "../context/GenerationJobContext";
 import type { GlobalCharacter } from "../types";
@@ -9,6 +10,11 @@ import { danbooruWikiUrl, openExternal } from "../utils/danbooruLinks";
 const PAGE_SIZE_OPTIONS = [50, 100, 200];
 const GENDER_OPTIONS = ["1girl", "1boy", "no_humans"];
 const STATUS_OPTIONS = ["uncollected", "collecting", "completed", "partial", "failed", "needs_review"];
+const ALTERNATIVE_OPTIONS: { value: "" | "yes" | "no"; label: string }[] = [
+  { value: "", label: "All" },
+  { value: "yes", label: "Alternative만" },
+  { value: "no", label: "일반만" },
+];
 
 function formatDate(value: string | null): string {
   if (!value) return "-";
@@ -134,6 +140,7 @@ export function CharactersPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [imageFilter, setImageFilter] = useState<"" | "yes" | "no">("");
   const [coverFilter, setCoverFilter] = useState<"" | "yes" | "no">("");
+  const [alternativeFilter, setAlternativeFilter] = useState<"" | "yes" | "no">("");
   const [sortBy, setSortBy] = useState("post_count");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [pageSize, setPageSize] = useState(100);
@@ -141,6 +148,7 @@ export function CharactersPage() {
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [viewingCharacter, setViewingCharacter] = useState<GlobalCharacter | null>(null);
+  const [linkingCharacter, setLinkingCharacter] = useState<GlobalCharacter | null>(null);
   const [minPostCountInput, setMinPostCountInput] = useState("500");
 
   useEffect(() => {
@@ -150,7 +158,7 @@ export function CharactersPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, genderFilter, statusFilter, imageFilter, coverFilter, pageSize, sortBy, sortOrder]);
+  }, [search, genderFilter, statusFilter, imageFilter, coverFilter, alternativeFilter, pageSize, sortBy, sortOrder]);
 
   const loadCharacters = async () => {
     setLoading(true);
@@ -162,6 +170,7 @@ export function CharactersPage() {
         collect_status: statusFilter || undefined,
         has_image: imageFilter ? imageFilter === "yes" : undefined,
         has_cover: coverFilter ? coverFilter === "yes" : undefined,
+        is_alternative: alternativeFilter ? alternativeFilter === "yes" : undefined,
         sort_by: sortBy,
         sort_order: sortOrder,
         skip: (currentPage - 1) * pageSize,
@@ -179,7 +188,7 @@ export function CharactersPage() {
   useEffect(() => {
     void loadCharacters();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, genderFilter, statusFilter, imageFilter, coverFilter, sortBy, sortOrder, currentPage, pageSize]);
+  }, [search, genderFilter, statusFilter, imageFilter, coverFilter, alternativeFilter, sortBy, sortOrder, currentPage, pageSize]);
 
   // 목록/통합 수집 작업이 끝나면 목록을 자동으로 새로고침 (진행 상태 자체는 GlobalTaskBar에 표시됨)
   // 여러 태그 수집 job이 동시에 진행될 수 있으므로, 완료된 job 집합이 바뀔 때마다 새로고침한다.
@@ -359,6 +368,16 @@ export function CharactersPage() {
               <option value="yes">선택됨</option>
               <option value="no">미선택</option>
             </select>
+            <label className="series-toolbar-label" htmlFor="alternative-filter">Alternative</label>
+            <select
+              id="alternative-filter"
+              value={alternativeFilter}
+              onChange={(e) => setAlternativeFilter(e.target.value as "" | "yes" | "no")}
+            >
+              {ALTERNATIVE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
             <label className="series-toolbar-label" htmlFor="sort-by">Sort</label>
             <select id="sort-by" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
               <option value="post_count">post count</option>
@@ -451,6 +470,20 @@ export function CharactersPage() {
                         </button>
                         {" "}
                         <span className="catalog-card-subtitle characters-tag-inline">{character.character_tag}</span>
+                        {character.is_alternative ? (
+                          <>
+                            {" "}
+                            <span className="badge badge-info" title={`상위: ${character.parent_display_name ?? character.parent_character_tag}`}>
+                              Alternative · ↳ {character.parent_display_name || character.parent_character_tag}
+                            </span>
+                          </>
+                        ) : null}
+                        {character.child_count > 0 ? (
+                          <>
+                            {" "}
+                            <span className="badge badge-muted">하위 {character.child_count}</span>
+                          </>
+                        ) : null}
                       </td>
                       <td className="col-count">{character.post_count.toLocaleString()}</td>
                       <td className="col-character-status">
@@ -516,6 +549,14 @@ export function CharactersPage() {
                         >
                           이미지 생성
                         </button>
+                        {" "}
+                        <button
+                          className="btn btn-small"
+                          type="button"
+                          onClick={() => setLinkingCharacter(character)}
+                        >
+                          {character.is_alternative ? "연결 해제" : "Merge"}
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -531,6 +572,14 @@ export function CharactersPage() {
 
       {viewingCharacter ? (
         <CharacterDetailModal character={viewingCharacter} onClose={() => setViewingCharacter(null)} />
+      ) : null}
+
+      {linkingCharacter ? (
+        <CharacterLinkModal
+          character={linkingCharacter}
+          onClose={() => setLinkingCharacter(null)}
+          onLinked={() => void loadCharacters()}
+        />
       ) : null}
     </div>
   );

@@ -13,6 +13,8 @@ import type {
   GlobalCatalogReviewListResponse,
   CatalogJob,
   CharacterCollectResult,
+  CharacterLinkCandidate,
+  CharacterLinkResult,
   CharacterListResponse,
   CollectJob,
   DanbooruStatus,
@@ -242,11 +244,35 @@ export const api = {
     max_post_count?: number;
     has_image?: boolean;
     has_cover?: boolean;
+    is_alternative?: boolean;
     sort_by?: string;
     sort_order?: string;
     skip?: number;
     limit?: number;
   } = {}) => request<GlobalCharacterListResponse>(`/character-catalog/characters${buildQuery(params)}`),
+
+  listCharacterLinkCandidates: (
+    characterId: number,
+    params: { mode?: "parent" | "child"; search?: string; exclude_ids?: number[]; limit?: number } = {},
+  ) => {
+    const { exclude_ids, ...rest } = params;
+    const query = {
+      ...rest,
+      ...(exclude_ids?.length ? { exclude_ids: exclude_ids.join(",") } : {}),
+    };
+    return request<{ items: CharacterLinkCandidate[] }>(
+      `/character-catalog/characters/${characterId}/link/candidates${buildQuery(query)}`,
+    );
+  },
+
+  linkParentCharacter: (childId: number, parentCharacterId: number) =>
+    request<CharacterLinkResult>(`/character-catalog/characters/${childId}/link`, {
+      method: "POST",
+      body: JSON.stringify({ parent_character_id: parentCharacterId }),
+    }),
+
+  unlinkParentCharacter: (childId: number) =>
+    request<CharacterLinkResult>(`/character-catalog/characters/${childId}/link`, { method: "DELETE" }),
 
   startCatalogListJob: (minPostCount: number, restart = false) =>
     request<CatalogJob>("/character-catalog/list/start", {

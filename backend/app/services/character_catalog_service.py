@@ -269,6 +269,8 @@ class CharacterCatalogService:
                 selectinload(GlobalCharacter.series_links).selectinload(CharacterSeriesLink.series),
                 selectinload(GlobalCharacter.images),
                 selectinload(GlobalCharacter.review),
+                selectinload(GlobalCharacter.parent),
+                selectinload(GlobalCharacter.children),
             )
             .filter(GlobalCharacter.id == character_id)
             .first()
@@ -285,6 +287,7 @@ class CharacterCatalogService:
         max_post_count: int | None = None,
         has_image: bool | None = None,
         has_cover: bool | None = None,
+        is_alternative: bool | None = None,
         sort_by: str = "post_count",
         sort_order: str = "desc",
         skip: int = 0,
@@ -294,7 +297,14 @@ class CharacterCatalogService:
             selectinload(GlobalCharacter.series_links).selectinload(CharacterSeriesLink.series),
             selectinload(GlobalCharacter.images),
             selectinload(GlobalCharacter.review),
+            selectinload(GlobalCharacter.parent),
+            selectinload(GlobalCharacter.children),
         )
+
+        if is_alternative is True:
+            query = query.filter(GlobalCharacter.parent_character_id.isnot(None))
+        elif is_alternative is False:
+            query = query.filter(GlobalCharacter.parent_character_id.is_(None))
 
         if search:
             like = f"%{search.strip()}%"

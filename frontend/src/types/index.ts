@@ -201,6 +201,11 @@ export interface GlobalCharacter {
   series_links: CharacterSeriesLinkInfo[];
   image_count: number;
   has_cover_image: boolean;
+  parent_character_id: number | null;
+  parent_character_tag: string | null;
+  parent_display_name: string | null;
+  is_alternative: boolean;
+  child_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -208,6 +213,22 @@ export interface GlobalCharacter {
 export interface GlobalCharacterListResponse {
   items: GlobalCharacter[];
   total: number;
+}
+
+export interface CharacterLinkCandidate {
+  id: number;
+  character_tag: string;
+  display_name: string;
+  post_count: number;
+  similarity_score: number;
+  linkable: boolean;
+}
+
+export interface CharacterLinkResult {
+  child_id: number;
+  child_character_tag: string;
+  parent_id: number;
+  parent_character_tag: string;
 }
 
 export interface CatalogJob {
@@ -389,7 +410,23 @@ export interface CatalogReviewItem {
   type: string | null;
   final_prompt: string | null;
   cover_image_id: number | null;
+  parent_character_tag?: string | null;
+  parent_display_name?: string | null;
+  is_alternative?: boolean;
+  child_count?: number;
   images: CatalogReviewImage[];
+}
+
+// CharacterLinkModal이 GlobalCharacter(캐릭터 관리 탭)와 CatalogReviewItem(리뷰 탭) 양쪽에서
+// 공통으로 다룰 수 있도록 필요한 필드만 뽑아낸 최소 인터페이스.
+export interface LinkableCharacterSummary {
+  id: number;
+  character_tag: string;
+  display_name: string;
+  is_alternative: boolean;
+  parent_character_tag: string | null;
+  parent_display_name: string | null;
+  child_count: number;
 }
 
 export type CatalogReviewFilterStatus =

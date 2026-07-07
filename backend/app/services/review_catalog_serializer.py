@@ -28,6 +28,7 @@ def visible_catalog_images_global(character: GlobalCharacter) -> list:
 def to_catalog_item_global(character: GlobalCharacter) -> GlobalCatalogReviewItemResponse:
     review = character.review
     images = visible_catalog_images_global(character)
+    parent = character.parent
     return GlobalCatalogReviewItemResponse(
         id=character.id,
         character_tag=character.character_tag,
@@ -48,6 +49,10 @@ def to_catalog_item_global(character: GlobalCharacter) -> GlobalCatalogReviewIte
         type=review.type if review else None,
         final_prompt=review.final_prompt if review else None,
         cover_image_id=review.cover_image_id if review else None,
+        parent_character_tag=parent.character_tag if parent else None,
+        parent_display_name=parent.display_name if parent else None,
+        is_alternative=character.parent_character_id is not None,
+        child_count=len(character.children),
         images=[
             CatalogReviewImageResponse(
                 id=image.id,

@@ -167,6 +167,10 @@ class GlobalCatalogReviewItemResponse(BaseModel):
     type: str | None = None
     final_prompt: str | None = None
     cover_image_id: int | None = None
+    parent_character_tag: str | None = None
+    parent_display_name: str | None = None
+    is_alternative: bool = False
+    child_count: int = 0
     images: list[CatalogReviewImageResponse] = Field(default_factory=list)
 
 

@@ -11,17 +11,27 @@ from app.schemas.character_catalog import (
     CatalogListStartRequest,
     CatalogRetryFailedRequest,
     CatalogTagsStartRequest,
+    CharacterLinkCandidate,
+    CharacterLinkCandidateListResponse,
+    CharacterLinkRequest,
+    CharacterLinkResponse,
+    CharacterUnlinkResponse,
     GlobalCharacterListResponse,
     GlobalCharacterResponse,
 )
 from app.services.character_catalog_job_manager import character_catalog_job_manager
 from app.services.character_catalog_service import CharacterCatalogService
+from app.services.character_link_service import CharacterLinkService, similarity_score
 
 router = APIRouter(prefix="/character-catalog", tags=["character-catalog"])
 
 
 def get_catalog_service(db: Session = Depends(get_db)) -> CharacterCatalogService:
     return CharacterCatalogService(db)
+
+
+def get_link_service(db: Session = Depends(get_db)) -> CharacterLinkService:
+    return CharacterLinkService(db)
 
 
 def _require_danbooru() -> None:
@@ -39,6 +49,7 @@ def list_global_characters(
     max_post_count: int | None = Query(default=None, ge=0),
     has_image: bool | None = Query(default=None),
     has_cover: bool | None = Query(default=None),
+    is_alternative: bool | None = Query(default=None),
     sort_by: str = Query(default="post_count"),
     sort_order: str = Query(default="desc"),
     skip: int = Query(default=0, ge=0),
@@ -54,6 +65,7 @@ def list_global_characters(
         max_post_count=max_post_count,
         has_image=has_image,
         has_cover=has_cover,
+        is_alternative=is_alternative,
         sort_by=sort_by,
         sort_order=sort_order,
         skip=skip,
@@ -71,6 +83,76 @@ def get_global_character(character_id: int, service: CharacterCatalogService = D
     if not character:
         raise HTTPException(status_code=404, detail="Character not found")
     return GlobalCharacterResponse.from_model(character)
+
+
+@router.get("/characters/{character_id}/link/candidates", response_model=CharacterLinkCandidateListResponse)
+def list_character_link_candidates(
+    character_id: int,
+    mode: str = Query(default="parent", pattern="^(parent|child)$"),
+    search: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    exclude_ids: str | None = Query(
+        default=None,
+        description="Comma-separated character IDs to exclude from candidates",
+    ),
+    service: CharacterCatalogService = Depends(get_catalog_service),
+    link_service: CharacterLinkService = Depends(get_link_service),
+):
+    character = service.get_character(character_id)
+    if not character:
+        raise HTTPException(status_code=404, detail="Character not found")
+
+    excluded: set[int] = set()
+    if exclude_ids:
+        for part in exclude_ids.split(","):
+            part = part.strip()
+            if part.isdigit():
+                excluded.add(int(part))
+
+    if mode == "parent":
+        candidates = link_service.list_parent_candidates(character, search=search, limit=limit, exclude_ids=excluded or None)
+    else:
+        candidates = link_service.list_child_candidates(character, search=search, limit=limit, exclude_ids=excluded or None)
+
+    role = "parent" if mode == "parent" else "child"
+    return CharacterLinkCandidateListResponse(
+        items=[
+            CharacterLinkCandidate(
+                id=item.id,
+                character_tag=item.character_tag,
+                display_name=item.display_name,
+                post_count=item.post_count,
+                similarity_score=similarity_score(character, item),
+                linkable=link_service.candidate_is_linkable(item, role=role),
+            )
+            for item in candidates
+        ]
+    )
+
+
+@router.post("/characters/{character_id}/link", response_model=CharacterLinkResponse)
+def link_character_to_parent(
+    character_id: int,
+    payload: CharacterLinkRequest,
+    link_service: CharacterLinkService = Depends(get_link_service),
+):
+    try:
+        result = link_service.link_parent(character_id, payload.parent_character_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CharacterLinkResponse(**result.__dict__)
+
+
+@router.delete("/characters/{character_id}/link", response_model=CharacterUnlinkResponse)
+def unlink_character_from_parent(
+    character_id: int,
+    link_service: CharacterLinkService = Depends(get_link_service),
+):
+    try:
+        result = link_service.unlink_parent(character_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CharacterUnlinkResponse(**result.__dict__)
 
 
 @router.post("/list/start", response_model=CatalogJobResponse)

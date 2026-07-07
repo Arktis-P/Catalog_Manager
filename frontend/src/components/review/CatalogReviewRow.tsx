@@ -39,6 +39,7 @@ interface CatalogReviewRowProps {
   onMoveSeries?: () => void;
   onRegenerate?: () => void;
   onComplete?: () => void;
+  onOpenLinkModal?: () => void;
   regenerating?: boolean;
 }
 
@@ -107,6 +108,7 @@ export function CatalogReviewRow({
   onMoveSeries,
   onRegenerate,
   onComplete,
+  onOpenLinkModal,
   regenerating = false,
 }: CatalogReviewRowProps) {
   const chips = appearanceTagChips(item);
@@ -190,6 +192,11 @@ export function CatalogReviewRow({
             >
               Wiki
             </a>
+            {onOpenLinkModal ? (
+              <button className="btn btn-small" type="button" onClick={onOpenLinkModal}>
+                {item.is_alternative ? "연결 해제" : "Merge"}
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -197,6 +204,14 @@ export function CatalogReviewRow({
           <span className="badge">{item.post_count.toLocaleString()} posts</span>
           {item.review_status ? <span className="badge">{item.review_status}</span> : null}
           {item.type ? <span className="badge">{item.type}</span> : null}
+          {item.is_alternative ? (
+            <span
+              className="badge badge-info"
+              title={`상위 캐릭터: ${item.parent_display_name ?? item.parent_character_tag}`}
+            >
+              Alternative · ↳ {item.parent_display_name || item.parent_character_tag}
+            </span>
+          ) : null}
         </div>
 
         <ReviewRatingStars rating={draft.rating} onRate={locked ? () => undefined : onRate} />

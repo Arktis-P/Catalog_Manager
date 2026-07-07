@@ -3,7 +3,7 @@ from __future__ import annotations
 from urllib.parse import quote
 
 from sqlalchemy import exists, or_, select
-from sqlalchemy.orm import Session, contains_eager, joinedload
+from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 
 from app.config import settings
 from app.integrations.danbooru.appearance_extractor import normalize_gender
@@ -353,7 +353,12 @@ class ReviewService:
         query = (
             self.db.query(GlobalCharacter)
             .outerjoin(GlobalCharacterReview, GlobalCharacterReview.global_character_id == GlobalCharacter.id)
-            .options(joinedload(GlobalCharacter.images), joinedload(GlobalCharacter.review))
+            .options(
+                joinedload(GlobalCharacter.images),
+                joinedload(GlobalCharacter.review),
+                joinedload(GlobalCharacter.parent),
+                selectinload(GlobalCharacter.children),
+            )
             .filter(self._global_character_has_images())
         )
 

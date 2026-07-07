@@ -38,6 +38,11 @@ class GlobalCharacterResponse(BaseModel):
     series_links: list[CharacterSeriesLinkResponse]
     image_count: int
     has_cover_image: bool
+    parent_character_id: int | None
+    parent_character_tag: str | None
+    parent_display_name: str | None
+    is_alternative: bool
+    child_count: int
     created_at: datetime
     updated_at: datetime
 
@@ -49,6 +54,7 @@ class GlobalCharacterResponse(BaseModel):
         if primary is not None:
             primary_tag = primary.series.series_tag if primary.series else primary.copyright_tag
         review = character.review
+        parent = character.parent
         return cls(
             id=character.id,
             character_tag=character.character_tag,
@@ -71,6 +77,11 @@ class GlobalCharacterResponse(BaseModel):
             related_series_count=len(links),
             image_count=len(character.images),
             has_cover_image=bool(review and review.cover_image_id is not None),
+            parent_character_id=character.parent_character_id,
+            parent_character_tag=parent.character_tag if parent else None,
+            parent_display_name=parent.display_name if parent else None,
+            is_alternative=character.parent_character_id is not None,
+            child_count=len(character.children),
             series_links=[
                 CharacterSeriesLinkResponse(
                     series_id=link.series_id,
@@ -155,3 +166,34 @@ class CatalogJobResponse(BaseModel):
 
 class CatalogJobListResponse(BaseModel):
     items: list[CatalogJobResponse]
+
+
+class CharacterLinkCandidate(BaseModel):
+    id: int
+    character_tag: str
+    display_name: str
+    post_count: int = 0
+    similarity_score: float = 0.0
+    linkable: bool = True
+
+
+class CharacterLinkCandidateListResponse(BaseModel):
+    items: list[CharacterLinkCandidate]
+
+
+class CharacterLinkRequest(BaseModel):
+    parent_character_id: int = Field(ge=1)
+
+
+class CharacterLinkResponse(BaseModel):
+    child_id: int
+    child_character_tag: str
+    parent_id: int
+    parent_character_tag: str
+
+
+class CharacterUnlinkResponse(BaseModel):
+    child_id: int
+    child_character_tag: str
+    parent_id: int
+    parent_character_tag: str

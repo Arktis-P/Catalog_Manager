@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
+import { CharacterLinkModal } from "../CharacterLinkModal";
 import { useReviewRegenerateJobs } from "../../context/ReviewRegenerateContext";
-import type { CatalogReviewFilterStatus, CatalogReviewItem } from "../../types";
+import type { CatalogReviewFilterStatus, CatalogReviewItem, LinkableCharacterSummary } from "../../types";
 import { danbooruPostsUrl, danbooruWikiUrl, openExternal } from "../../utils/danbooruLinks";
 import { appearanceTagChips, cycleGender, defaultEnabledTagKeys, resolveFinalPrompt } from "../../utils/reviewPrompt";
 import { pendingReviewImageUrl } from "../../utils/reviewImages";
@@ -22,6 +23,18 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
 }
 
+function toLinkableSummary(item: CatalogReviewItem): LinkableCharacterSummary {
+  return {
+    id: item.id,
+    character_tag: item.character_tag,
+    display_name: item.display_name,
+    is_alternative: Boolean(item.is_alternative),
+    parent_character_tag: item.parent_character_tag ?? null,
+    parent_display_name: item.parent_display_name ?? null,
+    child_count: item.child_count ?? 0,
+  };
+}
+
 export function GlobalCatalogReviewPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [items, setItems] = useState<CatalogReviewItem[]>([]);
@@ -39,6 +52,7 @@ export function GlobalCatalogReviewPanel() {
   const [quadLayout, setQuadLayout] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewPosition, setPreviewPosition] = useState<{ top: number; left: number } | null>(null);
+  const [linkingItem, setLinkingItem] = useState<CatalogReviewItem | null>(null);
   const appliedRegenerateJobIdsRef = useRef<Set<string>>(new Set());
 
   const {
@@ -324,7 +338,8 @@ export function GlobalCatalogReviewPanel() {
 
       if (focusedLocked) {
         const key = event.key.toLowerCase();
-        const allowed = event.key === "ArrowUp" || event.key === "ArrowDown" || key === "q" || key === "w";
+        const allowed =
+          event.key === "ArrowUp" || event.key === "ArrowDown" || key === "q" || key === "w" || key === "a";
         if (!allowed) {
           event.preventDefault();
           return;
@@ -399,6 +414,11 @@ export function GlobalCatalogReviewPanel() {
       if (key === "w") {
         event.preventDefault();
         openExternal(danbooruWikiUrl(focusedItem.character_tag, focusedItem.danbooru_wiki_url));
+        return;
+      }
+      if (key === "a") {
+        event.preventDefault();
+        setLinkingItem(focusedItem);
       }
     };
 
@@ -439,7 +459,7 @@ export function GlobalCatalogReviewPanel() {
             Refresh
           </button>
         </div>
-        <ReviewShortcutGuide />
+        <ReviewShortcutGuide includeMerge />
       </div>
 
       <div className="catalog-review-progress">
@@ -486,6 +506,7 @@ export function GlobalCatalogReviewPanel() {
                   onRate={(value) => setRating(item.id, value)}
                   onRegenerate={focused ? () => void regenerateFocused() : undefined}
                   onComplete={() => void completeItem(item)}
+                  onOpenLinkModal={() => setLinkingItem(item)}
                   regenerating={locked}
                 />
                 <div className="global-catalog-review-row-actions">
@@ -512,6 +533,14 @@ export function GlobalCatalogReviewPanel() {
           alt={previewAlt}
           top={previewPosition?.top ?? PREVIEW_GAP}
           left={previewPosition?.left ?? PREVIEW_GAP}
+        />
+      ) : null}
+
+      {linkingItem ? (
+        <CharacterLinkModal
+          character={toLinkableSummary(linkingItem)}
+          onClose={() => setLinkingItem(null)}
+          onLinked={() => void loadReviews()}
         />
       ) : null}
 
