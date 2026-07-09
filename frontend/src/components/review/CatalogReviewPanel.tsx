@@ -403,6 +403,23 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
     }
   }, [filterStatus, focusedDraft, focusedItem, focusedLocked, submitting]);
 
+  const handlePurgeUnselected = useCallback(async (item: CatalogReviewItem) => {
+    if (!window.confirm(`${item.character_tag}의 선택되지 않은 이미지를 삭제할까요? 되돌릴 수 없습니다.`)) {
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const response = await api.purgeUnselectedCatalogImages(item.id);
+      setItems((current) => current.map((entry) => (entry.id === item.id ? response.item : entry)));
+      setActionMessage(`${item.character_tag} 미선택 이미지 ${response.removed_count}장 삭제됨`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "미선택 이미지 삭제에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }, []);
+
   const undoLast = useCallback(async () => {
     const characterId = undoStack[0];
     if (!characterId || submitting) {
@@ -790,6 +807,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
                     onComplete={
                       rowIndex === focusIndex ? () => void completeFocused() : undefined
                     }
+                    onPurgeUnselected={() => void handlePurgeUnselected(item)}
                     regenerating={locked}
                   />
                 );

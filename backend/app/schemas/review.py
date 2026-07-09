@@ -115,6 +115,18 @@ class CatalogReviewDismissNeedsCheckResponse(BaseModel):
     needs_check_reason: str | None = None
 
 
+class CatalogReviewPurgeUnselectedResponse(BaseModel):
+    id: int
+    removed_count: int
+    item: CatalogReviewItemResponse
+
+
+class GlobalCatalogReviewPurgeUnselectedResponse(BaseModel):
+    id: int
+    removed_count: int
+    item: GlobalCatalogReviewItemResponse
+
+
 class CatalogReviewRegenerateRequest(BaseModel):
     prompt: str = Field(min_length=1)
     gender: str | None = None

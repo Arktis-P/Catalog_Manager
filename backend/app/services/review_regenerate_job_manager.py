@@ -234,6 +234,11 @@ class ReviewRegenerateJobManager:
         if paused_job_ids:
             self._update_job(job_id, message="다른 생성 작업 일시정지 중...")
 
+        # 메인 큐가 이미 NAIA로부터 이 캐릭터의 이미지를 받아 저장 대기 중일 수
+        # 있다. 일시정지는 "다음 NAIA 요청 전"에만 걸리므로, 이미 받아온 이미지의
+        # 저장(후처리)까지 끝나길 기다린 뒤에 지워야 stale 이미지가 섞이지 않는다.
+        generation_job_manager.wait_for_pending_postprocess(scope, character_id)
+
         try:
             if needs_gap:
                 self._update_job(job_id, message="다음 캐릭터 재생성 전 NAIA 대기 중...")

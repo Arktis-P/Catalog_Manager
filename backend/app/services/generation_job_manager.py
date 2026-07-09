@@ -128,6 +128,37 @@ class GenerationJobManager:
         self._postprocess_executor = ThreadPoolExecutor(
             max_workers=_POSTPROCESS_WORKERS, thread_name_prefix="gen-postprocess"
         )
+        # 캐릭터별로 아직 끝나지 않은 후처리(파일 저장) future를 추적한다. 재생성이
+        # 이 캐릭터의 이미지를 지우기 전에, 메인 큐에서 이미 NAIA 응답을 받아 저장
+        # 대기 중인 이미지가 없는지 반드시 확인(대기)해야 stale 이미지가 섞이지 않는다.
+        self._pending_postprocess: dict[tuple[str, int], list[Future]] = defaultdict(list)
+
+    def _track_postprocess_future(self, scope: str, character_id: int, future: Future) -> None:
+        key = (scope, character_id)
+        with self._lock:
+            self._pending_postprocess[key].append(future)
+
+        def _cleanup(done_future: Future) -> None:
+            with self._lock:
+                pending = self._pending_postprocess.get(key)
+                if pending and done_future in pending:
+                    pending.remove(done_future)
+                    if not pending:
+                        self._pending_postprocess.pop(key, None)
+
+        future.add_done_callback(_cleanup)
+
+    def wait_for_pending_postprocess(self, scope: str, character_id: int, timeout: float = 60.0) -> None:
+        """메인 생성 큐에서 이미 NAIA로부터 받아 저장 대기 중인 이미지가 있다면
+        완료될 때까지 기다린다. 재생성이 이미지를 지우기 직전에 호출해, 뒤늦게
+        저장되는 stale 이미지가 재생성 결과에 섞이는 것을 막는다."""
+        with self._lock:
+            futures = list(self._pending_postprocess.get((scope, character_id), []))
+        for future in futures:
+            try:
+                future.result(timeout=timeout)
+            except Exception:
+                pass
 
     def get_job(self, job_id: str) -> GenerationBatchState | None:
         with self._lock:
@@ -520,6 +551,7 @@ class GenerationJobManager:
                     future = self._postprocess_executor.submit(
                         _postprocess_character_image, character.id, generation_job.id, image_bytes
                     )
+                    self._track_postprocess_future("series", character.id, future)
                     future.add_done_callback(
                         self._make_postprocess_callback(job_id, character.character_tag, index, len(jobs))
                     )
@@ -824,6 +856,7 @@ class GenerationJobManager:
                     future = self._postprocess_executor.submit(
                         _postprocess_global_character_image, character.id, generation_job.id, image_bytes
                     )
+                    self._track_postprocess_future("global", character.id, future)
                     future.add_done_callback(
                         self._make_postprocess_callback(job_id, character.character_tag, index, len(jobs))
                     )

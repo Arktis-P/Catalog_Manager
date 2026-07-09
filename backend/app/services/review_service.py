@@ -14,7 +14,13 @@ from app.models.global_character_review import GlobalCharacterReview
 from app.models.image import Image
 from app.models.review import Review
 from app.models.series import Series
-from app.services.character_image_service import purge_character_images, purge_global_character_images
+from app.services.character_image_service import (
+    move_image_to_catalog_folder,
+    purge_character_images,
+    purge_global_character_images,
+    purge_noncover_images,
+    purge_noncover_images_global,
+)
 from app.services.db_write_queue import commit_db_session
 from app.services.prompt_service import build_generation_prompt
 
@@ -272,6 +278,7 @@ class ReviewService:
             review.cover_image_id = cover_image_id
             for image in character.images:
                 image.is_cover = image.id == cover_image_id
+            move_image_to_catalog_folder(self.db, cover_image)
 
         review.rating = rating
         # 0/-1점은 카탈로그에 이미지 없이 성별+기본 태그만 노출되어야 하므로,
@@ -457,6 +464,7 @@ class ReviewService:
             review.cover_image_id = cover_image_id
             for image in character.images:
                 image.is_cover = image.id == cover_image_id
+            move_image_to_catalog_folder(self.db, cover_image)
 
         review.rating = rating
         base_prompt = getattr(character, "generation_prompt", None)
@@ -469,6 +477,27 @@ class ReviewService:
         commit_db_session(self.db)
         self.db.refresh(character)
         return character
+
+    def purge_unselected_images(self, character_id: int) -> tuple[Character, int]:
+        """완료된 리뷰에서 커버로 선택되지 않은 이미지를 파일까지 완전히 삭제한다.
+        사용자가 명시적으로 버튼을 눌렀을 때만 호출되는 되돌릴 수 없는 동작."""
+        character = (
+            self.db.query(Character)
+            .options(joinedload(Character.images), joinedload(Character.review))
+            .filter(Character.id == character_id)
+            .first()
+        )
+        if not character:
+            raise ValueError("Character not found")
+        if not character.review or character.review.review_status != "completed":
+            raise ValueError("완료된 리뷰가 아닙니다")
+        if not character.review.cover_image_id:
+            raise ValueError("선택된 커버 이미지가 없습니다")
+
+        removed = purge_noncover_images(self.db, character)
+        commit_db_session(self.db)
+        self.db.refresh(character)
+        return character, removed
 
     def undo_catalog_review_global(self, global_character_id: int) -> GlobalCharacter:
         character = (
@@ -490,3 +519,22 @@ class ReviewService:
         commit_db_session(self.db)
         self.db.refresh(character)
         return character
+
+    def purge_unselected_images_global(self, global_character_id: int) -> tuple[GlobalCharacter, int]:
+        character = (
+            self.db.query(GlobalCharacter)
+            .options(joinedload(GlobalCharacter.images), joinedload(GlobalCharacter.review))
+            .filter(GlobalCharacter.id == global_character_id)
+            .first()
+        )
+        if not character:
+            raise ValueError("Character not found")
+        if not character.review or character.review.review_status != "completed":
+            raise ValueError("완료된 리뷰가 아닙니다")
+        if not character.review.cover_image_id:
+            raise ValueError("선택된 커버 이미지가 없습니다")
+
+        removed = purge_noncover_images_global(self.db, character)
+        commit_db_session(self.db)
+        self.db.refresh(character)
+        return character, removed

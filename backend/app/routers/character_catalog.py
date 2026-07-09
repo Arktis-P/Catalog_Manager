@@ -16,6 +16,8 @@ from app.schemas.character_catalog import (
     CharacterLinkRequest,
     CharacterLinkResponse,
     CharacterUnlinkResponse,
+    GlobalCharacterImageResponse,
+    GlobalCharacterImagesResponse,
     GlobalCharacterListResponse,
     GlobalCharacterResponse,
 )
@@ -83,6 +85,28 @@ def get_global_character(character_id: int, service: CharacterCatalogService = D
     if not character:
         raise HTTPException(status_code=404, detail="Character not found")
     return GlobalCharacterResponse.from_model(character)
+
+
+@router.get("/characters/{character_id}/images", response_model=GlobalCharacterImagesResponse)
+def get_global_character_images(character_id: int, service: CharacterCatalogService = Depends(get_catalog_service)):
+    """캐릭터 탭 '이미지 보기' 팝업용. 커버가 선택되어 있으면 1장, 아니면 최근
+    생성된 이미지 최대 2장을 반환한다."""
+    character = service.get_character(character_id)
+    if not character:
+        raise HTTPException(status_code=404, detail="Character not found")
+    images = service.get_character_images(character_id)
+    return GlobalCharacterImagesResponse(
+        id=character_id,
+        images=[
+            GlobalCharacterImageResponse(
+                id=image.id,
+                image_path=image.image_path,
+                is_cover=image.is_cover,
+                auto_status=image.auto_status,
+            )
+            for image in images
+        ],
+    )
 
 
 @router.get("/characters/{character_id}/link/candidates", response_model=CharacterLinkCandidateListResponse)

@@ -3,9 +3,10 @@ import { api } from "../api/client";
 import { CharacterLinkModal } from "../components/CharacterLinkModal";
 import { useCharacterCatalogJobs } from "../context/CharacterCatalogJobContext";
 import { useGenerationJobs } from "../context/GenerationJobContext";
-import type { GlobalCharacter } from "../types";
+import type { GlobalCharacter, GlobalCharacterImage } from "../types";
 import { collectStatusBadgeClass, collectStatusLabel } from "../utils/characterCatalogStatus";
 import { danbooruWikiUrl, openExternal } from "../utils/danbooruLinks";
+import { pendingReviewImageUrl } from "../utils/reviewImages";
 
 const PAGE_SIZE_OPTIONS = [50, 100, 200];
 const GENDER_OPTIONS = ["1girl", "1boy", "no_humans"];
@@ -128,6 +129,65 @@ function CharacterDetailModal({ character, onClose }: { character: GlobalCharact
   );
 }
 
+function CharacterImagesModal({ character, onClose }: { character: GlobalCharacter; onClose: () => void }) {
+  const [images, setImages] = useState<GlobalCharacterImage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void api
+      .getGlobalCharacterImages(character.id)
+      .then((response) => {
+        if (!cancelled) setImages(response.images);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "이미지를 불러오지 못했습니다.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [character.id]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header-row">
+          <span className="modal-title">{character.display_name || character.character_tag} 이미지</span>
+          <button className="btn btn-small" type="button" onClick={onClose}>닫기</button>
+        </div>
+        <div className="modal-body-scroll">
+          {loading ? (
+            <div className="empty-state">불러오는 중...</div>
+          ) : error ? (
+            <div className="error-banner">{error}</div>
+          ) : images.length === 0 ? (
+            <div className="empty-state">생성된 이미지가 없습니다.</div>
+          ) : (
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              {images.map((image) => (
+                <div key={image.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                  <img
+                    src={pendingReviewImageUrl(image.image_path, { thumbnail: true, thumbSize: 480 }) ?? undefined}
+                    alt={character.character_tag}
+                    style={{ maxWidth: 420, maxHeight: 560, borderRadius: 6 }}
+                  />
+                  {image.is_cover ? <span className="badge badge-success">커버로 선택됨</span> : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function CharactersPage() {
   const { jobs, startListJob, startTagsJob, retryFailed, collectAllUncollected, isJobActive, lastError, clearLastError } =
     useCharacterCatalogJobs();
@@ -153,6 +213,7 @@ export function CharactersPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [viewingCharacter, setViewingCharacter] = useState<GlobalCharacter | null>(null);
   const [linkingCharacter, setLinkingCharacter] = useState<GlobalCharacter | null>(null);
+  const [imagesCharacter, setImagesCharacter] = useState<GlobalCharacter | null>(null);
   const [minPostCountInput, setMinPostCountInput] = useState("500");
 
   useEffect(() => {
@@ -557,6 +618,16 @@ export function CharactersPage() {
                         <button
                           className="btn btn-small"
                           type="button"
+                          disabled={character.image_count === 0}
+                          title={character.image_count === 0 ? "생성된 이미지가 없습니다" : undefined}
+                          onClick={() => setImagesCharacter(character)}
+                        >
+                          이미지 보기
+                        </button>
+                        {" "}
+                        <button
+                          className="btn btn-small"
+                          type="button"
                           onClick={() => setLinkingCharacter(character)}
                         >
                           {character.is_alternative ? "연결 해제" : "Merge"}
@@ -584,6 +655,10 @@ export function CharactersPage() {
           onClose={() => setLinkingCharacter(null)}
           onLinked={() => void loadCharacters()}
         />
+      ) : null}
+
+      {imagesCharacter ? (
+        <CharacterImagesModal character={imagesCharacter} onClose={() => setImagesCharacter(null)} />
       ) : null}
     </div>
   );

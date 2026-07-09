@@ -8,6 +8,7 @@ import type {
   CatalogListResponse,
   CatalogReviewCompletePayload,
   CatalogReviewFilterStatus,
+  CatalogReviewItem,
   CatalogReviewListResponse,
   CatalogStats,
   GlobalCatalogReviewListResponse,
@@ -19,6 +20,7 @@ import type {
   CharacterListResponse,
   CollectJob,
   DanbooruStatus,
+  GlobalCharacterImagesResponse,
   GlobalCharacterListResponse,
   GenerationCandidateListResponse,
   GenerationQueuePreview,
@@ -255,6 +257,9 @@ export const api = {
     limit?: number;
   } = {}) => request<GlobalCharacterListResponse>(`/character-catalog/characters${buildQuery(params)}`),
 
+  getGlobalCharacterImages: (characterId: number) =>
+    request<GlobalCharacterImagesResponse>(`/character-catalog/characters/${characterId}/images`),
+
   listCharacterLinkCandidates: (
     characterId: number,
     params: { mode?: "parent" | "child"; search?: string; exclude_ids?: number[]; limit?: number } = {},
@@ -395,6 +400,12 @@ export const api = {
       { method: "POST" },
     ),
 
+  purgeUnselectedCatalogImages: (characterId: number) =>
+    request<{ id: number; removed_count: number; item: CatalogReviewItem }>(
+      `/review/catalog/${characterId}/purge-unselected`,
+      { method: "POST" },
+    ),
+
   regenerateCatalogCharacter: (
     characterId: number,
     payload: { prompt: string; gender?: string | null },
@@ -439,6 +450,12 @@ export const api = {
   undoCatalogReviewGlobal: (globalCharacterId: number) =>
     request<{ id: number; review_status: string; cover_image_id: number | null }>(
       `/review/catalog-global/${globalCharacterId}/undo`,
+      { method: "POST" },
+    ),
+
+  purgeUnselectedCatalogImagesGlobal: (globalCharacterId: number) =>
+    request<{ id: number; removed_count: number; item: CatalogReviewItem }>(
+      `/review/catalog-global/${globalCharacterId}/purge-unselected`,
       { method: "POST" },
     ),
 

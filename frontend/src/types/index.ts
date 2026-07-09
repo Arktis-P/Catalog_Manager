@@ -224,6 +224,18 @@ export interface GlobalCharacterListResponse {
   total: number;
 }
 
+export interface GlobalCharacterImage {
+  id: number;
+  image_path: string;
+  is_cover: boolean;
+  auto_status: string | null;
+}
+
+export interface GlobalCharacterImagesResponse {
+  id: number;
+  images: GlobalCharacterImage[];
+}
+
 export interface CharacterLinkCandidate {
   id: number;
   character_tag: string;

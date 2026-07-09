@@ -39,6 +39,7 @@ interface CatalogReviewRowProps {
   onMoveSeries?: () => void;
   onRegenerate?: () => void;
   onComplete?: () => void;
+  onPurgeUnselected?: () => void;
   onOpenLinkModal?: () => void;
   regenerating?: boolean;
 }
@@ -108,6 +109,7 @@ export function CatalogReviewRow({
   onMoveSeries,
   onRegenerate,
   onComplete,
+  onPurgeUnselected,
   onOpenLinkModal,
   regenerating = false,
 }: CatalogReviewRowProps) {
@@ -314,6 +316,17 @@ export function CatalogReviewRow({
             >
               결정
             </button>
+            {onPurgeUnselected && item.review_status === "completed" && item.images.length > 1 ? (
+              <button
+                className="btn btn-small btn-ghost"
+                type="button"
+                disabled={locked}
+                onClick={onPurgeUnselected}
+                title="선택되지 않은 이미지를 완전히 삭제합니다. 되돌릴 수 없습니다."
+              >
+                미선택 이미지 삭제
+              </button>
+            ) : null}
           </div>
         ) : null}
       </aside>

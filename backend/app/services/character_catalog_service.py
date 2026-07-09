@@ -276,6 +276,30 @@ class CharacterCatalogService:
             .first()
         )
 
+    def get_character_images(self, character_id: int) -> list[GlobalCharacterImage]:
+        """캐릭터 탭에서 '이미지 보기' 팝업용. 이미 카탈로그 커버로 선택된 이미지가
+        있으면 그 1장만, 없으면 최근 생성된 이미지 최대 2장을 반환한다."""
+        character = (
+            self.db.query(GlobalCharacter)
+            .options(selectinload(GlobalCharacter.images), selectinload(GlobalCharacter.review))
+            .filter(GlobalCharacter.id == character_id)
+            .first()
+        )
+        if not character:
+            return []
+
+        images = [image for image in character.images if not image.is_rejected]
+        cover_image_id = character.review.cover_image_id if character.review else None
+        cover = next(
+            (image for image in images if image.is_cover or image.id == cover_image_id),
+            None,
+        )
+        if cover:
+            return [cover]
+
+        images.sort(key=lambda image: image.created_at, reverse=True)
+        return images[:2]
+
     def list_characters(
         self,
         *,

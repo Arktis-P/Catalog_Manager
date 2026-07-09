@@ -64,6 +64,14 @@ app.mount(
     name="pending-review-images",
 )
 
+catalog_selected_images_dir = settings.output_dir / "generated_images" / "catalog_selected"
+catalog_selected_images_dir.mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/media/catalog-selected",
+    StaticFiles(directory=catalog_selected_images_dir),
+    name="catalog-selected-images",
+)
+
 
 def _static_icon_path(name: str) -> Path | None:
     dist_dir = settings.frontend_dist_dir

@@ -12,29 +12,33 @@ from app.config import settings
 router = APIRouter(tags=["media"])
 
 _FILENAME_RE = re.compile(r"^[a-zA-Z0-9_\-]+\.png$", re.IGNORECASE)
+_SOURCE_DIRS = {"pending_review", "catalog_selected"}
 
 
-def _pending_dir() -> Path:
-    return settings.output_dir / "generated_images" / "pending_review"
+def _source_dir(subdir: str) -> Path:
+    return settings.output_dir / "generated_images" / subdir
 
 
-def _thumb_cache_dir(size: int) -> Path:
-    return settings.output_dir / "generated_images" / "thumbs" / str(size)
+def _thumb_cache_dir(subdir: str, size: int) -> Path:
+    return settings.output_dir / "generated_images" / "thumbs" / subdir / str(size)
 
 
-@router.get("/media/thumb/{filename}")
+@router.get("/media/thumb/{subdir}/{filename}")
 def serve_thumbnail(
+    subdir: str,
     filename: str,
     size: int = Query(default=384, ge=128, le=1024),
 ):
+    if subdir not in _SOURCE_DIRS:
+        raise HTTPException(status_code=400, detail="Invalid subdir")
     if not _FILENAME_RE.match(filename):
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    source = _pending_dir() / filename
+    source = _source_dir(subdir) / filename
     if not source.is_file():
         raise HTTPException(status_code=404, detail="Image not found")
 
-    cache_dir = _thumb_cache_dir(size)
+    cache_dir = _thumb_cache_dir(subdir, size)
     cache_dir.mkdir(parents=True, exist_ok=True)
     cached = cache_dir / filename
 

@@ -197,3 +197,15 @@ class CharacterUnlinkResponse(BaseModel):
     child_character_tag: str
     parent_id: int
     parent_character_tag: str
+
+
+class GlobalCharacterImageResponse(BaseModel):
+    id: int
+    image_path: str
+    is_cover: bool
+    auto_status: str | None = None
+
+
+class GlobalCharacterImagesResponse(BaseModel):
+    id: int
+    images: list[GlobalCharacterImageResponse]

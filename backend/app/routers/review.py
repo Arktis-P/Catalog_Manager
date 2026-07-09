@@ -13,11 +13,13 @@ from app.schemas.review import (
     CatalogReviewDismissNeedsCheckResponse,
     CatalogReviewItemResponse,
     CatalogReviewListResponse,
+    CatalogReviewPurgeUnselectedResponse,
     CatalogReviewRegenerateRequest,
     CatalogReviewRegenerateResponse,
     CatalogReviewUndoResponse,
     GlobalCatalogReviewItemResponse,
     GlobalCatalogReviewListResponse,
+    GlobalCatalogReviewPurgeUnselectedResponse,
     ReviewRegenerateJobListResponse,
     ReviewRegenerateJobResponse,
 )
@@ -216,6 +218,22 @@ def undo_catalog_review(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/catalog/{character_id}/purge-unselected", response_model=CatalogReviewPurgeUnselectedResponse)
+def purge_unselected_catalog_images(
+    character_id: int,
+    service: ReviewService = Depends(get_review_service),
+):
+    try:
+        character, removed = service.purge_unselected_images(character_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CatalogReviewPurgeUnselectedResponse(
+        id=character.id,
+        removed_count=removed,
+        item=to_catalog_item(character),
+    )
+
+
 @router.post("/catalog/{character_id}/dismiss-needs-check", response_model=CatalogReviewDismissNeedsCheckResponse)
 def dismiss_catalog_needs_check(
     character_id: int,
@@ -329,6 +347,25 @@ def regenerate_catalog_character_global(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _job_to_response(job)
+
+
+@router.post(
+    "/catalog-global/{global_character_id}/purge-unselected",
+    response_model=GlobalCatalogReviewPurgeUnselectedResponse,
+)
+def purge_unselected_catalog_images_global(
+    global_character_id: int,
+    service: ReviewService = Depends(get_review_service),
+):
+    try:
+        character, removed = service.purge_unselected_images_global(global_character_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return GlobalCatalogReviewPurgeUnselectedResponse(
+        id=character.id,
+        removed_count=removed,
+        item=to_catalog_item_global(character),
+    )
 
 
 @router.post("/catalog-global/{global_character_id}/undo", response_model=CatalogReviewUndoResponse)

@@ -193,6 +193,23 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
     }
   };
 
+  const handlePurgeUnselected = async (item: CatalogReviewItem) => {
+    if (!window.confirm(`${item.character_tag}의 선택되지 않은 이미지를 삭제할까요? 되돌릴 수 없습니다.`)) {
+      return;
+    }
+    setSubmittingId(item.id);
+    setError(null);
+    try {
+      const response = await api.purgeUnselectedCatalogImagesGlobal(item.id);
+      setItems((current) => current.map((entry) => (entry.id === item.id ? response.item : entry)));
+      setActionMessage(`${item.character_tag} 미선택 이미지 ${response.removed_count}장 삭제됨`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "미선택 이미지 삭제에 실패했습니다.");
+    } finally {
+      setSubmittingId(null);
+    }
+  };
+
   const mergeRegeneratedItem = useCallback((updated: CatalogReviewItem) => {
     setItems((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
     setDrafts((current) => {
@@ -528,6 +545,7 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
                   onRate={(value) => setRating(item.id, value)}
                   onRegenerate={focused ? () => void regenerateFocused() : undefined}
                   onComplete={() => void completeItem(item)}
+                  onPurgeUnselected={() => void handlePurgeUnselected(item)}
                   onOpenLinkModal={() => setLinkingItem(item)}
                   regenerating={locked}
                 />
