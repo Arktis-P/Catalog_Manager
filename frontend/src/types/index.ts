@@ -523,6 +523,7 @@ export interface CatalogFilters {
   needs_review?: boolean;
   needs_regen?: boolean;
   search?: string;
+  include_hidden_ratings?: boolean;
   skip?: number;
   limit?: number;
 }

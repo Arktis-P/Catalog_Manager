@@ -60,6 +60,7 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
   const [focusIndex, setFocusIndex] = useState(0);
   const [drafts, setDrafts] = useState<Record<number, CharacterDraft>>({});
   const [submittingId, setSubmittingId] = useState<number | null>(null);
+  const [bulkPurging, setBulkPurging] = useState(false);
   const [thumbSize, setThumbSize] = useState(384);
   const [quadLayout, setQuadLayout] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -207,6 +208,36 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
       setError(err instanceof Error ? err.message : "미선택 이미지 삭제에 실패했습니다.");
     } finally {
       setSubmittingId(null);
+    }
+  };
+
+  const handlePurgeUnselectedAll = async () => {
+    const targets = items.filter((item) => item.review_status === "completed" && item.images.length > 1);
+    if (targets.length === 0) {
+      setActionMessage("삭제할 미선택 이미지가 있는 항목이 없습니다.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `현재 화면에 로드된 ${targets.length}개 항목의 선택되지 않은 이미지를 모두 삭제할까요? 되돌릴 수 없습니다.`,
+      )
+    ) {
+      return;
+    }
+    setBulkPurging(true);
+    setError(null);
+    let removedTotal = 0;
+    try {
+      for (const item of targets) {
+        const response = await api.purgeUnselectedCatalogImagesGlobal(item.id);
+        removedTotal += response.removed_count;
+        setItems((current) => current.map((entry) => (entry.id === item.id ? response.item : entry)));
+      }
+      setActionMessage(`${targets.length}개 항목에서 미선택 이미지 ${removedTotal}장 삭제됨`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "미선택 이미지 일괄 삭제에 실패했습니다.");
+    } finally {
+      setBulkPurging(false);
     }
   };
 
@@ -496,6 +527,18 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
           <label>&nbsp;</label>
           <button className="btn" type="button" onClick={() => void loadReviews()}>
             Refresh
+          </button>
+        </div>
+        <div className="field" style={{ justifyContent: "flex-end" }}>
+          <label>&nbsp;</label>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => void handlePurgeUnselectedAll()}
+            disabled={bulkPurging || items.length === 0}
+            title="현재 화면에 로드된 항목들의 선택되지 않은 이미지를 모두 삭제합니다."
+          >
+            미선택 이미지 전체 삭제
           </button>
         </div>
         <ReviewShortcutGuide includeMerge />

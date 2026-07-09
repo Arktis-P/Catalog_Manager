@@ -135,7 +135,9 @@ export const api = {
   listCatalog: (filters: CatalogFilters = {}) =>
     request<CatalogListResponse>(`/catalog${buildQuery(filters as Record<string, string | number | boolean | undefined>)}`),
 
-  listGlobalCatalog: (filters: Pick<CatalogFilters, "rating" | "gender" | "search" | "skip" | "limit"> = {}) =>
+  listGlobalCatalog: (
+    filters: Pick<CatalogFilters, "rating" | "gender" | "search" | "include_hidden_ratings" | "skip" | "limit"> = {},
+  ) =>
     request<GlobalCatalogListResponse>(`/catalog/global${buildQuery(filters as Record<string, string | number | boolean | undefined>)}`),
 
   getRandomCatalogCharacter: (filters: Omit<CatalogFilters, "skip" | "limit"> = {}) =>

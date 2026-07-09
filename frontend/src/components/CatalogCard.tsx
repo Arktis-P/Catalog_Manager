@@ -23,13 +23,7 @@ function statusBadgeClass(status: string): string {
 
 function ratingLabel(rating: number | null): string | null {
   if (rating === null || rating === -1) return null;
-  return `rating ${"★".repeat(rating)}${"☆".repeat(Math.max(0, 6 - rating))}`;
-}
-
-function formatAppearance(item: CatalogItem): string {
-  return [item.multi_color_hair, item.hair_color, item.hair_shape, item.eye_color, item.feature_tags]
-    .filter(Boolean)
-    .join(", ");
+  return `${"★".repeat(rating)}${"☆".repeat(Math.max(0, 6 - rating))}`;
 }
 
 function genderTagLabel(gender: string): string {
@@ -40,7 +34,6 @@ function genderTagLabel(gender: string): string {
 }
 
 export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate, isGlobal }: CatalogCardProps) {
-  const appearance = formatAppearance(item);
   const ratingText = ratingLabel(item.rating);
   const promptToCopy = item.final_prompt || item.generation_prompt;
   const isRatingZero = item.rating === 0 || item.rating === -1;
@@ -104,12 +97,6 @@ export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate, isGlob
                   ratingText
                 )}
               </dd>
-            </>
-          ) : null}
-          {appearance ? (
-            <>
-              <dt>Appearance</dt>
-              <dd>{appearance}</dd>
             </>
           ) : null}
         </dl>

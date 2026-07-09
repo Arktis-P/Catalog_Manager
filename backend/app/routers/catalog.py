@@ -74,22 +74,26 @@ def get_random_catalog_character(
     needs_review: bool | None = None,
     needs_regen: bool | None = None,
     search: str | None = None,
+    include_hidden_ratings: bool = False,
     service: CatalogService = Depends(get_catalog_service),
 ):
-    item = service.get_random_character(**_catalog_filter_kwargs(
-        series_tag=series_tag,
-        rating=rating,
-        gender=gender,
-        type=type,
-        hair_color=hair_color,
-        eye_color=eye_color,
-        feature_tags=feature_tags,
-        status=status,
-        has_cover_image=has_cover_image,
-        needs_review=needs_review,
-        needs_regen=needs_regen,
-        search=search,
-    ))
+    item = service.get_random_character(
+        **_catalog_filter_kwargs(
+            series_tag=series_tag,
+            rating=rating,
+            gender=gender,
+            type=type,
+            hair_color=hair_color,
+            eye_color=eye_color,
+            feature_tags=feature_tags,
+            status=status,
+            has_cover_image=has_cover_image,
+            needs_review=needs_review,
+            needs_regen=needs_regen,
+            search=search,
+        ),
+        include_hidden_ratings=include_hidden_ratings,
+    )
     if not item:
         raise HTTPException(status_code=404, detail="No matching character found")
     return item
@@ -109,22 +113,26 @@ def export_catalog_csv(
     needs_review: bool | None = None,
     needs_regen: bool | None = None,
     search: str | None = None,
+    include_hidden_ratings: bool = False,
     service: CatalogService = Depends(get_catalog_service),
 ):
-    content, saved_path = service.export_catalog_csv(**_catalog_filter_kwargs(
-        series_tag=series_tag,
-        rating=rating,
-        gender=gender,
-        type=type,
-        hair_color=hair_color,
-        eye_color=eye_color,
-        feature_tags=feature_tags,
-        status=status,
-        has_cover_image=has_cover_image,
-        needs_review=needs_review,
-        needs_regen=needs_regen,
-        search=search,
-    ))
+    content, saved_path = service.export_catalog_csv(
+        **_catalog_filter_kwargs(
+            series_tag=series_tag,
+            rating=rating,
+            gender=gender,
+            type=type,
+            hair_color=hair_color,
+            eye_color=eye_color,
+            feature_tags=feature_tags,
+            status=status,
+            has_cover_image=has_cover_image,
+            needs_review=needs_review,
+            needs_regen=needs_regen,
+            search=search,
+        ),
+        include_hidden_ratings=include_hidden_ratings,
+    )
     headers = {"Content-Disposition": 'attachment; filename="catalog-export.csv"'}
     if saved_path:
         headers["X-Export-Path"] = saved_path
@@ -145,6 +153,7 @@ def list_catalog(
     needs_review: bool | None = None,
     needs_regen: bool | None = None,
     search: str | None = None,
+    include_hidden_ratings: bool = False,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
     service: CatalogService = Depends(get_catalog_service),
@@ -164,6 +173,7 @@ def list_catalog(
             needs_regen=needs_regen,
             search=search,
         ),
+        include_hidden_ratings=include_hidden_ratings,
         skip=skip,
         limit=limit,
     )
@@ -175,6 +185,7 @@ def list_global_catalog(
     rating: int | None = Query(default=None, ge=-1, le=6),
     gender: str | None = None,
     search: str | None = None,
+    include_hidden_ratings: bool = False,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
     service: CatalogService = Depends(get_catalog_service),
@@ -183,6 +194,7 @@ def list_global_catalog(
         rating=rating,
         gender=gender,
         search=search,
+        include_hidden_ratings=include_hidden_ratings,
         skip=skip,
         limit=limit,
     )

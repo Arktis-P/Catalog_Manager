@@ -8,7 +8,7 @@ import { ReviewRatingGuide } from "../components/review/ReviewRatingGuide";
 export function ReviewPage() {
   const [searchParams] = useSearchParams();
   const [catalogScope, setCatalogScope] = useState<"series" | "characters">(
-    searchParams.get("scope") === "characters" ? "characters" : "series",
+    searchParams.get("scope") === "series" ? "series" : "characters",
   );
   const initialMode = searchParams.get("mode") === "appearance" ? "appearance" : "catalog";
   const initialSeriesId = useMemo(() => {
@@ -78,7 +78,7 @@ export function ReviewPage() {
                   className={`review-mode-tab${catalogScope === "characters" ? " review-mode-tab--active" : ""}`}
                   onClick={() => setCatalogScope("characters")}
                 >
-                  캐릭터 목록
+                  캐릭터
                 </button>
               </div>
             </>

@@ -111,12 +111,13 @@ class CatalogService:
         needs_review: bool | None = None,
         needs_regen: bool | None = None,
         search: str | None = None,
+        include_hidden_ratings: bool = False,
     ):
         if series_tag:
             query = query.filter(Series.series_tag == series_tag)
         if rating is not None:
             query = query.filter(Review.rating == rating)
-        else:
+        elif not include_hidden_ratings:
             # 레이팅 필터를 명시적으로 -1/0으로 선택하지 않는 한, 이미지가 없는
             # 레이팅(-1) 또는 생성 실패(0) 항목은 기본적으로 목록에서 제외한다.
             query = query.filter(or_(Review.rating.is_(None), ~Review.rating.in_((-1, 0))))
@@ -263,6 +264,7 @@ class CatalogService:
         needs_review: bool | None = None,
         needs_regen: bool | None = None,
         search: str | None = None,
+        include_hidden_ratings: bool = False,
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[list[dict], int]:
@@ -283,6 +285,7 @@ class CatalogService:
             needs_review=needs_review,
             needs_regen=needs_regen,
             search=search,
+            include_hidden_ratings=include_hidden_ratings,
         )
 
         total = query.order_by(None).with_entities(func.count(Character.id)).scalar() or 0
@@ -402,6 +405,7 @@ class CatalogService:
         rating: int | None = None,
         gender: str | None = None,
         search: str | None = None,
+        include_hidden_ratings: bool = False,
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[list[dict], int]:
@@ -420,7 +424,7 @@ class CatalogService:
         )
         if rating is not None:
             query = query.filter(GlobalCharacterReview.rating == rating)
-        else:
+        elif not include_hidden_ratings:
             query = query.filter(
                 or_(GlobalCharacterReview.rating.is_(None), ~GlobalCharacterReview.rating.in_((-1, 0)))
             )
@@ -499,6 +503,7 @@ class CatalogService:
         needs_review: bool | None = None,
         needs_regen: bool | None = None,
         search: str | None = None,
+        include_hidden_ratings: bool = False,
     ) -> dict | None:
         status_case = catalog_status_expression()
         query = self._base_query(status_case)
@@ -517,6 +522,7 @@ class CatalogService:
             needs_review=needs_review,
             needs_regen=needs_regen,
             search=search,
+            include_hidden_ratings=include_hidden_ratings,
         )
 
         weight = rating_weight_expression()
@@ -626,6 +632,7 @@ class CatalogService:
         needs_review: bool | None = None,
         needs_regen: bool | None = None,
         search: str | None = None,
+        include_hidden_ratings: bool = False,
         save_to_disk: bool = True,
     ) -> tuple[str, str | None]:
         status_case = catalog_status_expression()
@@ -645,6 +652,7 @@ class CatalogService:
             needs_review=needs_review,
             needs_regen=needs_regen,
             search=search,
+            include_hidden_ratings=include_hidden_ratings,
         )
         rows = query.order_by(Series.series_tag.asc(), Character.post_count.desc(), Character.id.asc()).all()
         character_ids = [character.id for character, _, _ in rows]

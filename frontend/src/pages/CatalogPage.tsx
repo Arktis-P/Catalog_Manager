@@ -57,7 +57,12 @@ export function CatalogPage() {
     [jobs],
   );
 
-  const listFilters = useMemo(() => filterQuery(filters), [filters]);
+  const [showHiddenRatings, setShowHiddenRatings] = useState(false);
+
+  const listFilters = useMemo(
+    () => ({ ...filterQuery(filters), include_hidden_ratings: showHiddenRatings || undefined }),
+    [filters, showHiddenRatings],
+  );
 
   const activeFilterCount = useMemo(
     () =>
@@ -68,8 +73,13 @@ export function CatalogPage() {
   );
 
   const globalListFilters = useMemo(
-    () => ({ rating: filters.rating, gender: filters.gender, search: filters.search }),
-    [filters.rating, filters.gender, filters.search],
+    () => ({
+      rating: filters.rating,
+      gender: filters.gender,
+      search: filters.search,
+      include_hidden_ratings: showHiddenRatings || undefined,
+    }),
+    [filters.rating, filters.gender, filters.search, showHiddenRatings],
   );
 
   const loadInitial = useCallback(async () => {
@@ -310,6 +320,13 @@ export function CatalogPage() {
           </p>
         </div>
         <div className="card-actions">
+          <button
+            className={`btn${showHiddenRatings ? " btn-primary" : ""}`}
+            type="button"
+            onClick={() => setShowHiddenRatings((current) => !current)}
+          >
+            {showHiddenRatings ? "레이팅 -1/0 숨기기" : "레이팅 -1/0 표시"}
+          </button>
           <button className="btn" type="button" onClick={() => void handleExport()}>
             Export CSV
           </button>

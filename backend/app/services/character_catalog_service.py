@@ -87,9 +87,11 @@ class CharacterCatalogService:
         pages_processed = 0
         created = 0
         updated = 0
+        truncated_by_max_pages = False
 
         while True:
             if max_pages is not None and pages_processed >= max_pages:
+                truncated_by_max_pages = True
                 break
 
             rows, has_more = self.collector.collect_page(page=page, min_post_count=min_post_count)
@@ -138,6 +140,13 @@ class CharacterCatalogService:
             if not has_more:
                 break
             page += 1
+
+        if not truncated_by_max_pages:
+            # min_post_count 기준 스캔이 자연스럽게 끝까지 완료된 경우(중간에 일시정지/취소된
+            # 것이 아니라면), 체크포인트를 1페이지로 되돌린다. 그렇지 않으면 다음 "전체 캐릭터
+            # 목록 수집" 실행이 항상 이전 체크포인트(리스트 끝부분)부터 재개되어, 페이지 1부터
+            # 다시 스캔되지 않아 새로 추가/누락된 태그를 영원히 놓치게 된다.
+            self.reset_checkpoint()
 
         return CatalogListResult(pages_processed=pages_processed, created=created, updated=updated, last_page=page)
 
