@@ -22,8 +22,7 @@ function statusBadgeClass(status: string): string {
 }
 
 function ratingLabel(rating: number | null): string | null {
-  if (rating === null) return null;
-  if (rating === -1) return "rating -1";
+  if (rating === null || rating === -1) return null;
   return `rating ${"★".repeat(rating)}${"☆".repeat(Math.max(0, 6 - rating))}`;
 }
 
@@ -93,10 +92,18 @@ export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate, isGlob
               <dd>{item.type}</dd>
             </>
           ) : null}
-          {ratingText ? (
+          {ratingText || item.rating === -1 ? (
             <>
               <dt>Rating</dt>
-              <dd>{ratingText}</dd>
+              <dd>
+                {item.rating === -1 ? (
+                  <span className="review-star review-star--red review-star--active" aria-label="rating -1">
+                    ★
+                  </span>
+                ) : (
+                  ratingText
+                )}
+              </dd>
             </>
           ) : null}
           {appearance ? (

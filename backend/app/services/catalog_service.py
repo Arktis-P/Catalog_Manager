@@ -116,6 +116,10 @@ class CatalogService:
             query = query.filter(Series.series_tag == series_tag)
         if rating is not None:
             query = query.filter(Review.rating == rating)
+        else:
+            # 레이팅 필터를 명시적으로 -1/0으로 선택하지 않는 한, 이미지가 없는
+            # 레이팅(-1) 또는 생성 실패(0) 항목은 기본적으로 목록에서 제외한다.
+            query = query.filter(or_(Review.rating.is_(None), ~Review.rating.in_((-1, 0))))
         if gender:
             query = query.filter(
                 Character.appearance_confirmed.is_(True),
@@ -416,6 +420,10 @@ class CatalogService:
         )
         if rating is not None:
             query = query.filter(GlobalCharacterReview.rating == rating)
+        else:
+            query = query.filter(
+                or_(GlobalCharacterReview.rating.is_(None), ~GlobalCharacterReview.rating.in_((-1, 0)))
+            )
         if gender:
             query = query.filter(GlobalCharacter.gender.ilike(f"%{gender}%"))
         if search:

@@ -15,7 +15,7 @@ import { ensureNotificationPermission, showTaskCompleteNotification } from "../u
 
 interface CharacterCatalogJobContextValue {
   jobs: CatalogJob[];
-  startListJob: (minPostCount: number, restart?: boolean) => Promise<CatalogJob>;
+  startListJob: (minPostCount: number, restart?: boolean, onlyNew?: boolean) => Promise<CatalogJob>;
   startTagsJob: (characterIds: number[]) => Promise<CatalogJob>;
   retryFailed: (limit?: number) => Promise<CatalogJob>;
   collectAllUncollected: (limit?: number) => Promise<CatalogJob[]>;
@@ -152,9 +152,9 @@ export function CharacterCatalogJobProvider({ children }: { children: ReactNode 
     setJobs((current) => upsertJob(current, job));
   }, []);
 
-  const startListJob = useCallback(async (minPostCount: number, restart = false) => {
+  const startListJob = useCallback(async (minPostCount: number, restart = false, onlyNew = false) => {
     setLastError(null);
-    const job = await api.startCatalogListJob(minPostCount, restart);
+    const job = await api.startCatalogListJob(minPostCount, restart, onlyNew);
     registerStartedJob(job);
     return job;
   }, [registerStartedJob]);

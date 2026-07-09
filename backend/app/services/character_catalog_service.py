@@ -80,6 +80,7 @@ class CharacterCatalogService:
         min_post_count: int,
         start_page: int | None = None,
         max_pages: int | None = None,
+        only_new: bool = False,
         progress_callback: CatalogProgressCallback | None = None,
     ) -> CatalogListResult:
         page = start_page if start_page is not None else self.get_checkpoint_page()
@@ -100,6 +101,10 @@ class CharacterCatalogService:
                     .first()
                 )
                 if existing:
+                    if only_new:
+                        # 신규 캐릭터만 추가하는 모드: 기존 항목은 post_count/display_name을
+                        # 포함해 어떤 필드도 건드리지 않고 그대로 건너뛴다.
+                        continue
                     existing.post_count = row.post_count
                     if not existing.display_name:
                         existing.display_name = row.display_name
@@ -191,6 +196,17 @@ class CharacterCatalogService:
             )
 
         try:
+            tag_info = self.client.get_tag(character.character_tag)
+            fetched_post_count = int(tag_info.get("post_count") or 0) if tag_info else None
+            if fetched_post_count is not None and (
+                not character.post_count or fetched_post_count != character.post_count
+            ):
+                character.post_count = fetched_post_count
+        except Exception:
+            # post_count 갱신은 부가 기능이라, 실패해도 외형/성별/시리즈 수집은 계속 진행한다.
+            pass
+
+        try:
             appearance = extract_appearance_tags(related)
             character.multi_color_hair = appearance.multi_color_hair
             character.hair_color = appearance.hair_color
@@ -259,6 +275,38 @@ class CharacterCatalogService:
             series_ok=series_ok,
             error="; ".join(error_parts) or None,
         )
+
+    # ---------- 개별 추가 ----------
+
+    def create_character(self, character_tag: str) -> GlobalCharacter:
+        """캐릭터 탭에서 태그 하나만 입력해 개별 추가할 때 사용. Danbooru에 실재하는
+        태그인지 확인하고 post_count를 채운 뒤 생성하며, 통합 태그 수집은 호출 측
+        (라우터)에서 별도 job으로 트리거한다."""
+        normalized = character_tag.strip().lower().replace(" ", "_")
+        if not normalized:
+            raise ValueError("Character tag is required.")
+
+        existing = (
+            self.db.query(GlobalCharacter)
+            .filter(GlobalCharacter.character_tag == normalized)
+            .first()
+        )
+        if existing:
+            raise ValueError(f"Character '{normalized}' already exists.")
+
+        tag_info = self.client.get_tag(normalized)
+        if not tag_info:
+            raise ValueError(f"Danbooru tag '{normalized}' not found.")
+
+        character = GlobalCharacter(
+            character_tag=normalized,
+            display_name=tag_to_display_name(normalized),
+            post_count=int(tag_info.get("post_count") or 0),
+        )
+        self.db.add(character)
+        commit_db_session(self.db)
+        self.db.refresh(character)
+        return character
 
     # ---------- 조회 ----------
 

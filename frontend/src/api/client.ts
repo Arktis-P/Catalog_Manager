@@ -20,6 +20,7 @@ import type {
   CharacterListResponse,
   CollectJob,
   DanbooruStatus,
+  GlobalCharacter,
   GlobalCharacterImagesResponse,
   GlobalCharacterListResponse,
   GenerationCandidateListResponse,
@@ -283,10 +284,16 @@ export const api = {
   unlinkParentCharacter: (childId: number) =>
     request<CharacterLinkResult>(`/character-catalog/characters/${childId}/link`, { method: "DELETE" }),
 
-  startCatalogListJob: (minPostCount: number, restart = false) =>
+  startCatalogListJob: (minPostCount: number, restart = false, onlyNew = false) =>
     request<CatalogJob>("/character-catalog/list/start", {
       method: "POST",
-      body: JSON.stringify({ min_post_count: minPostCount, restart }),
+      body: JSON.stringify({ min_post_count: minPostCount, restart, only_new: onlyNew }),
+    }),
+
+  createGlobalCharacter: (characterTag: string) =>
+    request<GlobalCharacter>("/character-catalog/characters", {
+      method: "POST",
+      body: JSON.stringify({ character_tag: characterTag }),
     }),
 
   startCatalogTagsJob: (characterIds: number[]) =>

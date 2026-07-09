@@ -11,6 +11,7 @@ from app.schemas.character_catalog import (
     CatalogListStartRequest,
     CatalogRetryFailedRequest,
     CatalogTagsStartRequest,
+    CharacterCreateRequest,
     CharacterLinkCandidate,
     CharacterLinkCandidateListResponse,
     CharacterLinkRequest,
@@ -77,6 +78,22 @@ def list_global_characters(
         items=[GlobalCharacterResponse.from_model(row) for row in rows],
         total=total,
     )
+
+
+@router.post("/characters", response_model=GlobalCharacterResponse)
+def create_global_character(
+    payload: CharacterCreateRequest,
+    service: CharacterCatalogService = Depends(get_catalog_service),
+):
+    """캐릭터 탭에서 태그 하나만 입력해 개별 추가. 생성 후 곧바로 통합 태그
+    수집(외형/성별/시리즈 + post_count)을 백그라운드 job으로 시작한다."""
+    _require_danbooru()
+    try:
+        character = service.create_character(payload.character_tag)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    character_catalog_job_manager.start_catalog_tags([character.id])
+    return GlobalCharacterResponse.from_model(character)
 
 
 @router.get("/characters/{character_id}", response_model=GlobalCharacterResponse)
@@ -185,6 +202,7 @@ def start_catalog_list(payload: CatalogListStartRequest):
     job = character_catalog_job_manager.start_catalog_list(
         min_post_count=payload.min_post_count,
         restart=payload.restart,
+        only_new=payload.only_new,
     )
     return CatalogJobResponse.from_state(job)
 

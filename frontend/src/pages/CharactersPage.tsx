@@ -215,6 +215,10 @@ export function CharactersPage() {
   const [linkingCharacter, setLinkingCharacter] = useState<GlobalCharacter | null>(null);
   const [imagesCharacter, setImagesCharacter] = useState<GlobalCharacter | null>(null);
   const [minPostCountInput, setMinPostCountInput] = useState("500");
+  const [onlyNewInput, setOnlyNewInput] = useState(false);
+  const [addTagInput, setAddTagInput] = useState("");
+  const [addingCharacter, setAddingCharacter] = useState(false);
+  const [addCharacterError, setAddCharacterError] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(searchInput.trim()), 300);
@@ -293,7 +297,23 @@ export function CharactersPage() {
 
   const handleStartListCollect = async () => {
     const minPostCount = Math.max(0, parseInt(minPostCountInput, 10) || 0);
-    await startListJob(minPostCount, false);
+    await startListJob(minPostCount, false, onlyNewInput);
+  };
+
+  const handleAddCharacter = async () => {
+    const tag = addTagInput.trim();
+    if (!tag) return;
+    setAddingCharacter(true);
+    setAddCharacterError(null);
+    try {
+      await api.createGlobalCharacter(tag);
+      setAddTagInput("");
+      await loadCharacters();
+    } catch (err) {
+      setAddCharacterError(err instanceof Error ? err.message : "캐릭터 추가에 실패했습니다.");
+    } finally {
+      setAddingCharacter(false);
+    }
   };
 
   const handleCollectSelected = async () => {
@@ -362,6 +382,14 @@ export function CharactersPage() {
             value={minPostCountInput}
             onChange={(e) => setMinPostCountInput(e.target.value)}
           />
+          <label className="series-toolbar-label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <input
+              type="checkbox"
+              checked={onlyNewInput}
+              onChange={(e) => setOnlyNewInput(e.target.checked)}
+            />
+            신규 캐릭터만 추가 (기존 항목 유지)
+          </label>
           <button className="btn btn-primary" type="button" disabled={listJobActive} onClick={() => void handleStartListCollect()}>
             전체 캐릭터 목록 수집
           </button>
@@ -384,6 +412,26 @@ export function CharactersPage() {
           {isGeneratingCharacters() ? (
             <span className="badge badge-info">캐릭터 목록 이미지 생성 진행/대기 중</span>
           ) : null}
+        </div>
+        <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
+          <label className="series-toolbar-label" htmlFor="add-character-tag">캐릭터 개별 추가</label>
+          <input
+            id="add-character-tag"
+            style={{ width: 260 }}
+            value={addTagInput}
+            onChange={(e) => setAddTagInput(e.target.value)}
+            placeholder="예: gold_ship_(umamusume)"
+            disabled={addingCharacter}
+          />
+          <button
+            className="btn"
+            type="button"
+            disabled={addingCharacter || !addTagInput.trim()}
+            onClick={() => void handleAddCharacter()}
+          >
+            {addingCharacter ? "추가 중..." : "+ 캐릭터 추가"}
+          </button>
+          {addCharacterError ? <span className="error-banner" style={{ padding: "4px 8px" }}>{addCharacterError}</span> : null}
         </div>
       </section>
 

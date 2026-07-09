@@ -286,25 +286,25 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
 
   const updatePreviewPosition = useCallback(() => {
     const scrollNode = scrollRef.current;
-    if (!scrollNode) {
+    if (!scrollNode || !focusedItem) {
       setPreviewPosition(null);
       return;
     }
-    const anchor = scrollNode.querySelector('[data-preview-anchor="true"]') as HTMLElement | null;
-    if (!anchor) {
+    // 개별 썸네일이 아니라 포커스된 행 전체를 기준으로 삼아, 미리보기가 항상
+    // 행의 왼쪽(좌측 작업 목록 사이드바 쪽)으로만 확장되고 현재 행의 썸네일/
+    // 정보(aside)는 절대 가리지 않도록 한다.
+    const row = scrollNode.querySelector(`[data-character-id="${focusedItem.id}"]`) as HTMLElement | null;
+    if (!row) {
       setPreviewPosition(null);
       return;
     }
-    const rect = anchor.getBoundingClientRect();
-    let top = rect.top - PREVIEW_SIZE - PREVIEW_GAP;
-    let left = rect.left + rect.width / 2 - PREVIEW_SIZE / 2;
-    if (top < PREVIEW_GAP) {
-      top = rect.bottom + PREVIEW_GAP;
-    }
+    const rect = row.getBoundingClientRect();
+    let top = rect.top + rect.height / 2 - PREVIEW_SIZE / 2;
+    let left = rect.left - PREVIEW_GAP - PREVIEW_SIZE;
     left = Math.max(PREVIEW_GAP, Math.min(left, window.innerWidth - PREVIEW_SIZE - PREVIEW_GAP));
     top = Math.max(PREVIEW_GAP, Math.min(top, window.innerHeight - PREVIEW_SIZE - PREVIEW_GAP));
     setPreviewPosition({ top, left });
-  }, []);
+  }, [focusedItem]);
 
   useEffect(() => {
     if (!previewOpen) {

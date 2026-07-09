@@ -117,8 +117,12 @@ class CharacterCatalogJobManager:
         )
         return (running + queued + done)[:limit]
 
-    def start_catalog_list(self, *, min_post_count: int, restart: bool = False) -> CatalogJobState:
-        return self._enqueue(JOB_TYPE_CATALOG_LIST, min_post_count=min_post_count, restart=restart)
+    def start_catalog_list(
+        self, *, min_post_count: int, restart: bool = False, only_new: bool = False
+    ) -> CatalogJobState:
+        return self._enqueue(
+            JOB_TYPE_CATALOG_LIST, min_post_count=min_post_count, restart=restart, only_new=only_new
+        )
 
     def start_catalog_tags(self, character_ids: list[int]) -> CatalogJobState:
         return self._enqueue(JOB_TYPE_CATALOG_TAGS, character_ids=character_ids)
@@ -244,7 +248,9 @@ class CharacterCatalogJobManager:
             self._running_job_ids.discard(job_id)
         self._dispatch_next()
 
-    def _run_catalog_list(self, job_id: str, db, *, min_post_count: int, restart: bool = False) -> None:
+    def _run_catalog_list(
+        self, job_id: str, db, *, min_post_count: int, restart: bool = False, only_new: bool = False
+    ) -> None:
         try:
             service = CharacterCatalogService(db)
             if restart:
@@ -264,7 +270,9 @@ class CharacterCatalogJobManager:
                 )
                 self._check_pause(job_id)
 
-            result = service.collect_list(min_post_count=min_post_count, progress_callback=on_progress)
+            result = service.collect_list(
+                min_post_count=min_post_count, only_new=only_new, progress_callback=on_progress
+            )
 
             self._update_job(
                 job_id,

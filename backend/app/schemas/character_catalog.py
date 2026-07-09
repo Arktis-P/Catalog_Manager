@@ -107,6 +107,11 @@ class GlobalCharacterListResponse(BaseModel):
 class CatalogListStartRequest(BaseModel):
     min_post_count: int = Field(default=10, ge=0)
     restart: bool = False
+    only_new: bool = False
+
+
+class CharacterCreateRequest(BaseModel):
+    character_tag: str = Field(..., min_length=1)
 
 
 class CatalogTagsStartRequest(BaseModel):
