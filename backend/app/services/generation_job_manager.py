@@ -4,6 +4,7 @@ import threading
 import uuid
 from collections import defaultdict, deque
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -132,6 +133,30 @@ class GenerationJobManager:
         # 이 캐릭터의 이미지를 지우기 전에, 메인 큐에서 이미 NAIA 응답을 받아 저장
         # 대기 중인 이미지가 없는지 반드시 확인(대기)해야 stale 이미지가 섞이지 않는다.
         self._pending_postprocess: dict[tuple[str, int], list[Future]] = defaultdict(list)
+        # 캐릭터별로 "NAIA 요청을 보내 응답을 기다리는 중"인 구간을 추적한다.
+        # pause_all_running()은 다음 NAIA 요청 전에만 걸리므로, 이미 요청을 보내고
+        # 응답을 기다리는 도중에는 아직 _pending_postprocess에 future가 등록되지
+        # 않은 채로 수 초~수십 초가 흐를 수 있다. 이 구간에서 재생성이 이미지를
+        # 지우면, 뒤늦게 도착한 응답이 저장되며 재생성 결과와 섞인다. 이 이벤트가
+        # 없으면 wait_for_pending_postprocess가 그 구간을 놓친다.
+        self._in_flight_generation: dict[tuple[str, int], threading.Event] = {}
+
+    @contextmanager
+    def _track_in_flight_generation(self, scope: str, character_id: int):
+        """NAIA 요청 전송부터 후처리 future 등록(또는 동기 저장 완료)까지의 구간을
+        표시한다. 이 구간이 끝나야 event가 set되어 wait_for_pending_postprocess가
+        더 이상 이 캐릭터를 기다리지 않는다."""
+        key = (scope, character_id)
+        event = threading.Event()
+        with self._lock:
+            self._in_flight_generation[key] = event
+        try:
+            yield
+        finally:
+            event.set()
+            with self._lock:
+                if self._in_flight_generation.get(key) is event:
+                    self._in_flight_generation.pop(key, None)
 
     def _track_postprocess_future(self, scope: str, character_id: int, future: Future) -> None:
         key = (scope, character_id)
@@ -149,11 +174,18 @@ class GenerationJobManager:
         future.add_done_callback(_cleanup)
 
     def wait_for_pending_postprocess(self, scope: str, character_id: int, timeout: float = 60.0) -> None:
-        """메인 생성 큐에서 이미 NAIA로부터 받아 저장 대기 중인 이미지가 있다면
-        완료될 때까지 기다린다. 재생성이 이미지를 지우기 직전에 호출해, 뒤늦게
-        저장되는 stale 이미지가 재생성 결과에 섞이는 것을 막는다."""
+        """메인 생성 큐가 이 캐릭터에 대해 NAIA 요청 중이거나, 이미 응답을 받아
+        저장 대기 중인 이미지가 있다면 완료될 때까지 기다린다. 재생성이 이미지를
+        지우기 직전에 호출해, 뒤늦게 도착/저장되는 stale 이미지가 재생성 결과에
+        섞이는 것을 막는다."""
+        key = (scope, character_id)
         with self._lock:
-            futures = list(self._pending_postprocess.get((scope, character_id), []))
+            event = self._in_flight_generation.get(key)
+        if event is not None:
+            event.wait(timeout=timeout)
+
+        with self._lock:
+            futures = list(self._pending_postprocess.get(key, []))
         for future in futures:
             try:
                 future.result(timeout=timeout)
@@ -539,19 +571,20 @@ class GenerationJobManager:
                             ),
                         )
 
-                    image_bytes, _ = generate_and_fetch_image(
-                        client,
-                        prompt=generation_job.prompt,
-                        negative_prompt=generation_job.negative_prompt or "",
-                        known_history_ids=known_history_ids,
-                        on_retry=_on_retry,
-                    )
-                    # 저장·자동검사(HF 태거 호출 포함)는 별도 스레드로 넘기고, 메인 루프는
-                    # 곧바로 다음 NAIA 요청으로 넘어간다 (후처리와 다음 생성이 겹쳐 실행됨).
-                    future = self._postprocess_executor.submit(
-                        _postprocess_character_image, character.id, generation_job.id, image_bytes
-                    )
-                    self._track_postprocess_future("series", character.id, future)
+                    with self._track_in_flight_generation("series", character.id):
+                        image_bytes, _ = generate_and_fetch_image(
+                            client,
+                            prompt=generation_job.prompt,
+                            negative_prompt=generation_job.negative_prompt or "",
+                            known_history_ids=known_history_ids,
+                            on_retry=_on_retry,
+                        )
+                        # 저장·자동검사(HF 태거 호출 포함)는 별도 스레드로 넘기고, 메인 루프는
+                        # 곧바로 다음 NAIA 요청으로 넘어간다 (후처리와 다음 생성이 겹쳐 실행됨).
+                        future = self._postprocess_executor.submit(
+                            _postprocess_character_image, character.id, generation_job.id, image_bytes
+                        )
+                        self._track_postprocess_future("series", character.id, future)
                     future.add_done_callback(
                         self._make_postprocess_callback(job_id, character.character_tag, index, len(jobs))
                     )
@@ -641,17 +674,18 @@ class GenerationJobManager:
                                 ),
                             )
                             wait_between_naia_generations()
-                            image_bytes, _ = generate_and_fetch_image(
-                                client,
-                                prompt=esc_prompt,
-                                negative_prompt=esc_negative,
-                                known_history_ids=known_history_ids,
-                            )
-                            new_img = service.import_generated_image(
-                                character=character,
-                                generation_job=esc_job,
-                                image_bytes=image_bytes,
-                            )
+                            with self._track_in_flight_generation("series", character.id):
+                                image_bytes, _ = generate_and_fetch_image(
+                                    client,
+                                    prompt=esc_prompt,
+                                    negative_prompt=esc_negative,
+                                    known_history_ids=known_history_ids,
+                                )
+                                new_img = service.import_generated_image(
+                                    character=character,
+                                    generation_job=esc_job,
+                                    image_bytes=image_bytes,
+                                )
                             char_imgs.append(new_img)
                             char_batch_images[char_id].append(new_img)
                             completed += 1
@@ -844,19 +878,20 @@ class GenerationJobManager:
                             ),
                         )
 
-                    image_bytes, _ = generate_and_fetch_image(
-                        client,
-                        prompt=generation_job.prompt,
-                        negative_prompt=generation_job.negative_prompt or "",
-                        known_history_ids=known_history_ids,
-                        on_retry=_on_retry,
-                    )
-                    # 저장·자동검사(HF 태거 호출 포함)는 별도 스레드로 넘기고, 메인 루프는
-                    # 곧바로 다음 NAIA 요청으로 넘어간다.
-                    future = self._postprocess_executor.submit(
-                        _postprocess_global_character_image, character.id, generation_job.id, image_bytes
-                    )
-                    self._track_postprocess_future("global", character.id, future)
+                    with self._track_in_flight_generation("global", character.id):
+                        image_bytes, _ = generate_and_fetch_image(
+                            client,
+                            prompt=generation_job.prompt,
+                            negative_prompt=generation_job.negative_prompt or "",
+                            known_history_ids=known_history_ids,
+                            on_retry=_on_retry,
+                        )
+                        # 저장·자동검사(HF 태거 호출 포함)는 별도 스레드로 넘기고, 메인 루프는
+                        # 곧바로 다음 NAIA 요청으로 넘어간다.
+                        future = self._postprocess_executor.submit(
+                            _postprocess_global_character_image, character.id, generation_job.id, image_bytes
+                        )
+                        self._track_postprocess_future("global", character.id, future)
                     future.add_done_callback(
                         self._make_postprocess_callback(job_id, character.character_tag, index, len(jobs))
                     )
