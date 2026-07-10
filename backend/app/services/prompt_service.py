@@ -53,16 +53,38 @@ def _multi_color_prompt_parts(multi_color_hair: str | None) -> list[str]:
     return parts
 
 
+def _split_tags(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [tag.strip() for tag in raw.split(",") if tag.strip()]
+
+
 def build_generation_prompt(character: Character) -> str | None:
+    """캐릭터의 외형 태그로부터 생성 프롬프트를 만든다.
+
+    머리색(hair_color)이 있으면 그것을 기준으로 삼지만, 포켓몬이나 갑옷/가면
+    캐릭터처럼 "머리카락" 자체가 없어 hair_color가 수집되지 않는 캐릭터도 있다.
+    이런 캐릭터가 이미지 생성 대상에서 통째로 제외되지 않도록, hair_color가
+    없으면 눈 색/머리 모양/특징 태그로 대체하고, 그마저도 전혀 없으면 캐릭터
+    이름만으로라도 프롬프트를 생성한다(절대 None을 반환해 조용히 건너뛰지 않음).
+    """
+    prompt_parts: list[str] = []
+
     primary = _primary_hair_color(character.hair_color)
-    if not primary:
-        return None
+    if primary:
+        prompt_parts.append(tag_to_prompt_text(primary))
+        prompt_parts.extend(_multi_color_prompt_parts(character.multi_color_hair))
+    else:
+        prompt_parts.extend(tag_to_prompt_text(tag) for tag in _split_tags(character.hair_shape))
+        prompt_parts.extend(tag_to_prompt_text(tag) for tag in _split_tags(character.eye_color))
+        prompt_parts.extend(tag_to_prompt_text(tag) for tag in _split_tags(character.feature_tags))
 
-    prompt_parts = [tag_to_prompt_text(primary)]
-    prompt_parts.extend(_multi_color_prompt_parts(character.multi_color_hair))
-
-    inner = ", ".join(prompt_parts)
     name = character_tag_to_prompt_name(character.character_tag)
+    unique_parts = list(dict.fromkeys(prompt_parts))
+    if not unique_parts:
+        return f"{NAME_WEIGHT}::{name}::"
+
+    inner = ", ".join(unique_parts)
     return f"{NAME_WEIGHT}::{name}::, {inner}"
 
 

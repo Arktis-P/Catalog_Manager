@@ -831,12 +831,21 @@ class GenerationJobManager:
             }
             known_history_ids.discard("")
 
+            start_message = "캐릭터 목록 이미지 생성 시작"
+            skipped = queue_payload.get("skipped") or []
+            if skipped:
+                # 큐 준비 단계에서 조용히 제외된 캐릭터가 있으면(예: 특징 태그 수집 미완료),
+                # 원인을 알 수 없는 "생성 안 됨" 상태로 방치되지 않도록 사유를 메시지에 남긴다.
+                tags = ", ".join(str(item.get("character_tag")) for item in skipped[:5])
+                more = f" 외 {len(skipped) - 5}명" if len(skipped) > 5 else ""
+                start_message += f" · 제외 {len(skipped)}명: {tags}{more}"
+
             self._update_job(
                 job_id,
                 status="running",
                 phase="generating",
                 queue_id=str(queue_payload.get("queue_id") or ""),
-                message="캐릭터 목록 이미지 생성 시작",
+                message=start_message,
                 total=len(jobs),
                 current=0,
             )
