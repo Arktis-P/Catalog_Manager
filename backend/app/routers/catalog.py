@@ -186,6 +186,7 @@ def list_global_catalog(
     gender: str | None = None,
     search: str | None = None,
     include_hidden_ratings: bool = False,
+    has_alternative: bool | None = None,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
     service: CatalogService = Depends(get_catalog_service),
@@ -195,6 +196,7 @@ def list_global_catalog(
         gender=gender,
         search=search,
         include_hidden_ratings=include_hidden_ratings,
+        has_alternative=has_alternative,
         skip=skip,
         limit=limit,
     )

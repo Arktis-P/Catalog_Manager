@@ -58,6 +58,7 @@ export function CatalogPage() {
   );
 
   const [showHiddenRatings, setShowHiddenRatings] = useState(false);
+  const [alternativeFilter, setAlternativeFilter] = useState<"" | "true" | "false">("");
 
   const listFilters = useMemo(
     () => ({ ...filterQuery(filters), include_hidden_ratings: showHiddenRatings || undefined }),
@@ -78,8 +79,9 @@ export function CatalogPage() {
       gender: filters.gender,
       search: filters.search,
       include_hidden_ratings: showHiddenRatings || undefined,
+      has_alternative: alternativeFilter === "" ? undefined : alternativeFilter === "true",
     }),
-    [filters.rating, filters.gender, filters.search, showHiddenRatings],
+    [filters.rating, filters.gender, filters.search, showHiddenRatings, alternativeFilter],
   );
 
   const loadInitial = useCallback(async () => {
@@ -364,6 +366,18 @@ export function CatalogPage() {
             <p className="catalog-card-subtitle">
               '리뷰 - 캐릭터 목록' 탭에서 완료한 항목입니다 ({globalTotal.toLocaleString()}개).
             </p>
+          </div>
+          <div className="field">
+            <label htmlFor="alternative-filter">Alternative</label>
+            <select
+              id="alternative-filter"
+              value={alternativeFilter}
+              onChange={(event) => setAlternativeFilter(event.target.value as "" | "true" | "false")}
+            >
+              <option value="">All</option>
+              <option value="true">Alternative만 표시</option>
+              <option value="false">Alternative 숨기기</option>
+            </select>
           </div>
         </div>
         {globalLoading && globalItems.length === 0 ? (

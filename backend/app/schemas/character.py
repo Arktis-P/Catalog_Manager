@@ -137,6 +137,9 @@ class GlobalCatalogItemResponse(BaseModel):
     has_cover_image: bool = False
     needs_review: bool = False
     needs_regen: bool = False
+    is_alternative: bool = False
+    parent_character_tag: str | None = None
+    parent_display_name: str | None = None
 
 
 class GlobalCatalogListResponse(BaseModel):

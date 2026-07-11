@@ -136,7 +136,10 @@ export const api = {
     request<CatalogListResponse>(`/catalog${buildQuery(filters as Record<string, string | number | boolean | undefined>)}`),
 
   listGlobalCatalog: (
-    filters: Pick<CatalogFilters, "rating" | "gender" | "search" | "include_hidden_ratings" | "skip" | "limit"> = {},
+    filters: Pick<
+      CatalogFilters,
+      "rating" | "gender" | "search" | "include_hidden_ratings" | "has_alternative" | "skip" | "limit"
+    > = {},
   ) =>
     request<GlobalCatalogListResponse>(`/catalog/global${buildQuery(filters as Record<string, string | number | boolean | undefined>)}`),
 

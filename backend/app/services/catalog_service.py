@@ -374,9 +374,13 @@ class CatalogService:
             catalog_status = "needs_review"
 
         gender_source = (review.gender if review and review.gender else character.gender)
+        parent = character.parent
 
         return {
             "id": character.id,
+            "is_alternative": character.parent_character_id is not None,
+            "parent_character_tag": parent.character_tag if parent else None,
+            "parent_display_name": parent.display_name if parent else None,
             "series_id": primary_link.series_id if primary_link else None,
             "series_tag": primary_link.series.series_tag if primary_link and primary_link.series else "",
             "series_display_name": (
@@ -406,6 +410,7 @@ class CatalogService:
         gender: str | None = None,
         search: str | None = None,
         include_hidden_ratings: bool = False,
+        has_alternative: bool | None = None,
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[list[dict], int]:
@@ -419,6 +424,7 @@ class CatalogService:
                 selectinload(GlobalCharacter.review),
                 selectinload(GlobalCharacter.images),
                 selectinload(GlobalCharacter.series_links).selectinload(CharacterSeriesLink.series),
+                selectinload(GlobalCharacter.parent),
             )
             .filter(has_image)
         )
@@ -428,6 +434,10 @@ class CatalogService:
             query = query.filter(
                 or_(GlobalCharacterReview.rating.is_(None), ~GlobalCharacterReview.rating.in_((-1, 0)))
             )
+        if has_alternative is True:
+            query = query.filter(GlobalCharacter.parent_character_id.isnot(None))
+        elif has_alternative is False:
+            query = query.filter(GlobalCharacter.parent_character_id.is_(None))
         if gender:
             query = query.filter(GlobalCharacter.gender.ilike(f"%{gender}%"))
         if search:

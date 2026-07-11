@@ -107,7 +107,13 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
         setPendingCharacterId(null);
       }
       setFocusIndex(nextFocus);
-      setDrafts(Object.fromEntries(response.items.map((item) => [item.id, createDraftForItem(item)])));
+      // 병합 등으로 인한 재조회 시 이미 사용자가 편집해둔 초안(레이팅 등)을 잃지 않도록
+      // 기존 draft가 있으면 그대로 유지하고, 새로 로드된 항목에만 기본값을 만든다.
+      setDrafts((current) =>
+        Object.fromEntries(
+          response.items.map((item) => [item.id, current[item.id] ?? createDraftForItem(item)]),
+        ),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "카탈로그 검수 목록을 불러오지 못했습니다.");
     } finally {
@@ -402,7 +408,7 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (isEditableTarget(event.target) || !focusedItem || !focusedDraft) {
+      if (linkingItem || isEditableTarget(event.target) || !focusedItem || !focusedDraft) {
         return;
       }
 
@@ -494,7 +500,16 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
 
     window.addEventListener("keydown", onKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, [focusedDraft, focusedItem, focusedLocked, items.length, regenerateFocused, shiftFocusedImage, togglePreview]);
+  }, [
+    focusedDraft,
+    focusedItem,
+    focusedLocked,
+    items.length,
+    linkingItem,
+    regenerateFocused,
+    shiftFocusedImage,
+    togglePreview,
+  ]);
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.floor(skip / PAGE_SIZE) + 1;

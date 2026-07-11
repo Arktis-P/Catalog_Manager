@@ -208,7 +208,7 @@ export function CatalogReviewRow({
           {item.type ? <span className="badge">{item.type}</span> : null}
           {item.is_alternative ? (
             <span
-              className="badge badge-info"
+              className="badge badge-alternative"
               title={`상위 캐릭터: ${item.parent_display_name ?? item.parent_character_tag}`}
             >
               Alternative · ↳ {item.parent_display_name || item.parent_character_tag}

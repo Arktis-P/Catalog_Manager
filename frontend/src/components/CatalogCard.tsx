@@ -74,6 +74,14 @@ export function CatalogCard({ item, onEdit, onChangeSeries, onRegenerate, isGlob
           <span className={statusBadgeClass(item.catalog_status)}>{item.catalog_status}</span>
           {item.needs_regen ? <span className="badge badge-warning">needs_regen</span> : null}
           {item.needs_review ? <span className="badge">needs_review</span> : null}
+          {isGlobal && item.is_alternative ? (
+            <span
+              className="badge badge-alternative"
+              title={`상위 캐릭터: ${item.parent_display_name ?? item.parent_character_tag ?? ""}`}
+            >
+              Alternative · ↳ {item.parent_display_name || item.parent_character_tag}
+            </span>
+          ) : null}
           <span className="badge badge-muted">{item.character_status}</span>
           <span className="badge">{item.post_count.toLocaleString()} posts</span>
         </div>

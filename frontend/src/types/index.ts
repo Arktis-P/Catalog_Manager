@@ -85,6 +85,9 @@ export interface CatalogItem {
   has_cover_image: boolean;
   needs_review: boolean;
   needs_regen: boolean;
+  is_alternative: boolean;
+  parent_character_tag: string | null;
+  parent_display_name: string | null;
 }
 
 export interface CatalogListResponse {
@@ -524,6 +527,7 @@ export interface CatalogFilters {
   needs_regen?: boolean;
   search?: string;
   include_hidden_ratings?: boolean;
+  has_alternative?: boolean;
   skip?: number;
   limit?: number;
 }

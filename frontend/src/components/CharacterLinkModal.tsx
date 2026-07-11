@@ -67,6 +67,16 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
     onClose();
   };
 
+  const moveSelection = (direction: 1 | -1) => {
+    if (candidates.length === 0) return;
+    const currentIndex = candidates.findIndex((item) => item.id === selectedId);
+    const nextIndex =
+      currentIndex === -1
+        ? 0
+        : (currentIndex + direction + candidates.length) % candidates.length;
+    setSelectedId(candidates[nextIndex]!.id);
+  };
+
   const handleUnlink = async () => {
     setSubmitting(true);
     setError(null);
@@ -101,6 +111,39 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
   };
 
   const isSubmitDisabled = !selectedId || submitting || (selectedCandidate ? !selectedCandidate.linkable : false);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        handleClose();
+        return;
+      }
+      if (alreadyLinked) return;
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        event.stopPropagation();
+        moveSelection(-1);
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        moveSelection(1);
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!isSubmitDisabled) {
+          void handleSubmit();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [alreadyLinked, candidates, isSubmitDisabled, selectedId, submitting]);
 
   return (
     <div className="modal-backdrop" onClick={handleClose}>
