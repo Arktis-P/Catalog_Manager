@@ -147,6 +147,47 @@ class ReviewService:
             )
         )
 
+    def reconcile_empty_completed_reviews(self) -> int:
+        """완료 처리되었지만 이미지가 하나도 남지 않은 리뷰를 다시 pending으로 되돌린다.
+        rating이 0 또는 -1인 항목은 이미지가 없는 것이 정상이므로 대상에서 제외한다."""
+        reviews = (
+            self.db.query(Review)
+            .join(Character, Character.id == Review.character_id)
+            .filter(
+                Review.review_status == "completed",
+                Review.rating.notin_((0, -1)),
+                ~exists().where(Image.character_id == Character.id, Image.is_rejected.is_(False)),
+            )
+            .all()
+        )
+        for review in reviews:
+            review.review_status = "pending"
+            review.cover_image_id = None
+        if reviews:
+            commit_db_session(self.db)
+        return len(reviews)
+
+    def reconcile_empty_completed_reviews_global(self) -> int:
+        reviews = (
+            self.db.query(GlobalCharacterReview)
+            .join(GlobalCharacter, GlobalCharacter.id == GlobalCharacterReview.global_character_id)
+            .filter(
+                GlobalCharacterReview.review_status == "completed",
+                GlobalCharacterReview.rating.notin_((0, -1)),
+                ~exists().where(
+                    GlobalCharacterImage.global_character_id == GlobalCharacter.id,
+                    GlobalCharacterImage.is_rejected.is_(False),
+                ),
+            )
+            .all()
+        )
+        for review in reviews:
+            review.review_status = "pending"
+            review.cover_image_id = None
+        if reviews:
+            commit_db_session(self.db)
+        return len(reviews)
+
     def list_catalog_reviews(
         self,
         *,
@@ -156,6 +197,7 @@ class ReviewService:
         skip: int = 0,
         limit: int = 30,
     ) -> tuple[Series, list[Character], int]:
+        self.reconcile_empty_completed_reviews()
         series = self.db.query(Series).filter(Series.id == series_id).first()
         if not series:
             raise ValueError("Series not found")
@@ -379,6 +421,7 @@ class ReviewService:
         skip: int = 0,
         limit: int = 30,
     ) -> tuple[list[GlobalCharacter], int]:
+        self.reconcile_empty_completed_reviews_global()
         query = (
             self.db.query(GlobalCharacter)
             .outerjoin(GlobalCharacterReview, GlobalCharacterReview.global_character_id == GlobalCharacter.id)
