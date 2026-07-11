@@ -491,13 +491,39 @@ class ReviewService:
             raise ValueError("Character not found")
         if not character.review or character.review.review_status != "completed":
             raise ValueError("완료된 리뷰가 아닙니다")
-        if not character.review.cover_image_id:
+        if not character.review.cover_image_id and character.review.rating not in (-1, 0):
             raise ValueError("선택된 커버 이미지가 없습니다")
 
         removed = purge_noncover_images(self.db, character)
         commit_db_session(self.db)
         self.db.refresh(character)
         return character, removed
+
+    def purge_unselected_images_bulk(self, series_id: int, *, search: str | None = None) -> tuple[int, int]:
+        """완료된 리뷰 전체(현재 페이지 제한 없이)에서 미선택 이미지를 일괄 삭제한다."""
+        query = (
+            self.db.query(Character)
+            .join(Character.review)
+            .filter(Character.series_id == series_id, Review.review_status == "completed")
+        )
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.filter(
+                or_(Character.character_tag.ilike(pattern), Character.display_name.ilike(pattern))
+            )
+        character_ids = [row[0] for row in query.with_entities(Character.id).all()]
+
+        affected = 0
+        removed_total = 0
+        for character_id in character_ids:
+            try:
+                _, removed = self.purge_unselected_images(character_id)
+            except ValueError:
+                continue
+            if removed:
+                affected += 1
+                removed_total += removed
+        return affected, removed_total
 
     def undo_catalog_review_global(self, global_character_id: int) -> GlobalCharacter:
         character = (
@@ -531,10 +557,39 @@ class ReviewService:
             raise ValueError("Character not found")
         if not character.review or character.review.review_status != "completed":
             raise ValueError("완료된 리뷰가 아닙니다")
-        if not character.review.cover_image_id:
+        if not character.review.cover_image_id and character.review.rating not in (-1, 0):
             raise ValueError("선택된 커버 이미지가 없습니다")
 
         removed = purge_noncover_images_global(self.db, character)
         commit_db_session(self.db)
         self.db.refresh(character)
         return character, removed
+
+    def purge_unselected_images_bulk_global(self, *, search: str | None = None) -> tuple[int, int]:
+        """완료된 리뷰 전체(현재 페이지 제한 없이)에서 미선택 이미지를 일괄 삭제한다."""
+        query = (
+            self.db.query(GlobalCharacter)
+            .join(GlobalCharacter.review)
+            .filter(GlobalCharacterReview.review_status == "completed")
+        )
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    GlobalCharacter.character_tag.ilike(pattern),
+                    GlobalCharacter.display_name.ilike(pattern),
+                )
+            )
+        character_ids = [row[0] for row in query.with_entities(GlobalCharacter.id).all()]
+
+        affected = 0
+        removed_total = 0
+        for character_id in character_ids:
+            try:
+                _, removed = self.purge_unselected_images_global(character_id)
+            except ValueError:
+                continue
+            if removed:
+                affected += 1
+                removed_total += removed
+        return affected, removed_total

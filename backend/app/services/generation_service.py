@@ -369,6 +369,7 @@ class GenerationService:
         generation_job: GenerationJob,
         image_bytes: bytes,
         created_at: datetime | None = None,
+        skip_checks: bool = False,
     ) -> Image:
         pending_dir = self.get_pending_images_dir()
         pending_dir.mkdir(parents=True, exist_ok=True)
@@ -382,24 +383,27 @@ class GenerationService:
         output_path.write_bytes(image_bytes)
 
         rel_path = output_path.relative_to(settings.project_root).as_posix()
-        series = self.db.query(Series).filter(Series.id == character.series_id).first()
-        check = check_generated_image(
-            output_path,
-            character=character,
-            series=series,
-            hf_token=self._settings.get_hf_token() or None,
-            hf_wd_model=self._settings.get_hf_wd_model() or None,
-        )
+        if skip_checks:
+            check = None
+        else:
+            series = self.db.query(Series).filter(Series.id == character.series_id).first()
+            check = check_generated_image(
+                output_path,
+                character=character,
+                series=series,
+                hf_token=self._settings.get_hf_token() or None,
+                hf_wd_model=self._settings.get_hf_wd_model() or None,
+            )
         image = Image(
             character_id=character.id,
             generation_job_id=generation_job.id,
             image_path=rel_path,
-            auto_tags=check.auto_tags,
-            auto_status=check.auto_status,
-            hair_match=check.hair_match,
-            eye_match=check.eye_match,
-            gender_pred=check.gender_pred,
-            cover_score=check.cover_score,
+            auto_tags=check.auto_tags if check else None,
+            auto_status=check.auto_status if check else None,
+            hair_match=check.hair_match if check else None,
+            eye_match=check.eye_match if check else None,
+            gender_pred=check.gender_pred if check else None,
+            cover_score=check.cover_score if check else None,
         )
         generation_job.status = "completed"
         generation_job.output_path = rel_path
@@ -663,6 +667,7 @@ class GenerationService:
         generation_job: GlobalCharacterGenerationJob,
         image_bytes: bytes,
         created_at: datetime | None = None,
+        skip_checks: bool = False,
     ) -> GlobalCharacterImage:
         pending_dir = self.get_pending_images_dir()
         pending_dir.mkdir(parents=True, exist_ok=True)
@@ -676,23 +681,26 @@ class GenerationService:
         output_path.write_bytes(image_bytes)
 
         rel_path = output_path.relative_to(settings.project_root).as_posix()
-        check = check_generated_image(
-            output_path,
-            character=character,
-            series=None,
-            hf_token=self._settings.get_hf_token() or None,
-            hf_wd_model=self._settings.get_hf_wd_model() or None,
-        )
+        if skip_checks:
+            check = None
+        else:
+            check = check_generated_image(
+                output_path,
+                character=character,
+                series=None,
+                hf_token=self._settings.get_hf_token() or None,
+                hf_wd_model=self._settings.get_hf_wd_model() or None,
+            )
         image = GlobalCharacterImage(
             global_character_id=character.id,
             generation_job_id=generation_job.id,
             image_path=rel_path,
-            auto_tags=check.auto_tags,
-            auto_status=check.auto_status,
-            hair_match=check.hair_match,
-            eye_match=check.eye_match,
-            gender_pred=check.gender_pred,
-            cover_score=check.cover_score,
+            auto_tags=check.auto_tags if check else None,
+            auto_status=check.auto_status if check else None,
+            hair_match=check.hair_match if check else None,
+            eye_match=check.eye_match if check else None,
+            gender_pred=check.gender_pred if check else None,
+            cover_score=check.cover_score if check else None,
         )
         generation_job.status = "completed"
         generation_job.output_path = rel_path
@@ -852,6 +860,7 @@ class GenerationService:
                 character=character,
                 generation_job=generation_job,
                 image_bytes=image_bytes,
+                skip_checks=True,
             )
 
             if progress_callback:
@@ -1011,6 +1020,7 @@ class GenerationService:
                 character=character,
                 generation_job=generation_job,
                 image_bytes=image_bytes,
+                skip_checks=True,
             )
 
             if progress_callback:

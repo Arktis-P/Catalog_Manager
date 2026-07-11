@@ -421,34 +421,31 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
   }, []);
 
   const handlePurgeUnselectedAll = useCallback(async () => {
-    const targets = items.filter((item) => item.review_status === "completed" && item.images.length > 1);
-    if (targets.length === 0) {
-      setActionMessage("삭제할 미선택 이미지가 있는 항목이 없습니다.");
+    if (!selectedSeriesId) {
       return;
     }
     if (
       !window.confirm(
-        `현재 화면에 로드된 ${targets.length}개 항목의 선택되지 않은 이미지를 모두 삭제할까요? 되돌릴 수 없습니다.`,
+        "리뷰가 완료된 모든 항목(현재 필터 검색어 기준)의 선택되지 않은 이미지를 모두 삭제할까요? 되돌릴 수 없습니다.",
       )
     ) {
       return;
     }
     setSubmitting(true);
     setError(null);
-    let removedTotal = 0;
     try {
-      for (const item of targets) {
-        const response = await api.purgeUnselectedCatalogImages(item.id);
-        removedTotal += response.removed_count;
-        setItems((current) => current.map((entry) => (entry.id === item.id ? response.item : entry)));
-      }
-      setActionMessage(`${targets.length}개 항목에서 미선택 이미지 ${removedTotal}장 삭제됨`);
+      const response = await api.purgeUnselectedCatalogImagesBulk({
+        series_id: selectedSeriesId,
+        search: search || undefined,
+      });
+      setActionMessage(`${response.affected_count}개 항목에서 미선택 이미지 ${response.removed_count}장 삭제됨`);
+      await loadReviews();
     } catch (err) {
       setError(err instanceof Error ? err.message : "미선택 이미지 일괄 삭제에 실패했습니다.");
     } finally {
       setSubmitting(false);
     }
-  }, [items]);
+  }, [selectedSeriesId, search, loadReviews]);
 
   const undoLast = useCallback(async () => {
     const characterId = undoStack[0];
@@ -775,8 +772,8 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
             className="btn"
             type="button"
             onClick={() => void handlePurgeUnselectedAll()}
-            disabled={submitting || items.length === 0}
-            title="현재 화면에 로드된 항목들의 선택되지 않은 이미지를 모두 삭제합니다."
+            disabled={submitting || !selectedSeriesId}
+            title="리뷰가 완료된 모든 항목(현재 검색어 기준)의 선택되지 않은 이미지를 모두 삭제합니다."
           >
             미선택 이미지 전체 삭제
           </button>

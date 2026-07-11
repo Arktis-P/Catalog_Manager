@@ -418,6 +418,12 @@ export const api = {
       { method: "POST" },
     ),
 
+  purgeUnselectedCatalogImagesBulk: (params: { series_id: number; search?: string }) =>
+    request<{ affected_count: number; removed_count: number }>(
+      `/review/catalog/purge-unselected-all${buildQuery(params)}`,
+      { method: "POST" },
+    ),
+
   regenerateCatalogCharacter: (
     characterId: number,
     payload: { prompt: string; gender?: string | null },
@@ -441,6 +447,11 @@ export const api = {
 
   getReviewRegenerateJob: (jobId: string) =>
     request<ReviewRegenerateJob>(`/review/catalog/regenerate/jobs/${jobId}`),
+
+  dismissReviewRegenerateJob: (jobId: string) =>
+    request<{ ok: boolean }>(`/review/catalog/regenerate/jobs/${jobId}`, {
+      method: "DELETE",
+    }),
 
   listCatalogReviewsGlobal: (
     params: { filter_status?: CatalogReviewFilterStatus; search?: string; skip?: number; limit?: number } = {},
@@ -468,6 +479,12 @@ export const api = {
   purgeUnselectedCatalogImagesGlobal: (globalCharacterId: number) =>
     request<{ id: number; removed_count: number; item: CatalogReviewItem }>(
       `/review/catalog-global/${globalCharacterId}/purge-unselected`,
+      { method: "POST" },
+    ),
+
+  purgeUnselectedCatalogImagesBulkGlobal: (params: { search?: string } = {}) =>
+    request<{ affected_count: number; removed_count: number }>(
+      `/review/catalog-global/purge-unselected-all${buildQuery(params)}`,
       { method: "POST" },
     ),
 

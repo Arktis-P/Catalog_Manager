@@ -2,6 +2,7 @@ import type { ReviewRegenerateJob } from "../types";
 
 interface ReviewRegenerateProgressPanelProps {
   job: ReviewRegenerateJob;
+  onDismiss?: () => void;
 }
 
 function statusLabel(status: string): string {
@@ -19,8 +20,9 @@ function statusLabel(status: string): string {
   }
 }
 
-export function ReviewRegenerateProgressPanel({ job }: ReviewRegenerateProgressPanelProps) {
+export function ReviewRegenerateProgressPanel({ job, onDismiss }: ReviewRegenerateProgressPanelProps) {
   const isActive = job.status === "queued" || job.status === "running";
+  const isDone = job.status === "completed" || job.status === "failed";
   const percent = job.total > 0 ? Math.min(100, Math.round((job.current / job.total) * 100)) : null;
 
   return (
@@ -37,6 +39,10 @@ export function ReviewRegenerateProgressPanel({ job }: ReviewRegenerateProgressP
         <span className="badge badge-compact badge-muted task-badge">재생성</span>
         <span className="badge badge-compact">{statusLabel(job.status)}</span>
         {percent !== null && isActive ? <span className="task-meta">{percent}%</span> : null}
+        <div className="task-row1-spacer" />
+        {isDone && onDismiss ? (
+          <button className="btn btn-small btn-ghost task-btn" type="button" aria-label="닫기" onClick={onDismiss}>×</button>
+        ) : null}
       </div>
       {isActive ? (
         <div className="task-row2">

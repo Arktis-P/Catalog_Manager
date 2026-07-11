@@ -23,6 +23,7 @@ interface ReviewRegenerateContextValue {
   ) => Promise<ReviewRegenerateJob>;
   isCharacterRegenerating: (characterId: number, scope?: string) => boolean;
   getCharacterJob: (characterId: number, scope?: string) => ReviewRegenerateJob | null;
+  dismissJob: (jobId: string) => void;
   lastError: string | null;
   clearLastError: () => void;
   lastCompletedJob: ReviewRegenerateJob | null;
@@ -166,6 +167,13 @@ export function ReviewRegenerateProvider({ children }: { children: ReactNode }) 
     [jobs],
   );
 
+  const dismissJob = useCallback((jobId: string) => {
+    setJobs((current) => current.filter((job) => job.job_id !== jobId));
+    void api.dismissReviewRegenerateJob(jobId).catch(() => {
+      // Ignore dismiss errors; job will simply reappear on next refresh if it failed server-side.
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       jobs,
@@ -173,6 +181,7 @@ export function ReviewRegenerateProvider({ children }: { children: ReactNode }) 
       enqueueRegenerateGlobal,
       isCharacterRegenerating,
       getCharacterJob,
+      dismissJob,
       lastError,
       clearLastError: () => setLastError(null),
       lastCompletedJob,
@@ -184,6 +193,7 @@ export function ReviewRegenerateProvider({ children }: { children: ReactNode }) 
       enqueueRegenerateGlobal,
       isCharacterRegenerating,
       getCharacterJob,
+      dismissJob,
       lastError,
       lastCompletedJob,
     ],

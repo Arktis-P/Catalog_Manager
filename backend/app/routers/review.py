@@ -13,6 +13,7 @@ from app.schemas.review import (
     CatalogReviewDismissNeedsCheckResponse,
     CatalogReviewItemResponse,
     CatalogReviewListResponse,
+    CatalogReviewPurgeUnselectedBulkResponse,
     CatalogReviewPurgeUnselectedResponse,
     CatalogReviewRegenerateRequest,
     CatalogReviewRegenerateResponse,
@@ -234,6 +235,16 @@ def purge_unselected_catalog_images(
     )
 
 
+@router.post("/catalog/purge-unselected-all", response_model=CatalogReviewPurgeUnselectedBulkResponse)
+def purge_unselected_catalog_images_bulk(
+    series_id: int = Query(..., ge=1),
+    search: str | None = None,
+    service: ReviewService = Depends(get_review_service),
+):
+    affected, removed = service.purge_unselected_images_bulk(series_id, search=search)
+    return CatalogReviewPurgeUnselectedBulkResponse(affected_count=affected, removed_count=removed)
+
+
 @router.post("/catalog/{character_id}/dismiss-needs-check", response_model=CatalogReviewDismissNeedsCheckResponse)
 def dismiss_catalog_needs_check(
     character_id: int,
@@ -279,6 +290,13 @@ def get_review_regenerate_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Regenerate job not found")
     return _job_to_response(job)
+
+
+@router.delete("/catalog/regenerate/jobs/{job_id}")
+def dismiss_review_regenerate_job(job_id: str):
+    if not review_regenerate_job_manager.dismiss_job(job_id):
+        raise HTTPException(status_code=400, detail="완료되지 않은 작업은 지울 수 없습니다")
+    return {"ok": True}
 
 
 # ── 캐릭터 목록(GlobalCharacter) 중심 리뷰 ──────────────────────────────
@@ -366,6 +384,15 @@ def purge_unselected_catalog_images_global(
         removed_count=removed,
         item=to_catalog_item_global(character),
     )
+
+
+@router.post("/catalog-global/purge-unselected-all", response_model=CatalogReviewPurgeUnselectedBulkResponse)
+def purge_unselected_catalog_images_bulk_global(
+    search: str | None = None,
+    service: ReviewService = Depends(get_review_service),
+):
+    affected, removed = service.purge_unselected_images_bulk_global(search=search)
+    return CatalogReviewPurgeUnselectedBulkResponse(affected_count=affected, removed_count=removed)
 
 
 @router.post("/catalog-global/{global_character_id}/undo", response_model=CatalogReviewUndoResponse)

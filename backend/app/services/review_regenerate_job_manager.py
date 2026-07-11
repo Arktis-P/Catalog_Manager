@@ -76,6 +76,14 @@ class ReviewRegenerateJobManager:
         jobs.sort(key=lambda job: job.started_at, reverse=True)
         return jobs[:limit]
 
+    def dismiss_job(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status not in {"completed", "failed"}:
+                return False
+            del self._jobs[job_id]
+            return True
+
     def _enqueue(
         self,
         character_id: int,

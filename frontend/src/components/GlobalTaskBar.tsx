@@ -53,7 +53,7 @@ export function GlobalTaskBar() {
     lastError: catalogError,
     clearLastError: clearCatalogError,
   } = useCharacterCatalogJobs();
-  const { jobs: regenerateJobs } = useReviewRegenerateJobs();
+  const { jobs: regenerateJobs, dismissJob: dismissRegenerateJob } = useReviewRegenerateJobs();
 
   const isCatalogJob = (job: CollectJob | CatalogJob | (typeof generationJobs)[number]): job is CatalogJob =>
     job.job_type === "character_catalog_list" || job.job_type === "character_catalog_tags";
@@ -86,7 +86,7 @@ export function GlobalTaskBar() {
   const dismissAllCompleted = () => {
     for (const job of dismissibleJobs) {
       if (isRegenerateJob(job)) {
-        continue;
+        dismissRegenerateJob(job.job_id);
       } else if (job.job_type === "image_generation") {
         dismissGenerationJob(job.job_id);
       } else if (isCatalogJob(job)) {
@@ -143,7 +143,15 @@ export function GlobalTaskBar() {
         <div className="global-task-bar-jobs">
           {activeJobs.map((job) =>
             isRegenerateJob(job) ? (
-              <ReviewRegenerateProgressPanel key={job.job_id} job={job} />
+              <ReviewRegenerateProgressPanel
+                key={job.job_id}
+                job={job}
+                onDismiss={
+                  job.status === "completed" || job.status === "failed"
+                    ? () => dismissRegenerateJob(job.job_id)
+                    : undefined
+                }
+              />
             ) : job.job_type === "image_generation" ? (
               <GenerationProgressPanel
                 key={job.job_id}

@@ -127,6 +127,11 @@ class GlobalCatalogReviewPurgeUnselectedResponse(BaseModel):
     item: GlobalCatalogReviewItemResponse
 
 
+class CatalogReviewPurgeUnselectedBulkResponse(BaseModel):
+    affected_count: int
+    removed_count: int
+
+
 class CatalogReviewRegenerateRequest(BaseModel):
     prompt: str = Field(min_length=1)
     gender: str | None = None
