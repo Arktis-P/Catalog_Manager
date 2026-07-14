@@ -12,7 +12,27 @@ const MULTI_COLOR_PROMPT_TAGS = new Set([
   "gradient_hair",
   "colored_inner_hair",
   "multicolored_hair",
+  "two-tone_hair",
 ]);
+
+// 자주 쓰는 멀티컬러 머리 옵션. 캐릭터에 태그가 없어도 항상 선택 버튼으로 노출한다.
+// key는 appearanceTagChips의 multi 그룹과 동일한 형식이라 두 버튼이 자동 동기화된다.
+export const MULTI_HAIR_OPTIONS = [
+  "multicolored_hair",
+  "two-tone_hair",
+  "gradient_hair",
+  "streaked_hair",
+  "colored_inner_hair",
+].map((tag) => ({
+  tag,
+  key: `multi:${tag}`,
+  label: tag.replace(/_/g, " ").replace(/\s*hair$/, ""),
+}));
+
+export function stripHairSuffix(label: string): string {
+  const stripped = label.replace(/\s*hair$/, "");
+  return stripped || label;
+}
 
 function tagToPromptText(tag: string): string {
   return tag.trim().replace(/_/g, " ");
@@ -39,8 +59,18 @@ export function appearanceTagChips(item: {
   hair_shape: string | null;
   eye_color: string | null;
   feature_tags: string | null;
-}): Array<{ key: string; label: string; group: "gender" | "hair" | "multi" | "shape" | "eyes" | "features" }> {
-  const chips: Array<{ key: string; label: string; group: "gender" | "hair" | "multi" | "shape" | "eyes" | "features" }> = [];
+}): Array<{
+  key: string;
+  label: string;
+  group: "gender" | "hair" | "multi" | "shape" | "eyes" | "features";
+  optional?: boolean;
+}> {
+  const chips: Array<{
+    key: string;
+    label: string;
+    group: "gender" | "hair" | "multi" | "shape" | "eyes" | "features";
+    optional?: boolean;
+  }> = [];
 
   if (item.gender) {
     chips.push({ key: `gender:${item.gender}`, label: item.gender, group: "gender" });
@@ -67,6 +97,15 @@ export function appearanceTagChips(item: {
 
   for (const tag of splitTags(item.feature_tags)) {
     chips.push({ key: `features:${tag}`, label: tagToPromptText(tag), group: "features" });
+  }
+
+  // 캐릭터 데이터에 없는 멀티컬러 옵션도 chips에 포함시켜, 옵션 버튼으로 켰을 때
+  // 프롬프트/selected_tags에 반영되게 한다. optional 표시로 기본 선택·상단 표시에서 제외.
+  const existingKeys = new Set(chips.map((chip) => chip.key));
+  for (const option of MULTI_HAIR_OPTIONS) {
+    if (!existingKeys.has(option.key)) {
+      chips.push({ key: option.key, label: tagToPromptText(option.tag), group: "multi", optional: true });
+    }
   }
 
   return chips;
@@ -111,7 +150,7 @@ export function defaultEnabledTagKeys(chips: ReturnType<typeof appearanceTagChip
       }
       continue;
     }
-    if (chip.group === "multi") {
+    if (chip.group === "multi" && !chip.optional) {
       enabled.add(chip.key);
     }
   }

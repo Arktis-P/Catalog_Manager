@@ -155,17 +155,22 @@ class ReviewService:
             .join(Character, Character.id == Review.character_id)
             .filter(
                 Review.review_status == "completed",
-                Review.rating.notin_((0, -1)),
+                # rating이 NULL인 경우 `NOT IN`은 NULL로 평가돼 대상에서 빠지므로 명시적으로 포함한다.
+                or_(Review.rating.is_(None), Review.rating.notin_((0, -1))),
                 ~exists().where(Image.character_id == Character.id, Image.is_rejected.is_(False)),
             )
             .all()
         )
+        reverted = 0
         for review in reviews:
+            if review.rating in (0, -1):
+                continue
             review.review_status = "pending"
             review.cover_image_id = None
-        if reviews:
+            reverted += 1
+        if reverted:
             commit_db_session(self.db)
-        return len(reviews)
+        return reverted
 
     def reconcile_empty_completed_reviews_global(self) -> int:
         reviews = (
@@ -173,7 +178,11 @@ class ReviewService:
             .join(GlobalCharacter, GlobalCharacter.id == GlobalCharacterReview.global_character_id)
             .filter(
                 GlobalCharacterReview.review_status == "completed",
-                GlobalCharacterReview.rating.notin_((0, -1)),
+                # rating이 NULL인 경우 `NOT IN`은 NULL로 평가돼 대상에서 빠지므로 명시적으로 포함한다.
+                or_(
+                    GlobalCharacterReview.rating.is_(None),
+                    GlobalCharacterReview.rating.notin_((0, -1)),
+                ),
                 ~exists().where(
                     GlobalCharacterImage.global_character_id == GlobalCharacter.id,
                     GlobalCharacterImage.is_rejected.is_(False),
@@ -181,12 +190,16 @@ class ReviewService:
             )
             .all()
         )
+        reverted = 0
         for review in reviews:
+            if review.rating in (0, -1):
+                continue
             review.review_status = "pending"
             review.cover_image_id = None
-        if reviews:
+            reverted += 1
+        if reverted:
             commit_db_session(self.db)
-        return len(reviews)
+        return reverted
 
     def list_catalog_reviews(
         self,

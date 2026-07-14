@@ -54,6 +54,9 @@ class ReviewRegenerateJobManager:
         self._running = False
         self._lock = threading.Lock()
         self._needs_inter_character_gap = False
+        # 재생성 큐가 완전히 빌 때까지 메인 생성 큐를 계속 일시정지 상태로 붙잡아둔다.
+        # 작업 사이마다 재개하면 그 틈에 메인 큐가 NAIA를 선점해 순서가 뒤섞인다.
+        self._paused_generation_job_ids: set[str] = set()
 
     def get_job(self, job_id: str) -> ReviewRegenerateJobState | None:
         with self._lock:
@@ -239,6 +242,8 @@ class ReviewRegenerateJobManager:
         from app.services.generation_job_manager import generation_job_manager
 
         paused_job_ids = generation_job_manager.pause_all_running()
+        with self._lock:
+            self._paused_generation_job_ids.update(paused_job_ids)
         if paused_job_ids:
             self._update_job(job_id, message="다른 생성 작업 일시정지 중...")
 
@@ -312,14 +317,24 @@ class ReviewRegenerateJobManager:
                 finished_at=_utc_now(),
             )
         finally:
-            if paused_job_ids:
-                generation_job_manager.resume_jobs(paused_job_ids)
             with self._lock:
                 self._needs_inter_character_gap = True
                 if self._active_by_character.get((scope, character_id)) == job_id:
                     self._active_by_character.pop((scope, character_id), None)
                 self._running = False
                 self._refresh_queue_messages()
+                # 대기 중인 재생성 작업이 하나라도 남아 있으면 메인 생성 큐를 재개하지
+                # 않는다. 큐가 완전히 비었을 때만 모아둔 작업들을 한 번에 재개한다.
+                has_pending = any(
+                    (queued := self._jobs.get(queued_id)) is not None and queued.status == "queued"
+                    for queued_id in self._job_queue
+                )
+                jobs_to_resume: list[str] = []
+                if not has_pending:
+                    jobs_to_resume = list(self._paused_generation_job_ids)
+                    self._paused_generation_job_ids.clear()
+            if jobs_to_resume:
+                generation_job_manager.resume_jobs(jobs_to_resume)
             self._dispatch_next()
 
 

@@ -7,7 +7,9 @@ import {
   defaultEnabledTagKeys,
   genderChipClass,
   genderChipLabel,
+  MULTI_HAIR_OPTIONS,
   resolveFinalPrompt,
+  stripHairSuffix,
 } from "../../utils/reviewPrompt";
 import { LazyReviewImage } from "./LazyReviewImage";
 import { ReviewRatingStars } from "./ReviewRatingStars";
@@ -117,7 +119,9 @@ export function CatalogReviewRow({
   const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
   const promptText = resolveFinalPrompt(item, draft) ?? "";
   const displayGender = draft.gender ?? item.gender;
-  const hairRowChips = chips.filter((chip) => chip.group === "hair" || chip.group === "multi" || chip.group === "shape");
+  const hairRowChips = chips.filter(
+    (chip) => (chip.group === "hair" || chip.group === "multi" || chip.group === "shape") && !chip.optional,
+  );
   const featureRowChips = chips.filter((chip) => chip.group === "eyes" || chip.group === "features");
   const imageSlots = item.images.slice(0, 4);
   const slotCount = quadLayout ? 4 : 2;
@@ -236,7 +240,20 @@ export function CatalogReviewRow({
                 onClick={() => onToggleTag(chip.key)}
                 disabled={locked}
               >
-                {chip.label}
+                {chip.group === "multi" ? stripHairSuffix(chip.label) : chip.label}
+              </button>
+            ))}
+          </div>
+          <div className="catalog-review-tags catalog-review-tags--multi-options">
+            {MULTI_HAIR_OPTIONS.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                className={`review-tag${enabledTags.has(option.key) ? " review-tag--enabled" : ""}`}
+                onClick={() => onToggleTag(option.key)}
+                disabled={locked}
+              >
+                {option.label}
               </button>
             ))}
           </div>

@@ -801,6 +801,9 @@ class GenerationService:
         )
         image_count = self.get_images_per_character()
         self._clear_character_review_images(character)
+        # NAIA 생성은 수 분이 걸리므로, 그동안 SQLite 쓰기 트랜잭션을 열어두면
+        # 다른 요청(리뷰 완료, 병합 등)이 전부 잠겨 멈춘다. 생성 전에 즉시 커밋한다.
+        self.db.commit()
 
         if progress_callback:
             progress_callback(
@@ -843,7 +846,8 @@ class GenerationService:
                 status="pending",
             )
             self.db.add(generation_job)
-            self.db.flush()
+            # flush만 하면 NAIA 응답을 기다리는 내내 쓰기 잠금이 유지된다. 즉시 커밋.
+            self.db.commit()
 
             try:
                 image_bytes, _ = generate_and_fetch_image(
@@ -961,6 +965,9 @@ class GenerationService:
         )
         image_count = self.get_images_per_character()
         self._clear_global_character_review_images(character)
+        # NAIA 생성은 수 분이 걸리므로, 그동안 SQLite 쓰기 트랜잭션을 열어두면
+        # 다른 요청(리뷰 완료, 병합 등)이 전부 잠겨 멈춘다. 생성 전에 즉시 커밋한다.
+        self.db.commit()
 
         if progress_callback:
             progress_callback(
@@ -1003,7 +1010,8 @@ class GenerationService:
                 status="pending",
             )
             self.db.add(generation_job)
-            self.db.flush()
+            # flush만 하면 NAIA 응답을 기다리는 내내 쓰기 잠금이 유지된다. 즉시 커밋.
+            self.db.commit()
 
             try:
                 image_bytes, _ = generate_and_fetch_image(
