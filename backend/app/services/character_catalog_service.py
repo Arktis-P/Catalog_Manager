@@ -415,7 +415,16 @@ class CharacterCatalogService:
         if has_image is True:
             query = query.filter(image_exists)
         elif has_image is False:
-            query = query.filter(~image_exists)
+            # 0성/-1성으로 리뷰가 완료된 캐릭터는 이미지가 없는 것이 정상이므로
+            # "미생성" 목록에 포함하지 않는다.
+            completed_zero_rated = exists(
+                select(1).where(
+                    GlobalCharacterReview.global_character_id == GlobalCharacter.id,
+                    GlobalCharacterReview.review_status == "completed",
+                    GlobalCharacterReview.rating.in_((0, -1)),
+                )
+            )
+            query = query.filter(~image_exists, ~completed_zero_rated)
 
         cover_exists = exists(
             select(1).where(
