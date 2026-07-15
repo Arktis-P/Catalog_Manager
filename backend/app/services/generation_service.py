@@ -801,6 +801,13 @@ class GenerationService:
         )
         image_count = self.get_images_per_character()
         self._clear_character_review_images(character)
+        # 재생성 명령 시점의 프롬프트를 리뷰에 저장해, 목록이 갱신돼도 그대로 표시되게 한다.
+        review = character.review
+        if not review:
+            review = Review(character_id=character.id)
+            self.db.add(review)
+            character.review = review
+        review.final_prompt = prompt_core.strip() or None
         # NAIA 생성은 수 분이 걸리므로, 그동안 SQLite 쓰기 트랜잭션을 열어두면
         # 다른 요청(리뷰 완료, 병합 등)이 전부 잠겨 멈춘다. 생성 전에 즉시 커밋한다.
         self.db.commit()
@@ -965,6 +972,13 @@ class GenerationService:
         )
         image_count = self.get_images_per_character()
         self._clear_global_character_review_images(character)
+        # 재생성 명령 시점의 프롬프트를 리뷰에 저장해, 목록이 갱신돼도 그대로 표시되게 한다.
+        review = character.review
+        if not review:
+            review = GlobalCharacterReview(global_character_id=character.id)
+            self.db.add(review)
+            character.review = review
+        review.final_prompt = prompt_core.strip() or None
         # NAIA 생성은 수 분이 걸리므로, 그동안 SQLite 쓰기 트랜잭션을 열어두면
         # 다른 요청(리뷰 완료, 병합 등)이 전부 잠겨 멈춘다. 생성 전에 즉시 커밋한다.
         self.db.commit()

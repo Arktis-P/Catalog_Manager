@@ -249,7 +249,7 @@ class ReviewService:
         )
         if filter_status == "pending":
             query = query.filter(_pending_condition)
-        elif filter_status == "completed":
+        elif filter_status in ("completed", "completed_recent"):
             query = query.filter(Review.review_status == "completed")
         elif filter_status == "needs_check":
             query = query.filter(Character.status == "needs_check")
@@ -273,12 +273,12 @@ class ReviewService:
             )
 
         total = query.order_by(None).count()
-        items = (
-            query.order_by(Character.post_count.desc(), Character.character_tag.asc(), Character.id.asc())
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
+        if filter_status == "completed_recent":
+            # 최근에 결정한 항목부터 보여줘 잘못 매긴 레이팅을 바로 찾아 되돌릴 수 있게 한다.
+            ordering = (Review.updated_at.desc(), Character.id.desc())
+        else:
+            ordering = (Character.post_count.desc(), Character.character_tag.asc(), Character.id.asc())
+        items = query.order_by(*ordering).offset(skip).limit(limit).all()
         return series, items, total
 
     def complete_catalog_review(
@@ -451,7 +451,7 @@ class ReviewService:
             query = query.filter(
                 or_(GlobalCharacterReview.id.is_(None), GlobalCharacterReview.review_status != "completed")
             )
-        elif filter_status == "completed":
+        elif filter_status in ("completed", "completed_recent"):
             query = query.filter(GlobalCharacterReview.review_status == "completed")
 
         if search:
@@ -461,14 +461,16 @@ class ReviewService:
             )
 
         total = query.order_by(None).count()
-        items = (
-            query.order_by(
-                GlobalCharacter.post_count.desc(), GlobalCharacter.character_tag.asc(), GlobalCharacter.id.asc()
+        if filter_status == "completed_recent":
+            # 최근에 결정한 항목부터 보여줘 잘못 매긴 레이팅을 바로 찾아 되돌릴 수 있게 한다.
+            ordering = (GlobalCharacterReview.updated_at.desc(), GlobalCharacter.id.desc())
+        else:
+            ordering = (
+                GlobalCharacter.post_count.desc(),
+                GlobalCharacter.character_tag.asc(),
+                GlobalCharacter.id.asc(),
             )
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
+        items = query.order_by(*ordering).offset(skip).limit(limit).all()
         return items, total
 
     def complete_catalog_review_global(

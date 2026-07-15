@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
 from app.models.global_character import GlobalCharacter
+from app.models.global_character_image import GlobalCharacterImage
+from app.models.global_character_review import GlobalCharacterReview
 from app.schemas.character_catalog import (
     CatalogCollectAllRequest,
     CatalogJobListResponse,
@@ -156,6 +159,41 @@ def list_character_link_candidates(
         candidates = link_service.list_child_candidates(character, search=search, limit=limit, exclude_ids=excluded or None)
 
     role = "parent" if mode == "parent" else "child"
+
+    # 후보들의 리뷰 상태/이미지 수/커버 경로를 한 번에 조회해 병합 판단에 필요한
+    # 정보(이미 생성·선택된 캐릭터인지)를 배지로 보여줄 수 있게 한다.
+    db = service.db
+    candidate_ids = [item.id for item in candidates]
+    review_map: dict[int, GlobalCharacterReview] = {}
+    image_count_map: dict[int, int] = {}
+    cover_path_map: dict[int, str] = {}
+    if candidate_ids:
+        reviews = (
+            db.query(GlobalCharacterReview)
+            .filter(GlobalCharacterReview.global_character_id.in_(candidate_ids))
+            .all()
+        )
+        review_map = {review.global_character_id: review for review in reviews}
+        image_count_map = dict(
+            db.query(GlobalCharacterImage.global_character_id, func.count(GlobalCharacterImage.id))
+            .filter(GlobalCharacterImage.global_character_id.in_(candidate_ids))
+            .group_by(GlobalCharacterImage.global_character_id)
+            .all()
+        )
+        cover_ids = {
+            review.cover_image_id
+            for review in reviews
+            if review.cover_image_id and review.review_status == "completed"
+        }
+        if cover_ids:
+            cover_images = (
+                db.query(GlobalCharacterImage).filter(GlobalCharacterImage.id.in_(cover_ids)).all()
+            )
+            path_by_image_id = {image.id: image.image_path for image in cover_images}
+            for review in reviews:
+                if review.review_status == "completed" and review.cover_image_id in path_by_image_id:
+                    cover_path_map[review.global_character_id] = path_by_image_id[review.cover_image_id]
+
     return CharacterLinkCandidateListResponse(
         items=[
             CharacterLinkCandidate(
@@ -165,6 +203,10 @@ def list_character_link_candidates(
                 post_count=item.post_count,
                 similarity_score=similarity_score(character, item),
                 linkable=link_service.candidate_is_linkable(item, role=role),
+                review_status=review_map[item.id].review_status if item.id in review_map else None,
+                rating=review_map[item.id].rating if item.id in review_map else None,
+                image_count=image_count_map.get(item.id, 0),
+                cover_image_path=cover_path_map.get(item.id),
             )
             for item in candidates
         ]

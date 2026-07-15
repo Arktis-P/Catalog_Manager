@@ -149,7 +149,10 @@ def confirm_appearance_review(
 @router.get("/catalog", response_model=CatalogReviewListResponse)
 def list_catalog_reviews(
     series_id: int = Query(..., ge=1),
-    filter_status: str = Query(default="pending", pattern="^(pending|completed|all|needs_check)$"),
+    filter_status: str = Query(
+        default="pending",
+        pattern="^(pending|completed|completed_recent|all|needs_check|triage_fast|triage_check|triage_regen)$",
+    ),
     search: str | None = None,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=30, ge=1, le=100),
@@ -304,7 +307,7 @@ def dismiss_review_regenerate_job(job_id: str):
 
 @router.get("/catalog-global", response_model=GlobalCatalogReviewListResponse)
 def list_catalog_reviews_global(
-    filter_status: str = Query(default="pending", pattern="^(pending|completed|all)$"),
+    filter_status: str = Query(default="pending", pattern="^(pending|completed|completed_recent|all)$"),
     search: str | None = None,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=30, ge=1, le=100),

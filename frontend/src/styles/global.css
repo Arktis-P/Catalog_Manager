@@ -1461,6 +1461,64 @@ button,
   color: var(--text-muted);
 }
 
+.merge-candidate-badge {
+  align-self: flex-start;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.merge-candidate-badge--completed {
+  color: #6fcf97;
+  border-color: rgba(111, 207, 151, 0.5);
+}
+
+.merge-candidate-badge--clickable {
+  cursor: zoom-in;
+}
+
+.merge-candidate-badge--clickable:hover {
+  background: rgba(111, 207, 151, 0.12);
+}
+
+.merge-image-popup {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  cursor: zoom-out;
+}
+
+.merge-image-popup-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+  background: #111;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+.merge-image-popup-panel img {
+  max-width: min(600px, 80vw);
+  max-height: min(600px, 75vh);
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.merge-image-popup-caption {
+  font-size: 13px;
+  color: var(--text);
+}
+
 .merge-preview-child-list {
   margin: 8px 0 0;
   padding-left: 18px;
@@ -3177,6 +3235,56 @@ button,
 
 .review-star--active {
   transform: scale(1.05);
+}
+
+.review-star--zero {
+  font-size: 0.8rem;
+  font-weight: 700;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid #5a5a5a;
+  color: #8a8a8a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.review-star--zero-active {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--bg);
+}
+
+.review-rating-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.review-rating-status--unset {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
+.review-rating-status--zero {
+  color: var(--bg);
+  background: var(--text);
+  border-color: var(--text);
+}
+
+.review-rating-status--red {
+  color: #fff;
+  background: #c94c4c;
+  border-color: #c94c4c;
+}
+
+.review-rating-status--set {
+  color: #f5c542;
+  border-color: rgba(245, 197, 66, 0.6);
 }
 
 .review-image-preview {

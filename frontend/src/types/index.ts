@@ -246,6 +246,10 @@ export interface CharacterLinkCandidate {
   post_count: number;
   similarity_score: number;
   linkable: boolean;
+  review_status: string | null;
+  rating: number | null;
+  image_count: number;
+  cover_image_path: string | null;
 }
 
 export interface CharacterLinkResult {
@@ -456,6 +460,7 @@ export interface LinkableCharacterSummary {
 export type CatalogReviewFilterStatus =
   | "pending"
   | "completed"
+  | "completed_recent"
   | "all"
   | "needs_check"
   | "triage_fast"

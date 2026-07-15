@@ -180,6 +180,11 @@ class CharacterLinkCandidate(BaseModel):
     post_count: int = 0
     similarity_score: float = 0.0
     linkable: bool = True
+    review_status: str | None = None
+    rating: int | None = None
+    image_count: int = 0
+    # completed 항목의 카탈로그 커버 이미지 경로. 클릭 시 미리보기 팝업에 사용한다.
+    cover_image_path: str | None = None
 
 
 class CharacterLinkCandidateListResponse(BaseModel):

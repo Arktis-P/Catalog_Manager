@@ -79,6 +79,17 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
     clearLastError: clearRegenerateError,
   } = useReviewRegenerateJobs();
 
+  // loadReviews의 useCallback 의존성을 늘리지 않고(불필요한 재조회 방지) 최신
+  // 항목/재생성 상태를 참조하기 위한 ref.
+  const itemsRef = useRef<CatalogReviewItem[]>([]);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+  const regenCheckRef = useRef(isCharacterRegenerating);
+  useEffect(() => {
+    regenCheckRef.current = isCharacterRegenerating;
+  }, [isCharacterRegenerating]);
+
   useEffect(() => {
     void api.getSettings().then((settings) => {
       setThumbSize(settings.review_thumbnail_size);
@@ -96,11 +107,21 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
         skip,
         limit: PAGE_SIZE,
       });
-      setItems(response.items);
+      // 재생성 대기/진행 중인 항목은 이미지가 비어 있어 목록 응답에서 빠질 수 있으므로,
+      // 재생성이 모두 끝날 때까지 기존 위치에 그대로 유지한다(완료 시 결과로 교체됨).
+      const fetchedIds = new Set(response.items.map((item) => item.id));
+      const kept = itemsRef.current
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => !fetchedIds.has(item.id) && regenCheckRef.current(item.id, "global"));
+      const merged = [...response.items];
+      for (const { item, index } of kept) {
+        merged.splice(Math.min(index, merged.length), 0, item);
+      }
+      setItems(merged);
       setTotal(response.total);
       let nextFocus = 0;
       if (pendingCharacterId) {
-        const found = response.items.findIndex((item) => item.id === pendingCharacterId);
+        const found = merged.findIndex((item) => item.id === pendingCharacterId);
         if (found >= 0) {
           nextFocus = found;
         }
@@ -110,9 +131,7 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
       // 병합 등으로 인한 재조회 시 이미 사용자가 편집해둔 초안(레이팅 등)을 잃지 않도록
       // 기존 draft가 있으면 그대로 유지하고, 새로 로드된 항목에만 기본값을 만든다.
       setDrafts((current) =>
-        Object.fromEntries(
-          response.items.map((item) => [item.id, current[item.id] ?? createDraftForItem(item)]),
-        ),
+        Object.fromEntries(merged.map((item) => [item.id, current[item.id] ?? createDraftForItem(item)])),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "카탈로그 검수 목록을 불러오지 못했습니다.");
@@ -517,6 +536,7 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
           >
             <option value="pending">Pending</option>
             <option value="completed">Completed</option>
+            <option value="completed_recent">최근 완료순</option>
             <option value="all">All with images</option>
           </select>
         </div>

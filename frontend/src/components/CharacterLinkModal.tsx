@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import type { CharacterLinkCandidate, LinkableCharacterSummary } from "../types";
+import { pendingReviewImageUrl } from "../utils/reviewImages";
+
+const CANDIDATE_PREVIEW_SIZE = 600;
 
 type LinkMode = "as_child" | "as_parent";
 
@@ -21,6 +24,7 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewCandidate, setPreviewCandidate] = useState<CharacterLinkCandidate | null>(null);
 
   const effectiveMode: LinkMode = canBeChild ? mode : "as_parent";
 
@@ -117,6 +121,10 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
+        if (previewCandidate) {
+          setPreviewCandidate(null);
+          return;
+        }
         handleClose();
         return;
       }
@@ -143,7 +151,7 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
     };
     window.addEventListener("keydown", onKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, [alreadyLinked, candidates, isSubmitDisabled, selectedId, submitting]);
+  }, [alreadyLinked, candidates, isSubmitDisabled, previewCandidate, selectedId, submitting]);
 
   return (
     <div className="modal-backdrop" onClick={handleClose}>
@@ -254,6 +262,32 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
                                 ? ` · match ${Math.round(candidate.similarity_score * 100)}%`
                                 : ""}
                             </span>
+                            {candidate.review_status === "completed" ? (
+                              <span
+                                className={`merge-candidate-badge merge-candidate-badge--completed${
+                                  candidate.cover_image_path ? " merge-candidate-badge--clickable" : ""
+                                }`}
+                                role={candidate.cover_image_path ? "button" : undefined}
+                                title={
+                                  candidate.cover_image_path
+                                    ? "카탈로그에 표시 중 · 클릭하면 선택된 이미지를 크게 봅니다"
+                                    : "카탈로그 선택 완료 (표시 이미지 없음)"
+                                }
+                                onClick={(event) => {
+                                  if (!candidate.cover_image_path) return;
+                                  event.stopPropagation();
+                                  setPreviewCandidate(candidate);
+                                }}
+                              >
+                                완료
+                                {typeof candidate.rating === "number" ? ` ★${candidate.rating}` : ""}
+                                {candidate.cover_image_path ? " · 이미지" : ""}
+                              </span>
+                            ) : candidate.image_count > 0 ? (
+                              <span className="merge-candidate-badge" title="이미지는 생성됐지만 아직 리뷰 미완료">
+                                생성됨 {candidate.image_count}장
+                              </span>
+                            ) : null}
                           </button>
                         );
                       })
@@ -287,6 +321,31 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
           </div>
         </div>
       </div>
+      {previewCandidate?.cover_image_path ? (
+        <div
+          className="merge-image-popup"
+          onClick={(event) => {
+            event.stopPropagation();
+            setPreviewCandidate(null);
+          }}
+        >
+          <div className="merge-image-popup-panel">
+            <div className="merge-image-popup-caption">
+              {previewCandidate.display_name || previewCandidate.character_tag}
+              {typeof previewCandidate.rating === "number" ? ` · ★${previewCandidate.rating}` : ""}
+            </div>
+            <img
+              src={
+                pendingReviewImageUrl(previewCandidate.cover_image_path, {
+                  thumbnail: true,
+                  thumbSize: CANDIDATE_PREVIEW_SIZE,
+                }) ?? undefined
+              }
+              alt={previewCandidate.character_tag}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
