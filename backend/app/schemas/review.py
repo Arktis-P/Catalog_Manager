@@ -94,6 +94,14 @@ class CatalogReviewCompleteRequest(BaseModel):
     selected_tags: str | None = None
 
 
+class V2ReviewSaveRequest(BaseModel):
+    cover_image_id: int | None = None
+    gender: str | None = None
+    rating: int | None = Field(default=None, ge=-1, le=6)
+    base_prompt: str | None = None
+    selected_tags: str | None = None
+
+
 class CatalogReviewCompleteResponse(BaseModel):
     id: int
     review_status: str
@@ -198,3 +206,80 @@ class GlobalCatalogReviewItemResponse(BaseModel):
 class GlobalCatalogReviewListResponse(BaseModel):
     items: list[GlobalCatalogReviewItemResponse]
     total: int
+
+
+class V2ReviewImageResponse(BaseModel):
+    id: int
+    image_path: str
+    auto_status: str | None = None
+    cover_score: float | None = None
+    hair_match: bool | None = None
+    eye_match: bool | None = None
+    gender_pred: str | None = None
+    quality_status: str | None = None
+    quality_score: float | None = None
+    quality_reasons: str | None = None
+    identity_status: str | None = None
+    character_confidence: float | None = None
+    hair_color_confidence: float | None = None
+    conflicting_character_tag: str | None = None
+    conflicting_character_confidence: float | None = None
+    identity_reasons: str | None = None
+    suggested_multicolor_tags: str | None = None
+    is_provisional: bool = False
+    is_rejected: bool = False
+    is_cover: bool = False
+
+
+class V2ReviewCharacterResponse(BaseModel):
+    id: int
+    character_tag: str
+    display_name: str
+    post_count: int
+    danbooru_wiki_url: str | None = None
+    series_ids: list[int] = Field(default_factory=list)
+    series_tags: list[str] = Field(default_factory=list)
+    multi_color_hair: str | None = None
+    hair_color: str | None = None
+    hair_shape: str | None = None
+    eye_color: str | None = None
+    feature_tags: str | None = None
+    gender: str | None = None
+    primary_hair_color: str | None = None
+    primary_hair_needs_review: bool = False
+    base_prompt: str | None = None
+    previous_base_prompt: str | None = None
+    prompt_modified: bool = False
+    first_post_at: str | None = None
+    generation_status: str
+    generation_attempts: int = 0
+    review_status: str = "pending"
+    rating: int | None = None
+    rating_stage: str = "primary"
+    selected_tags: str | None = None
+    cover_image_id: int | None = None
+    preview_image: V2ReviewImageResponse | None = None
+    images: list[V2ReviewImageResponse] = Field(default_factory=list)
+
+
+class V2ReviewCharacterListResponse(BaseModel):
+    items: list[V2ReviewCharacterResponse]
+    total: int
+
+
+class V2ReviewCompleteResponse(BaseModel):
+    id: int
+    review_status: str
+    rating: int | None = None
+    rating_stage: str = "primary"
+    gender: str | None = None
+    base_prompt: str | None = None
+    previous_base_prompt: str | None = None
+    selected_tags: str | None = None
+
+
+class V2ReviewStatsResponse(BaseModel):
+    total: int
+    pending: int = 0
+    in_progress: int = 0
+    completed: int = 0

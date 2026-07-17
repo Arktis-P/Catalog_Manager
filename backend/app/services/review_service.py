@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 
 from app.config import settings
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.models.character import Character
+from app.models.character_series_link import CharacterSeriesLink
 from app.models.global_character import GlobalCharacter
 from app.models.global_character_image import GlobalCharacterImage
 from app.models.global_character_review import GlobalCharacterReview
@@ -472,6 +473,218 @@ class ReviewService:
             )
         items = query.order_by(*ordering).offset(skip).limit(limit).all()
         return items, total
+
+    def list_v2_review_characters(
+        self,
+        *,
+        review_status: str | None = None,
+        rating: str | None = None,
+        quality_status: str | None = None,
+        identity_status: str | None = None,
+        generation_status: str | None = None,
+        gender: str | None = None,
+        series_id: int | None = None,
+        multicolor: str | None = None,
+        prompt_modified: bool | None = None,
+        search: str | None = None,
+        skip: int = 0,
+        limit: int = 30,
+    ) -> tuple[list[GlobalCharacter], int]:
+        query = (
+            self.db.query(GlobalCharacter)
+            .outerjoin(GlobalCharacterReview, GlobalCharacterReview.global_character_id == GlobalCharacter.id)
+            .options(
+                joinedload(GlobalCharacter.images),
+                joinedload(GlobalCharacter.review),
+                joinedload(GlobalCharacter.parent),
+                selectinload(GlobalCharacter.children),
+                selectinload(GlobalCharacter.series_links).joinedload(CharacterSeriesLink.series),
+            )
+        )
+
+        if review_status:
+            if review_status == "pending":
+                query = query.filter(
+                    or_(
+                        GlobalCharacterReview.id.is_(None),
+                        GlobalCharacterReview.review_status == "pending",
+                    )
+                )
+            else:
+                query = query.filter(GlobalCharacterReview.review_status == review_status)
+
+        if rating:
+            if rating == "unrated":
+                query = query.filter(
+                    or_(GlobalCharacterReview.id.is_(None), GlobalCharacterReview.rating.is_(None))
+                )
+            else:
+                try:
+                    rating_value = int(rating)
+                except ValueError as exc:
+                    raise ValueError("rating must be an integer or 'unrated'") from exc
+                if rating_value not in (-1, 0, 1, 2, 3, 4, 5, 6):
+                    raise ValueError("rating must be between -1 and 6")
+                query = query.filter(GlobalCharacterReview.rating == rating_value)
+
+        if quality_status:
+            query = query.filter(
+                exists(
+                    select(1).where(
+                        GlobalCharacterImage.global_character_id == GlobalCharacter.id,
+                        GlobalCharacterImage.quality_status == quality_status,
+                        GlobalCharacterImage.is_rejected.is_(False),
+                    )
+                )
+            )
+        if identity_status:
+            query = query.filter(
+                exists(
+                    select(1).where(
+                        GlobalCharacterImage.global_character_id == GlobalCharacter.id,
+                        GlobalCharacterImage.identity_status == identity_status,
+                        GlobalCharacterImage.is_rejected.is_(False),
+                    )
+                )
+            )
+        if generation_status:
+            query = query.filter(GlobalCharacter.generation_status == generation_status)
+        if gender:
+            normalized_gender = normalize_gender(gender) or gender
+            query = query.filter(
+                or_(
+                    GlobalCharacterReview.gender == normalized_gender,
+                    GlobalCharacter.gender == normalized_gender,
+                )
+            )
+        if series_id is not None:
+            query = query.join(
+                CharacterSeriesLink,
+                CharacterSeriesLink.global_character_id == GlobalCharacter.id,
+            ).filter(CharacterSeriesLink.series_id == series_id)
+        if multicolor == "has":
+            query = query.filter(GlobalCharacter.multi_color_hair.is_not(None), GlobalCharacter.multi_color_hair != "")
+        elif multicolor == "suggested":
+            query = query.filter(
+                exists(
+                    select(1).where(
+                        GlobalCharacterImage.global_character_id == GlobalCharacter.id,
+                        GlobalCharacterImage.suggested_multicolor_tags.is_not(None),
+                        GlobalCharacterImage.suggested_multicolor_tags != "",
+                        GlobalCharacterImage.is_rejected.is_(False),
+                    )
+                )
+            )
+        if prompt_modified is True:
+            query = query.filter(
+                GlobalCharacter.previous_base_prompt.is_not(None),
+                GlobalCharacter.base_prompt != GlobalCharacter.previous_base_prompt,
+            )
+        elif prompt_modified is False:
+            query = query.filter(
+                or_(
+                    GlobalCharacter.previous_base_prompt.is_(None),
+                    GlobalCharacter.base_prompt == GlobalCharacter.previous_base_prompt,
+                )
+            )
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    GlobalCharacter.character_tag.ilike(pattern),
+                    GlobalCharacter.display_name.ilike(pattern),
+                )
+            )
+
+        query = query.distinct()
+        total = query.order_by(None).count()
+        items = (
+            query.order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.character_tag.asc(), GlobalCharacter.id.asc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+        return items, total
+
+    def save_v2_review_character(
+        self,
+        character_id: int,
+        *,
+        review_status: str,
+        cover_image_id: int | None = None,
+        gender: str | None = None,
+        rating: int | None = None,
+        base_prompt: str | None = None,
+        selected_tags: str | None = None,
+    ) -> GlobalCharacter:
+        if review_status not in ("in_progress", "completed"):
+            raise ValueError("Invalid review status")
+        if rating is not None and rating not in (-1, 0, 1, 2, 3, 4, 5, 6):
+            raise ValueError("rating must be between -1 and 6")
+
+        character = (
+            self.db.query(GlobalCharacter)
+            .options(joinedload(GlobalCharacter.images), joinedload(GlobalCharacter.review))
+            .filter(GlobalCharacter.id == character_id)
+            .first()
+        )
+        if not character:
+            raise ValueError("Character not found")
+
+        review = character.review
+        if not review:
+            review = GlobalCharacterReview(global_character_id=character.id)
+            self.db.add(review)
+            character.review = review
+
+        normalized_gender = normalize_gender(gender) if gender else None
+        if normalized_gender:
+            character.gender = normalized_gender
+            review.gender = normalized_gender
+
+        if base_prompt is not None:
+            next_prompt = base_prompt.strip() or None
+            if character.base_prompt != next_prompt:
+                character.previous_base_prompt = character.base_prompt
+                character.base_prompt = next_prompt
+
+        if cover_image_id is not None:
+            cover_image = next(
+                (image for image in character.images if image.id == cover_image_id and not image.is_rejected),
+                None,
+            )
+            if not cover_image:
+                raise ValueError("Cover image not found or rejected")
+            review.cover_image_id = cover_image_id
+            for image in character.images:
+                image.is_cover = image.id == cover_image_id
+
+        review.rating = rating
+        review.selected_tags = selected_tags
+        review.final_prompt = character.base_prompt
+        review.review_status = review_status
+        review.rating_stage = "primary"
+
+        commit_db_session(self.db)
+        self.db.refresh(character)
+        return character
+
+    def get_v2_review_stats(self) -> dict[str, int]:
+        rows = (
+            self.db.query(
+                func.coalesce(GlobalCharacterReview.review_status, "pending").label("status"),
+                func.count(GlobalCharacter.id),
+            )
+            .outerjoin(GlobalCharacterReview, GlobalCharacterReview.global_character_id == GlobalCharacter.id)
+            .group_by("status")
+            .all()
+        )
+        stats = {"total": 0, "pending": 0, "in_progress": 0, "completed": 0}
+        for status, count in rows:
+            stats["total"] += count
+            if status in stats:
+                stats[status] = count
+        return stats
 
     def complete_catalog_review_global(
         self,

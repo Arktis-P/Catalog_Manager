@@ -21,6 +21,12 @@ from app.schemas.review import (
     GlobalCatalogReviewItemResponse,
     GlobalCatalogReviewListResponse,
     GlobalCatalogReviewPurgeUnselectedResponse,
+    V2ReviewCharacterListResponse,
+    V2ReviewCharacterResponse,
+    V2ReviewCompleteResponse,
+    V2ReviewImageResponse,
+    V2ReviewSaveRequest,
+    V2ReviewStatsResponse,
     ReviewRegenerateJobListResponse,
     ReviewRegenerateJobResponse,
 )
@@ -63,6 +69,73 @@ def _to_catalog_item(character) -> CatalogReviewItemResponse:
     return to_catalog_item(character)
 
 
+def _to_v2_review_image(image) -> V2ReviewImageResponse:
+    return V2ReviewImageResponse(
+        id=image.id,
+        image_path=image.image_path,
+        auto_status=image.auto_status,
+        cover_score=image.cover_score,
+        hair_match=image.hair_match,
+        eye_match=image.eye_match,
+        gender_pred=image.gender_pred,
+        quality_status=image.quality_status,
+        quality_score=image.quality_score,
+        quality_reasons=image.quality_reasons,
+        identity_status=image.identity_status,
+        character_confidence=image.character_confidence,
+        hair_color_confidence=image.hair_color_confidence,
+        conflicting_character_tag=image.conflicting_character_tag,
+        conflicting_character_confidence=image.conflicting_character_confidence,
+        identity_reasons=image.identity_reasons,
+        suggested_multicolor_tags=image.suggested_multicolor_tags,
+        is_provisional=image.is_provisional,
+        is_rejected=image.is_rejected,
+        is_cover=image.is_cover,
+    )
+
+
+def _to_v2_review_character(character) -> V2ReviewCharacterResponse:
+    review = character.review
+    visible_images = sorted(
+        [image for image in character.images if not image.is_rejected],
+        key=lambda image: (not image.is_cover, -(image.cover_score or 0), image.id),
+    )
+    preview_image = visible_images[0] if visible_images else None
+    series_links = [link for link in character.series_links if link.series_id is not None]
+    return V2ReviewCharacterResponse(
+        id=character.id,
+        character_tag=character.character_tag,
+        display_name=character.display_name or character.character_tag,
+        post_count=character.post_count,
+        danbooru_wiki_url=ReviewService.build_wiki_url(character.character_tag),
+        series_ids=[link.series_id for link in series_links],
+        series_tags=[link.series.series_tag for link in series_links if link.series],
+        multi_color_hair=character.multi_color_hair,
+        hair_color=character.hair_color,
+        hair_shape=character.hair_shape,
+        eye_color=character.eye_color,
+        feature_tags=character.feature_tags,
+        gender=normalize_gender(review.gender if review and review.gender else character.gender),
+        primary_hair_color=character.primary_hair_color,
+        primary_hair_needs_review=character.primary_hair_needs_review,
+        base_prompt=character.base_prompt,
+        previous_base_prompt=character.previous_base_prompt,
+        prompt_modified=bool(
+            character.previous_base_prompt is not None and character.base_prompt != character.previous_base_prompt
+        ),
+        first_post_at=character.first_post_at.isoformat() if character.first_post_at else None,
+        generation_status=character.generation_status,
+        generation_attempts=character.generation_attempts,
+        review_status=review.review_status if review else "pending",
+        rating=review.rating if review else None,
+        rating_stage=review.rating_stage if review else "primary",
+        selected_tags=review.selected_tags if review else None,
+        cover_image_id=review.cover_image_id if review else None,
+        preview_image=_to_v2_review_image(preview_image) if preview_image else None,
+        images=[_to_v2_review_image(image) for image in visible_images],
+    )
+
+
 def _job_to_response(job: ReviewRegenerateJobState) -> ReviewRegenerateJobResponse:
     result = None
     if job.result:
@@ -87,6 +160,113 @@ def _job_to_response(job: ReviewRegenerateJobState) -> ReviewRegenerateJobRespon
         started_at=job.started_at,
         finished_at=job.finished_at,
     )
+
+
+@router.get("/v2/characters", response_model=V2ReviewCharacterListResponse)
+def list_v2_review_characters(
+    review_status: str | None = Query(default=None, pattern="^(pending|in_progress|completed)$"),
+    rating: str | None = None,
+    quality_status: str | None = None,
+    identity_status: str | None = None,
+    generation_status: str | None = None,
+    gender: str | None = None,
+    series_id: int | None = Query(default=None, ge=1),
+    multicolor: str | None = Query(default=None, pattern="^(has|suggested)$"),
+    prompt_modified: bool | None = None,
+    search: str | None = None,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=30, ge=1, le=100),
+    service: ReviewService = Depends(get_review_service),
+):
+    try:
+        items, total = service.list_v2_review_characters(
+            review_status=review_status,
+            rating=rating,
+            quality_status=quality_status,
+            identity_status=identity_status,
+            generation_status=generation_status,
+            gender=gender,
+            series_id=series_id,
+            multicolor=multicolor,
+            prompt_modified=prompt_modified,
+            search=search,
+            skip=skip,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return V2ReviewCharacterListResponse(
+        items=[_to_v2_review_character(character) for character in items],
+        total=total,
+    )
+
+
+@router.post("/v2/characters/{character_id}/complete", response_model=V2ReviewCompleteResponse)
+def complete_v2_review_character(
+    character_id: int,
+    payload: V2ReviewSaveRequest,
+    service: ReviewService = Depends(get_review_service),
+):
+    try:
+        character = service.save_v2_review_character(
+            character_id,
+            review_status="completed",
+            cover_image_id=payload.cover_image_id,
+            gender=payload.gender,
+            rating=payload.rating,
+            base_prompt=payload.base_prompt,
+            selected_tags=payload.selected_tags,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    review = character.review
+    return V2ReviewCompleteResponse(
+        id=character.id,
+        review_status=review.review_status,
+        rating=review.rating,
+        rating_stage=review.rating_stage,
+        gender=normalize_gender(review.gender) if review.gender else None,
+        base_prompt=character.base_prompt,
+        previous_base_prompt=character.previous_base_prompt,
+        selected_tags=review.selected_tags,
+    )
+
+
+@router.post("/v2/characters/{character_id}/save", response_model=V2ReviewCompleteResponse)
+@router.patch("/v2/characters/{character_id}", response_model=V2ReviewCompleteResponse)
+def save_v2_review_character(
+    character_id: int,
+    payload: V2ReviewSaveRequest,
+    service: ReviewService = Depends(get_review_service),
+):
+    try:
+        character = service.save_v2_review_character(
+            character_id,
+            review_status="in_progress",
+            cover_image_id=payload.cover_image_id,
+            gender=payload.gender,
+            rating=payload.rating,
+            base_prompt=payload.base_prompt,
+            selected_tags=payload.selected_tags,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    review = character.review
+    return V2ReviewCompleteResponse(
+        id=character.id,
+        review_status=review.review_status,
+        rating=review.rating,
+        rating_stage=review.rating_stage,
+        gender=normalize_gender(review.gender) if review.gender else None,
+        base_prompt=character.base_prompt,
+        previous_base_prompt=character.previous_base_prompt,
+        selected_tags=review.selected_tags,
+    )
+
+
+@router.get("/v2/stats", response_model=V2ReviewStatsResponse)
+def get_v2_review_stats(service: ReviewService = Depends(get_review_service)):
+    return V2ReviewStatsResponse(**service.get_v2_review_stats())
 
 
 @router.get("/appearance", response_model=AppearanceReviewListResponse)
