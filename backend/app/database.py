@@ -38,6 +38,7 @@ def get_db() -> Generator[Session, None, None]:
 
 def init_db() -> None:
     from app.models import (  # noqa: F401
+        appearance_tag_relevance,
         character,
         character_series_link,
         generation_job,
@@ -62,6 +63,7 @@ def init_db() -> None:
     _migrate_series_columns()
     _migrate_character_columns()
     _migrate_global_character_columns()
+    _migrate_global_character_image_columns()
     _migrate_review_columns()
 
 
@@ -93,6 +95,62 @@ def _migrate_global_character_columns() -> None:
     existing = {column["name"] for column in inspector.get_columns("global_characters")}
     migrations = {
         "parent_character_id": "ALTER TABLE global_characters ADD COLUMN parent_character_id INTEGER",
+        "primary_hair_color": "ALTER TABLE global_characters ADD COLUMN primary_hair_color VARCHAR(100)",
+        "primary_hair_needs_review": (
+            "ALTER TABLE global_characters ADD COLUMN primary_hair_needs_review BOOLEAN NOT NULL DEFAULT 0"
+        ),
+        "base_prompt": "ALTER TABLE global_characters ADD COLUMN base_prompt TEXT",
+        "previous_base_prompt": "ALTER TABLE global_characters ADD COLUMN previous_base_prompt TEXT",
+        "prompt_revision_reason": "ALTER TABLE global_characters ADD COLUMN prompt_revision_reason TEXT",
+        "prompt_revision_level": "ALTER TABLE global_characters ADD COLUMN prompt_revision_level INTEGER",
+        "first_post_at": "ALTER TABLE global_characters ADD COLUMN first_post_at DATETIME",
+        "generation_status": (
+            "ALTER TABLE global_characters ADD COLUMN generation_status VARCHAR(50) NOT NULL DEFAULT 'not_generated'"
+        ),
+        "generation_attempts": (
+            "ALTER TABLE global_characters ADD COLUMN generation_attempts INTEGER NOT NULL DEFAULT 0"
+        ),
+    }
+    with engine.begin() as connection:
+        for column_name, statement in migrations.items():
+            if column_name not in existing:
+                connection.execute(text(statement))
+
+
+def _migrate_global_character_image_columns() -> None:
+    inspector = inspect(engine)
+    if "global_character_images" not in inspector.get_table_names():
+        return
+
+    existing = {column["name"] for column in inspector.get_columns("global_character_images")}
+    migrations = {
+        "quality_status": "ALTER TABLE global_character_images ADD COLUMN quality_status VARCHAR(50)",
+        "quality_score": "ALTER TABLE global_character_images ADD COLUMN quality_score FLOAT",
+        "quality_reasons": "ALTER TABLE global_character_images ADD COLUMN quality_reasons TEXT",
+        "quality_checked_at": "ALTER TABLE global_character_images ADD COLUMN quality_checked_at DATETIME",
+        "quality_checker_version": (
+            "ALTER TABLE global_character_images ADD COLUMN quality_checker_version VARCHAR(50)"
+        ),
+        "identity_status": "ALTER TABLE global_character_images ADD COLUMN identity_status VARCHAR(50)",
+        "character_confidence": "ALTER TABLE global_character_images ADD COLUMN character_confidence FLOAT",
+        "hair_color_confidence": "ALTER TABLE global_character_images ADD COLUMN hair_color_confidence FLOAT",
+        "conflicting_character_tag": (
+            "ALTER TABLE global_character_images ADD COLUMN conflicting_character_tag VARCHAR(255)"
+        ),
+        "conflicting_character_confidence": (
+            "ALTER TABLE global_character_images ADD COLUMN conflicting_character_confidence FLOAT"
+        ),
+        "identity_reasons": "ALTER TABLE global_character_images ADD COLUMN identity_reasons TEXT",
+        "suggested_multicolor_tags": (
+            "ALTER TABLE global_character_images ADD COLUMN suggested_multicolor_tags TEXT"
+        ),
+        "identity_checked_at": "ALTER TABLE global_character_images ADD COLUMN identity_checked_at DATETIME",
+        "identity_checker_version": (
+            "ALTER TABLE global_character_images ADD COLUMN identity_checker_version VARCHAR(50)"
+        ),
+        "is_provisional": (
+            "ALTER TABLE global_character_images ADD COLUMN is_provisional BOOLEAN NOT NULL DEFAULT 0"
+        ),
     }
     with engine.begin() as connection:
         for column_name, statement in migrations.items():
@@ -111,6 +169,20 @@ def _migrate_review_columns() -> None:
             existing = {column["name"] for column in inspector.get_columns("global_character_reviews")}
             if "selected_tags" not in existing:
                 connection.execute(text("ALTER TABLE global_character_reviews ADD COLUMN selected_tags TEXT"))
+            if "review_status" not in existing:
+                connection.execute(
+                    text(
+                        "ALTER TABLE global_character_reviews "
+                        "ADD COLUMN review_status VARCHAR(50) NOT NULL DEFAULT 'pending'"
+                    )
+                )
+            if "rating_stage" not in existing:
+                connection.execute(
+                    text(
+                        "ALTER TABLE global_character_reviews "
+                        "ADD COLUMN rating_stage VARCHAR(50) NOT NULL DEFAULT 'primary'"
+                    )
+                )
 
 
 def _migrate_series_columns() -> None:

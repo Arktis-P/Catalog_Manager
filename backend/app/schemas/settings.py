@@ -17,6 +17,16 @@ class SettingsResponse(BaseModel):
     hf_wd_model: str = ""
     notification_mode: str = "each"
     notification_display: str = "toast"
+    v2_relevance_min_cooccurrence: int = 10
+    v2_relevance_threshold_hair_shape: float = 0.35
+    v2_relevance_threshold_multicolor: float = 0.30
+    v2_relevance_threshold_eye_color: float = 0.35
+    v2_relevance_threshold_feature: float = 0.20
+    v2_relevance_small_sample_bonus: float = 0.10
+    v2_relevance_min_posts_auto_confirm: int = 20
+    v2_quality_retry_max: int = 3
+    v2_recent_character_cutoff: str = "2025-05-01"
+    v2_feature_tag_whitelist: str = "glasses,horns,eyepatch,dark_skin,scar,animal_ears,halo,wings,tail"
 
 
 class SettingsUpdateRequest(BaseModel):

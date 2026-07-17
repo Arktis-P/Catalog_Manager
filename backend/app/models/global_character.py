@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -33,6 +33,15 @@ class GlobalCharacter(Base):
     eye_color: Mapped[str | None] = mapped_column(Text, nullable=True)
     feature_tags: Mapped[str | None] = mapped_column(Text, nullable=True)
     gender: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    primary_hair_color: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    primary_hair_needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    base_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    previous_base_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_revision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_revision_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    first_post_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    generation_status: Mapped[str] = mapped_column(String(50), nullable=False, default="not_generated", index=True)
+    generation_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # 의상 차이 등으로 태그가 분리된 동일 캐릭터를 묶기 위한 자기참조 부모 링크.
     # Series의 parent_series_id와 동일하게 1단계 깊이만 허용한다 (부모는 자식을 가질 수 없음).
@@ -63,6 +72,11 @@ class GlobalCharacter(Base):
     )
     review = relationship(
         "GlobalCharacterReview", back_populates="global_character", uselist=False, cascade="all, delete-orphan"
+    )
+    appearance_relevances = relationship(
+        "CharacterAppearanceTagRelevance",
+        back_populates="global_character",
+        cascade="all, delete-orphan",
     )
     parent = relationship(
         "GlobalCharacter", remote_side=[id], back_populates="children", foreign_keys=[parent_character_id]

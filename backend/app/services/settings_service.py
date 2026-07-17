@@ -26,8 +26,28 @@ SETTING_NOTIFICATION_MODE = "notification_mode"
 VALID_NOTIFICATION_MODES = {"each", "all_done", "none"}
 DEFAULT_NOTIFICATION_MODE = "each"
 SETTING_NOTIFICATION_DISPLAY = "notification_display"
+SETTING_V2_RELEVANCE_MIN_COOCCURRENCE = "v2_relevance_min_cooccurrence"
+SETTING_V2_RELEVANCE_THRESHOLD_HAIR_SHAPE = "v2_relevance_threshold_hair_shape"
+SETTING_V2_RELEVANCE_THRESHOLD_MULTICOLOR = "v2_relevance_threshold_multicolor"
+SETTING_V2_RELEVANCE_THRESHOLD_EYE_COLOR = "v2_relevance_threshold_eye_color"
+SETTING_V2_RELEVANCE_THRESHOLD_FEATURE = "v2_relevance_threshold_feature"
+SETTING_V2_RELEVANCE_SMALL_SAMPLE_BONUS = "v2_relevance_small_sample_bonus"
+SETTING_V2_RELEVANCE_MIN_POSTS_AUTO_CONFIRM = "v2_relevance_min_posts_auto_confirm"
+SETTING_V2_QUALITY_RETRY_MAX = "v2_quality_retry_max"
+SETTING_V2_RECENT_CHARACTER_CUTOFF = "v2_recent_character_cutoff"
+SETTING_V2_FEATURE_TAG_WHITELIST = "v2_feature_tag_whitelist"
 VALID_NOTIFICATION_DISPLAYS = {"toast", "browser", "both"}
 DEFAULT_NOTIFICATION_DISPLAY = "toast"
+DEFAULT_V2_RELEVANCE_MIN_COOCCURRENCE = 10
+DEFAULT_V2_RELEVANCE_THRESHOLD_HAIR_SHAPE = 0.35
+DEFAULT_V2_RELEVANCE_THRESHOLD_MULTICOLOR = 0.30
+DEFAULT_V2_RELEVANCE_THRESHOLD_EYE_COLOR = 0.35
+DEFAULT_V2_RELEVANCE_THRESHOLD_FEATURE = 0.20
+DEFAULT_V2_RELEVANCE_SMALL_SAMPLE_BONUS = 0.10
+DEFAULT_V2_RELEVANCE_MIN_POSTS_AUTO_CONFIRM = 20
+DEFAULT_V2_QUALITY_RETRY_MAX = 3
+DEFAULT_V2_RECENT_CHARACTER_CUTOFF = "2025-05-01"
+DEFAULT_V2_FEATURE_TAG_WHITELIST = "glasses,horns,eyepatch,dark_skin,scar,animal_ears,halo,wings,tail"
 DEFAULT_NAIA_BASE_URL = "http://127.0.0.1:7243"
 DEFAULT_IMAGES_PER_CHARACTER = 2
 DEFAULT_REVIEW_THUMBNAIL_SIZE = 384
@@ -197,6 +217,24 @@ class SettingsService:
         self._set_setting(SETTING_NOTIFICATION_DISPLAY, value)
         return value
 
+    def _get_int_setting(self, key: str, default: int) -> int:
+        raw = self._get_setting(key)
+        if not raw:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+
+    def _get_float_setting(self, key: str, default: float) -> float:
+        raw = self._get_setting(key)
+        if not raw:
+            return default
+        try:
+            return float(raw)
+        except ValueError:
+            return default
+
     def get_generation_prompt_config(self) -> GenerationPromptConfig:
         defaults = default_generation_prompt_config()
         return GenerationPromptConfig(
@@ -238,4 +276,32 @@ class SettingsService:
             "hf_wd_model": self.get_hf_wd_model(),
             "notification_mode": self.get_notification_mode(),
             "notification_display": self.get_notification_display(),
+            "v2_relevance_min_cooccurrence": self._get_int_setting(
+                SETTING_V2_RELEVANCE_MIN_COOCCURRENCE, DEFAULT_V2_RELEVANCE_MIN_COOCCURRENCE
+            ),
+            "v2_relevance_threshold_hair_shape": self._get_float_setting(
+                SETTING_V2_RELEVANCE_THRESHOLD_HAIR_SHAPE, DEFAULT_V2_RELEVANCE_THRESHOLD_HAIR_SHAPE
+            ),
+            "v2_relevance_threshold_multicolor": self._get_float_setting(
+                SETTING_V2_RELEVANCE_THRESHOLD_MULTICOLOR, DEFAULT_V2_RELEVANCE_THRESHOLD_MULTICOLOR
+            ),
+            "v2_relevance_threshold_eye_color": self._get_float_setting(
+                SETTING_V2_RELEVANCE_THRESHOLD_EYE_COLOR, DEFAULT_V2_RELEVANCE_THRESHOLD_EYE_COLOR
+            ),
+            "v2_relevance_threshold_feature": self._get_float_setting(
+                SETTING_V2_RELEVANCE_THRESHOLD_FEATURE, DEFAULT_V2_RELEVANCE_THRESHOLD_FEATURE
+            ),
+            "v2_relevance_small_sample_bonus": self._get_float_setting(
+                SETTING_V2_RELEVANCE_SMALL_SAMPLE_BONUS, DEFAULT_V2_RELEVANCE_SMALL_SAMPLE_BONUS
+            ),
+            "v2_relevance_min_posts_auto_confirm": self._get_int_setting(
+                SETTING_V2_RELEVANCE_MIN_POSTS_AUTO_CONFIRM, DEFAULT_V2_RELEVANCE_MIN_POSTS_AUTO_CONFIRM
+            ),
+            "v2_quality_retry_max": self._get_int_setting(
+                SETTING_V2_QUALITY_RETRY_MAX, DEFAULT_V2_QUALITY_RETRY_MAX
+            ),
+            "v2_recent_character_cutoff": self._get_setting(SETTING_V2_RECENT_CHARACTER_CUTOFF)
+            or DEFAULT_V2_RECENT_CHARACTER_CUTOFF,
+            "v2_feature_tag_whitelist": self._get_setting(SETTING_V2_FEATURE_TAG_WHITELIST)
+            or DEFAULT_V2_FEATURE_TAG_WHITELIST,
         }
