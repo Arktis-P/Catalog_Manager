@@ -25,9 +25,16 @@ from app.schemas.character_catalog import (
     GlobalCharacterListResponse,
     GlobalCharacterResponse,
 )
+from app.schemas.tag_relevance import (
+    AppearanceTagRelevanceListResponse,
+    RelevanceCollectJobResponse,
+    RelevanceCollectStartRequest,
+)
 from app.services.character_catalog_job_manager import character_catalog_job_manager
 from app.services.character_catalog_service import CharacterCatalogService
 from app.services.character_link_service import CharacterLinkService, similarity_score
+from app.services.relevance_collect_job_manager import relevance_collect_job_manager
+from app.services.tag_relevance_service import TagRelevanceService
 
 router = APIRouter(prefix="/character-catalog", tags=["character-catalog"])
 
@@ -43,6 +50,72 @@ def get_link_service(db: Session = Depends(get_db)) -> CharacterLinkService:
 def _require_danbooru() -> None:
     if not settings.danbooru_configured:
         raise HTTPException(status_code=400, detail="Configure Danbooru credentials in input/danbooru.env first.")
+
+
+@router.post("/relevance/start", response_model=RelevanceCollectJobResponse)
+def start_relevance_collect(
+    payload: RelevanceCollectStartRequest,
+    db: Session = Depends(get_db),
+):
+    _require_danbooru()
+    if payload.character_ids is None:
+        character_ids = [
+            row[0]
+            for row in db.query(GlobalCharacter.id)
+            .order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.id.asc())
+            .all()
+        ]
+    else:
+        character_ids = list(dict.fromkeys(payload.character_ids))
+        if not character_ids:
+            raise HTTPException(status_code=400, detail="character_ids must not be empty")
+        found_ids = {
+            row[0]
+            for row in db.query(GlobalCharacter.id)
+            .filter(GlobalCharacter.id.in_(character_ids))
+            .all()
+        }
+        missing = [character_id for character_id in character_ids if character_id not in found_ids]
+        if missing:
+            raise HTTPException(status_code=404, detail=f"Character not found: {missing[0]}")
+
+    if not character_ids:
+        raise HTTPException(status_code=400, detail="No characters to collect")
+    job = relevance_collect_job_manager.start(character_ids)
+    return RelevanceCollectJobResponse.from_state(job)
+
+
+@router.get("/relevance/jobs/{job_id}", response_model=RelevanceCollectJobResponse)
+def get_relevance_collect_job(job_id: str):
+    job = relevance_collect_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Relevance collect job not found")
+    return RelevanceCollectJobResponse.from_state(job)
+
+
+@router.post("/relevance/jobs/{job_id}/cancel", response_model=RelevanceCollectJobResponse)
+def cancel_relevance_collect_job(job_id: str):
+    job = relevance_collect_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Relevance collect job not found")
+    if job.status == "cancelled":
+        return RelevanceCollectJobResponse.from_state(job)
+    if not relevance_collect_job_manager.cancel(job_id):
+        raise HTTPException(status_code=409, detail="Job cannot be cancelled")
+    job = relevance_collect_job_manager.get_job(job_id)
+    return RelevanceCollectJobResponse.from_state(job)
+
+
+@router.get(
+    "/characters/{character_id}/relevance",
+    response_model=AppearanceTagRelevanceListResponse,
+)
+def list_character_relevance(character_id: int, db: Session = Depends(get_db)):
+    exists = db.query(GlobalCharacter.id).filter(GlobalCharacter.id == character_id).first()
+    if not exists:
+        raise HTTPException(status_code=404, detail="Character not found")
+    rows = TagRelevanceService(db).list_for_character(character_id)
+    return AppearanceTagRelevanceListResponse(items=rows)
 
 
 @router.get("/characters", response_model=GlobalCharacterListResponse)
