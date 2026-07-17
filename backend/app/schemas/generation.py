@@ -119,3 +119,27 @@ class GlobalGenerationCandidateListResponse(BaseModel):
 class GlobalGenerationStartRequest(BaseModel):
     character_ids: list[int] = Field(..., min_length=1, max_length=300)
     prompt_level: int = Field(default=1, ge=1, le=5)
+
+
+class V2GenerationStartRequest(BaseModel):
+    character_ids: list[int] | None = Field(default=None, max_length=300)
+    rerun: bool = False
+
+
+class V2GenerationJobState(BaseModel):
+    job_id: str
+    status: str
+    phase: str
+    message: str
+    current: int
+    total: int
+    completed: int
+    failed: int
+    current_character_tag: str
+    errors: list[dict[str, object]] = Field(default_factory=list)
+    started_at: str
+    finished_at: str | None = None
+
+
+class V2GenerationJobListResponse(BaseModel):
+    items: list[V2GenerationJobState]

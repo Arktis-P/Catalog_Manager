@@ -17,9 +17,13 @@ from app.schemas.generation import (
     GlobalGenerationStartRequest,
     NaiaStatusResponse,
     SuggestLevelResponse,
+    V2GenerationJobListResponse,
+    V2GenerationJobState,
+    V2GenerationStartRequest,
 )
 from app.services.generation_job_manager import generation_job_manager
 from app.services.generation_service import GenerationService
+from app.services.v2_generation_job_manager import v2_generation_job_manager
 
 router = APIRouter(prefix="/generation", tags=["generation"])
 
@@ -50,9 +54,61 @@ def _job_to_schema(job) -> GenerationJobState:
     )
 
 
+def _v2_job_to_schema(job) -> V2GenerationJobState:
+    return V2GenerationJobState(
+        job_id=job.job_id,
+        status=job.status,
+        phase=job.phase,
+        message=job.message,
+        current=job.current,
+        total=job.total,
+        completed=job.completed,
+        failed=job.failed,
+        current_character_tag=job.current_character_tag,
+        errors=job.errors,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+    )
+
+
 @router.get("/naia/status", response_model=NaiaStatusResponse)
 def get_naia_status(db: Session = Depends(get_db)):
     return GenerationService(db).naia_status()
+
+
+@router.post("/v2/start", response_model=V2GenerationJobState)
+def start_v2_generation(payload: V2GenerationStartRequest):
+    job = v2_generation_job_manager.start(
+        character_ids=payload.character_ids,
+        rerun=payload.rerun,
+    )
+    return _v2_job_to_schema(job)
+
+
+@router.get("/v2/jobs", response_model=V2GenerationJobListResponse)
+def list_v2_generation_jobs():
+    return V2GenerationJobListResponse(
+        items=[_v2_job_to_schema(job) for job in v2_generation_job_manager.list_visible_jobs()]
+    )
+
+
+@router.get("/v2/jobs/{job_id}", response_model=V2GenerationJobState)
+def get_v2_generation_job(job_id: str):
+    job = v2_generation_job_manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _v2_job_to_schema(job)
+
+
+@router.post("/v2/jobs/{job_id}/cancel", response_model=V2GenerationJobState)
+def cancel_v2_generation_job(job_id: str):
+    cancelled = v2_generation_job_manager.cancel(job_id)
+    job = v2_generation_job_manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not cancelled and job.status in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="Job could not be cancelled")
+    return _v2_job_to_schema(job)
 
 
 @router.get("/characters/candidates", response_model=GlobalGenerationCandidateListResponse)
