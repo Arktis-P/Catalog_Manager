@@ -35,6 +35,11 @@ import type {
   ReviewRegenerateJob,
   ReviewRegenerateJobListResponse,
   Series,
+  V2ReviewCharacterListResponse,
+  V2ReviewCompleteResponse,
+  V2ReviewFilters,
+  V2ReviewSavePayload,
+  V2ReviewStats,
   SeriesCreatePayload,
   SeriesListResponse,
   SeriesMergeCandidate,
@@ -487,6 +492,23 @@ export const api = {
       `/review/catalog-global/purge-unselected-all${buildQuery(params)}`,
       { method: "POST" },
     ),
+
+  listV2ReviewCharacters: (params: V2ReviewFilters = {}) =>
+    request<V2ReviewCharacterListResponse>(`/review/v2/characters${buildQuery(params as Record<string, string | number | boolean | undefined>)}`),
+
+  completeV2ReviewCharacter: (characterId: number, payload: V2ReviewSavePayload) =>
+    request<V2ReviewCompleteResponse>(`/review/v2/characters/${characterId}/complete`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  saveV2ReviewCharacter: (characterId: number, payload: V2ReviewSavePayload) =>
+    request<V2ReviewCompleteResponse>(`/review/v2/characters/${characterId}/save`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  getV2ReviewStats: () => request<V2ReviewStats>("/review/v2/stats"),
 
   dismissCatalogNeedsCheck: (characterId: number) =>
     request<{ id: number; character_status: string; needs_check_reason: string | null }>(

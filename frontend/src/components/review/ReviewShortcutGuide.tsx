@@ -12,13 +12,19 @@ const TAIL_SHORTCUTS = ["q/w Danbooru", "Space 확대"] as const;
 interface ReviewShortcutGuideProps {
   includeUndo?: boolean;
   includeMerge?: boolean;
+  includeMulticolor?: boolean;
 }
 
-export function ReviewShortcutGuide({ includeUndo = false, includeMerge = false }: ReviewShortcutGuideProps) {
+export function ReviewShortcutGuide({
+  includeUndo = false,
+  includeMerge = false,
+  includeMulticolor = false,
+}: ReviewShortcutGuideProps) {
   const shortcuts = [
     ...BASE_SHORTCUTS,
     ...(includeUndo ? ["Ctrl+Z 취소"] : []),
     ...(includeMerge ? ["a Merge (부모/자식 연결)"] : []),
+    ...(includeMulticolor ? ["c Multicolor 옵션 팝업"] : []),
     ...TAIL_SHORTCUTS,
   ];
 

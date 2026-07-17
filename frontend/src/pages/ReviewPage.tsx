@@ -4,13 +4,15 @@ import { AppearanceReviewPanel } from "../components/review/AppearanceReviewPane
 import { CatalogReviewPanel } from "../components/review/CatalogReviewPanel";
 import { GlobalCatalogReviewPanel } from "../components/review/GlobalCatalogReviewPanel";
 import { ReviewRatingGuide } from "../components/review/ReviewRatingGuide";
+import { V2ReviewPanel } from "../components/review/V2ReviewPanel";
 
 export function ReviewPage() {
   const [searchParams] = useSearchParams();
   const [catalogScope, setCatalogScope] = useState<"series" | "characters">(
     searchParams.get("scope") === "series" ? "series" : "characters",
   );
-  const initialMode = searchParams.get("mode") === "appearance" ? "appearance" : "catalog";
+  const rawMode = searchParams.get("mode");
+  const initialMode = rawMode === "appearance" ? "appearance" : rawMode === "v2" ? "v2" : "catalog";
   const initialSeriesId = useMemo(() => {
     const raw = searchParams.get("series_id");
     if (!raw) {
@@ -56,6 +58,14 @@ export function ReviewPage() {
             >
               Appearance
             </Link>
+            <Link
+              className={`review-mode-tab${initialMode === "v2" ? " review-mode-tab--active" : ""}`}
+              to="/review?mode=v2"
+              role="tab"
+              aria-selected={initialMode === "v2"}
+            >
+              V2
+            </Link>
           </div>
 
           {initialMode === "catalog" ? (
@@ -86,7 +96,7 @@ export function ReviewPage() {
         </div>
       </header>
 
-      <ReviewRatingGuide />
+      {initialMode !== "v2" ? <ReviewRatingGuide /> : null}
 
       {initialMode === "catalog" ? (
         catalogScope === "series" ? (
@@ -94,6 +104,8 @@ export function ReviewPage() {
         ) : (
           <GlobalCatalogReviewPanel initialCharacterId={initialCharacterId} />
         )
+      ) : initialMode === "v2" ? (
+        <V2ReviewPanel />
       ) : (
         <AppearanceReviewPanel />
       )}

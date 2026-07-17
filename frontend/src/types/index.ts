@@ -508,6 +508,106 @@ export interface ReviewRegenerateJobListResponse {
   items: ReviewRegenerateJob[];
 }
 
+export interface V2ReviewImage {
+  id: number;
+  image_path: string;
+  auto_status: string | null;
+  cover_score: number | null;
+  hair_match: boolean | null;
+  eye_match: boolean | null;
+  gender_pred: string | null;
+  quality_status: string | null;
+  quality_score: number | null;
+  quality_reasons: string | null;
+  identity_status: string | null;
+  character_confidence: number | null;
+  hair_color_confidence: number | null;
+  conflicting_character_tag: string | null;
+  conflicting_character_confidence: number | null;
+  identity_reasons: string | null;
+  suggested_multicolor_tags: string | null;
+  is_provisional: boolean;
+  is_rejected: boolean;
+  is_cover: boolean;
+}
+
+export interface V2ReviewCharacter {
+  id: number;
+  character_tag: string;
+  display_name: string;
+  post_count: number;
+  danbooru_wiki_url: string | null;
+  series_ids: number[];
+  series_tags: string[];
+  multi_color_hair: string | null;
+  hair_color: string | null;
+  hair_shape: string | null;
+  eye_color: string | null;
+  feature_tags: string | null;
+  gender: string | null;
+  primary_hair_color: string | null;
+  primary_hair_needs_review: boolean;
+  base_prompt: string | null;
+  previous_base_prompt: string | null;
+  prompt_modified: boolean;
+  first_post_at: string | null;
+  generation_status: string;
+  generation_attempts: number;
+  review_status: string;
+  rating: number | null;
+  rating_stage: string;
+  selected_tags: string | null;
+  cover_image_id: number | null;
+  preview_image: V2ReviewImage | null;
+  images: V2ReviewImage[];
+}
+
+export interface V2ReviewCharacterListResponse {
+  items: V2ReviewCharacter[];
+  total: number;
+}
+
+export interface V2ReviewFilters {
+  review_status?: string;
+  rating?: string;
+  quality_status?: string;
+  identity_status?: string;
+  generation_status?: string;
+  gender?: string;
+  series_id?: number;
+  multicolor?: string;
+  prompt_modified?: boolean;
+  search?: string;
+  skip?: number;
+  limit?: number;
+}
+
+export interface V2ReviewSavePayload {
+  cover_image_id?: number | null;
+  gender?: string | null;
+  rating?: number | null;
+  base_prompt?: string | null;
+  selected_tags?: string | null;
+}
+
+export interface V2ReviewCompleteResponse {
+  id: number;
+  review_status: string;
+  rating: number | null;
+  rating_stage: string;
+  gender: string | null;
+  base_prompt: string | null;
+  previous_base_prompt: string | null;
+  selected_tags: string | null;
+}
+
+export interface V2ReviewStats {
+  total: number;
+  pending: number;
+  in_progress: number;
+  completed: number;
+}
+
 export interface DanbooruStatus {
   configured: boolean;
   ready: boolean;
