@@ -42,6 +42,28 @@ function characterTagToPromptName(characterTag: string): string {
   return characterTag.trim().replace(/_/g, " ");
 }
 
+export function weightedCharacterPrompt(characterTag: string): string {
+  let name = characterTagToPromptName(characterTag);
+  if (/\d$/.test(name)) {
+    name = `${name} `;
+  }
+  return `1.2::${name}::`;
+}
+
+export function buildV2BasePrompt(
+  characterTag: string,
+  primaryHairColor?: string | null,
+  promptCandidateMultiColorTags?: string[] | null,
+): string {
+  const parts = [
+    ...(primaryHairColor ? [tagToPromptText(primaryHairColor)] : []),
+    ...(promptCandidateMultiColorTags ?? []).map(tagToPromptText),
+  ].filter(Boolean);
+  return parts.length > 0
+    ? `${weightedCharacterPrompt(characterTag)}, ${Array.from(new Set(parts)).join(", ")}`
+    : weightedCharacterPrompt(characterTag);
+}
+
 function splitTags(value: string | null | undefined): string[] {
   if (!value) {
     return [];
@@ -129,18 +151,23 @@ export function buildFinalPrompt(
   }
 
   if (innerParts.length === 0) {
-    return basePrompt;
+    return basePrompt ?? weightedCharacterPrompt(characterTag);
   }
 
   // generation_prompt가 비어 있어도(예: 아직 이미지 생성 job이 캐시하지 않은 GlobalCharacter)
   // 항목에 표시된 외형 태그만으로 기본 프롬프트를 구성해 보여준다.
-  const name = characterTagToPromptName(characterTag);
-  return `1.2::${name}::, ${innerParts.join(", ")}`;
+  return `${weightedCharacterPrompt(characterTag)}, ${innerParts.join(", ")}`;
 }
 
-export function defaultEnabledTagKeys(chips: ReturnType<typeof appearanceTagChips>): Set<string> {
+export function defaultEnabledTagKeys(
+  chips: ReturnType<typeof appearanceTagChips>,
+  promptCandidateMultiColorTags?: string[] | null,
+): Set<string> {
   const enabled = new Set<string>();
   let primaryHairEnabled = false;
+  const candidateMultiKeys = new Set(
+    (promptCandidateMultiColorTags ?? []).map((tag) => `multi:${tag.trim()}`).filter((tag) => tag !== "multi:"),
+  );
 
   for (const chip of chips) {
     if (chip.group === "hair") {
@@ -150,7 +177,7 @@ export function defaultEnabledTagKeys(chips: ReturnType<typeof appearanceTagChip
       }
       continue;
     }
-    if (chip.group === "multi" && !chip.optional) {
+    if (chip.group === "multi" && (!chip.optional || candidateMultiKeys.has(chip.key))) {
       enabled.add(chip.key);
     }
   }
@@ -220,6 +247,7 @@ export function resolveFinalPrompt(
     enabledTags: Set<string>;
     customPrompt: string | null;
     promptEdited: boolean;
+    promptCandidateMultiColorTags?: string[] | null;
   },
 ): string | null {
   if (draft.promptEdited && draft.customPrompt !== null) {
@@ -227,7 +255,7 @@ export function resolveFinalPrompt(
   }
 
   const chips = appearanceTagChips(item);
-  const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
+  const enabledTags =
+    draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips, draft.promptCandidateMultiColorTags);
   return buildFinalPrompt(item.character_tag, item.generation_prompt, enabledTags, chips);
 }
-

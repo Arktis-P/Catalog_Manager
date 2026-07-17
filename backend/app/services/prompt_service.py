@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
+from sqlalchemy.orm import Session
+
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.models.character import Character
+from app.models.appearance_tag_relevance import CharacterAppearanceTagRelevance
+from app.models.global_character import GlobalCharacter
 
 NAME_WEIGHT = "1.2"
 
@@ -30,6 +36,13 @@ def tag_to_prompt_text(tag: str) -> str:
 
 def character_tag_to_prompt_name(character_tag: str) -> str:
     return character_tag.strip().replace("_", " ")
+
+
+def weighted_character_name_prompt(character_tag: str) -> str:
+    name = character_tag_to_prompt_name(character_tag)
+    if name[-1:].isdigit():
+        name = f"{name} "
+    return f"{NAME_WEIGHT}::{name}::"
 
 
 def _primary_hair_color(hair_color: str | None) -> str | None:
@@ -79,13 +92,88 @@ def build_generation_prompt(character: Character) -> str | None:
         prompt_parts.extend(tag_to_prompt_text(tag) for tag in _split_tags(character.eye_color))
         prompt_parts.extend(tag_to_prompt_text(tag) for tag in _split_tags(character.feature_tags))
 
-    name = character_tag_to_prompt_name(character.character_tag)
     unique_parts = list(dict.fromkeys(prompt_parts))
     if not unique_parts:
-        return f"{NAME_WEIGHT}::{name}::"
+        return weighted_character_name_prompt(character.character_tag)
 
     inner = ", ".join(unique_parts)
-    return f"{NAME_WEIGHT}::{name}::, {inner}"
+    return f"{weighted_character_name_prompt(character.character_tag)}, {inner}"
+
+
+def build_v2_base_prompt(
+    *,
+    character_tag: str,
+    primary_hair_color: str | None = None,
+    multicolor_tags: Iterable[str] | None = None,
+) -> str:
+    prompt_parts: list[str] = []
+    if primary_hair_color and primary_hair_color.strip():
+        prompt_parts.append(tag_to_prompt_text(primary_hair_color))
+    if multicolor_tags:
+        prompt_parts.extend(tag_to_prompt_text(tag) for tag in multicolor_tags if tag and tag.strip())
+
+    unique_parts = list(dict.fromkeys(prompt_parts))
+    name_part = weighted_character_name_prompt(character_tag)
+    if not unique_parts:
+        return name_part
+    return f"{name_part}, {', '.join(unique_parts)}"
+
+
+def v2_multicolor_prompt_candidates(db: Session, global_character_id: int) -> list[str]:
+    rows = (
+        db.query(CharacterAppearanceTagRelevance.tag)
+        .filter(
+            CharacterAppearanceTagRelevance.global_character_id == global_character_id,
+            CharacterAppearanceTagRelevance.tag_category == "multicolor",
+            CharacterAppearanceTagRelevance.is_prompt_candidate.is_(True),
+        )
+        .order_by(
+            CharacterAppearanceTagRelevance.relevance_score.desc(),
+            CharacterAppearanceTagRelevance.cooccurrence_count.desc(),
+            CharacterAppearanceTagRelevance.tag.asc(),
+        )
+        .all()
+    )
+    return [row[0] for row in rows]
+
+
+def refresh_global_character_base_prompt(
+    db: Session,
+    character: GlobalCharacter,
+    *,
+    overwrite: bool = False,
+) -> str | None:
+    if character.base_prompt and not overwrite:
+        return character.base_prompt
+
+    next_prompt = build_v2_base_prompt(
+        character_tag=character.character_tag,
+        primary_hair_color=character.primary_hair_color,
+        multicolor_tags=v2_multicolor_prompt_candidates(db, character.id),
+    )
+    if character.base_prompt != next_prompt:
+        character.previous_base_prompt = character.base_prompt
+        character.base_prompt = next_prompt
+    return character.base_prompt
+
+
+def refresh_global_character_base_prompts(
+    db: Session,
+    *,
+    overwrite: bool = False,
+    character_ids: Iterable[int] | None = None,
+) -> list[GlobalCharacter]:
+    query = db.query(GlobalCharacter)
+    if character_ids is not None:
+        ids = list(character_ids)
+        if not ids:
+            return []
+        query = query.filter(GlobalCharacter.id.in_(ids))
+
+    characters = query.order_by(GlobalCharacter.id.asc()).all()
+    for character in characters:
+        refresh_global_character_base_prompt(db, character, overwrite=overwrite)
+    return characters
 
 
 def mask_appearance_for_catalog(character: Character) -> dict[str, str | None]:

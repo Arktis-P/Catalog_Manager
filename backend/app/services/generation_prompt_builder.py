@@ -120,6 +120,21 @@ def build_full_prompt(
     return build_prompt_from_character_core(character_part, gender=gender, prompt_config=config)
 
 
+def build_full_prompt_v2(
+    character,
+    *,
+    prompt_config: GenerationPromptConfig | None = None,
+) -> tuple[str, str]:
+    character_part = (getattr(character, "base_prompt", None) or "").strip()
+    if not character_part:
+        raise ValueError(f"{character.character_tag}: base_prompt가 없습니다.")
+    return build_prompt_from_character_core(
+        character_part,
+        gender=getattr(character, "gender", None),
+        prompt_config=prompt_config,
+    )
+
+
 def build_prompt_from_character_core(
     character_core: str,
     *,
