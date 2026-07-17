@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.models.character import Character
 from app.models.global_character import GlobalCharacter
@@ -9,6 +11,20 @@ from app.schemas.review import (
     GlobalCatalogReviewItemResponse,
 )
 from app.services.review_service import ReviewService
+
+
+def _parse_json_reason_list(value: str | None) -> list[str]:
+    """quality_reasons/identity_reasons/suggested_multicolor_tags에 저장된
+    JSON 배열 문자열을 리스트로 파싱한다. 값이 없거나 형식이 어긋나면 빈 리스트."""
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed]
 
 
 def visible_catalog_images(character: Character) -> list:
@@ -64,6 +80,17 @@ def to_catalog_item_global(character: GlobalCharacter) -> GlobalCatalogReviewIte
                 gender_pred=image.gender_pred,
                 is_rejected=image.is_rejected,
                 is_cover=image.is_cover,
+                is_provisional=image.is_provisional,
+                quality_status=image.quality_status,
+                quality_score=image.quality_score,
+                quality_reasons=_parse_json_reason_list(image.quality_reasons),
+                identity_status=image.identity_status,
+                character_confidence=image.character_confidence,
+                hair_color_confidence=image.hair_color_confidence,
+                conflicting_character_tag=image.conflicting_character_tag,
+                conflicting_character_confidence=image.conflicting_character_confidence,
+                identity_reasons=_parse_json_reason_list(image.identity_reasons),
+                suggested_multicolor_tags=_parse_json_reason_list(image.suggested_multicolor_tags),
             )
             for image in images
         ],

@@ -51,6 +51,18 @@ class CatalogReviewImageResponse(BaseModel):
     gender_pred: str | None = None
     is_rejected: bool = False
     is_cover: bool = False
+    # V2 자동 검사 (quality/identity 분리, §6·§8) — GlobalCharacterImage에서만 채워진다.
+    is_provisional: bool = False
+    quality_status: str | None = None
+    quality_score: float | None = None
+    quality_reasons: list[str] = Field(default_factory=list)
+    identity_status: str | None = None
+    character_confidence: float | None = None
+    hair_color_confidence: float | None = None
+    conflicting_character_tag: str | None = None
+    conflicting_character_confidence: float | None = None
+    identity_reasons: list[str] = Field(default_factory=list)
+    suggested_multicolor_tags: list[str] = Field(default_factory=list)
 
 
 class CatalogReviewItemResponse(BaseModel):

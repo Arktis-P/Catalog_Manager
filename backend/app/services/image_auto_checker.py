@@ -5,10 +5,17 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageFilter, ImageStat
+from PIL import Image
 
 from app.models.character import Character
 from app.models.series import Series
+from app.services.quality_checker import (
+    eye_local_contrast as _eye_local_contrast,
+    face_symmetry_score as _face_symmetry_score,
+    finger_periodicity as _finger_periodicity,
+    region_mean as _region_mean,
+    region_sharpness as _region_sharpness,
+)
 
 
 @dataclass
@@ -46,130 +53,6 @@ def _parse_appearance_tags(value: str | None) -> list[str]:
     if not value:
         return []
     return [_normalize_tag(t) for t in value.split(",") if t.strip()]
-
-
-def _region_sharpness(image: Image.Image, box: tuple[int, int, int, int]) -> float:
-    crop = image.crop(box).convert("L")
-    edges = crop.filter(ImageFilter.FIND_EDGES)
-    return float(ImageStat.Stat(edges).var[0])
-
-
-def _region_mean(image: Image.Image, box: tuple[int, int, int, int]) -> float:
-    crop = image.crop(box).convert("L")
-    return float(ImageStat.Stat(crop).mean[0])
-
-
-def _face_symmetry_score(image: Image.Image, box: tuple[int, int, int, int]) -> float:
-    """눈 영역 좌우 대칭성 점수 (0~1).
-
-    두 눈이 비슷한 형태로 생성되었을수록 1에 가깝습니다.
-    기울어진 얼굴·머리·액세서리로 인한 자연스러운 비대칭을 고려해 임계값은 느슨하게 설정합니다.
-    """
-    crop = image.crop(box).convert("L")
-    w, h = crop.size
-    if w < 8:
-        return 1.0
-
-    mid = w // 2
-    left = crop.crop((0, 0, mid, h))
-    right = crop.crop((w - mid, 0, w, h)).transpose(Image.FLIP_LEFT_RIGHT)
-
-    if left.size != right.size:
-        right = right.resize(left.size, Image.LANCZOS)
-
-    diff = ImageChops.difference(left, right)
-    mean_diff = ImageStat.Stat(diff).mean[0]
-    return max(0.0, 1.0 - mean_diff / 255.0)
-
-
-def _eye_local_contrast(image: Image.Image, box: tuple[int, int, int, int], patch: int = 21) -> float:
-    """눈 영역 내 최대 로컬 대비 (0~255).
-
-    MaxFilter - MinFilter 차이의 최대값을 반환합니다.
-    눈·홍채·동공·하이라이트처럼 고대비 특성이 영역 내 어딘가에 존재하는지 확인합니다.
-    균일한 배경이 넓어도 눈이 제대로 그려졌다면 최대값이 충분히 높게 나옵니다.
-    """
-    size = patch if patch % 2 == 1 else patch + 1
-    crop = image.crop(box).convert("L")
-
-    local_max = crop.filter(ImageFilter.MaxFilter(size=size))
-    local_min = crop.filter(ImageFilter.MinFilter(size=size))
-    contrast_img = ImageChops.difference(local_max, local_min)
-
-    # 최대 로컬 대비값 반환 (extrema → (min, max))
-    return float(contrast_img.getextrema()[1])
-
-
-def _finger_periodicity(
-    image: Image.Image, box: tuple[int, int, int, int]
-) -> tuple[float, int]:
-    """PIL 기반 손가락 주기성 분석.
-
-    손가락이 규칙적으로 배열되면 엣지 밀도의 가로 프로파일에 주기적 피크가 나타납니다.
-    이미지를 1픽셀 높이로 리사이즈(BOX = 박스 평균)하면 각 열의 평균 엣지 강도를 얻을 수 있고,
-    그 프로파일에서 피크 개수를 세어 손가락 개수를 추정합니다.
-
-    Returns:
-        (periodicity_score 0~1, estimated_finger_count)
-    """
-    crop = image.crop(box).convert("L")
-    w, h = crop.size
-    if w < 20 or h < 20:
-        return 0.0, 0
-
-    # 손가락 끝이 모이는 상단 45%에 집중
-    tip_h = max(h * 45 // 100, 10)
-    tip = crop.crop((0, 0, w, tip_h))
-    edges = tip.filter(ImageFilter.FIND_EDGES)
-
-    # 1행으로 리사이즈(BOX 평균) → 각 열의 평균 엣지 강도
-    col_profile_img = edges.resize((w, 1), Image.BOX)
-    col_profile: list[int] = list(col_profile_img.getdata())
-
-    if max(col_profile) < 1:
-        return 0.0, 0
-
-    # 이동 평균 스무딩 (윈도우 = 이미지 폭의 약 5%)
-    window = max(w // 20, 3)
-    smoothed: list[float] = []
-    for i in range(w):
-        lo = max(0, i - window // 2)
-        hi = min(w, i + window // 2 + 1)
-        smoothed.append(sum(col_profile[lo:hi]) / (hi - lo))
-
-    mean_val = sum(smoothed) / len(smoothed)
-    # 피크 임계값: 평균보다 20% 높은 값
-    peak_threshold = mean_val * 1.2
-
-    # 최소 손가락 폭 = 전체 폭 / 9 (최대 8개 손가락 기준 여유)
-    min_gap = max(w // 9, 5)
-
-    peaks = 0
-    in_peak = False
-    last_peak_pos = -min_gap
-
-    for i, val in enumerate(smoothed):
-        if val >= peak_threshold and not in_peak:
-            if i - last_peak_pos >= min_gap:
-                in_peak = True
-                peaks += 1
-                last_peak_pos = i
-        elif val < peak_threshold:
-            in_peak = False
-
-    # 점수: 3~8개면 정상 범위 (0.6~0.8), 벗어나면 낮음
-    if 4 <= peaks <= 6:
-        score = 0.75
-    elif 3 <= peaks <= 8:
-        score = 0.55
-    elif peaks == 2 or peaks == 9:
-        score = 0.30
-    elif peaks == 0:
-        score = 0.0
-    else:
-        score = 0.10  # 1 or 10+
-
-    return score, peaks
 
 
 def check_detail_quality(image_path: Path) -> DetailCheckResult:
