@@ -6,6 +6,7 @@ __pycache__/
 venv/
 Lib/
 Scripts/
+!backend/scripts/
 .env
 .env.*
 !.env.example
