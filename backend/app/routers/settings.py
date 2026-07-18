@@ -33,6 +33,10 @@ def update_settings(
         service.set_naia_portable_dir(payload.naia_portable_dir)
     if payload.generation_images_per_character is not None:
         service.set_generation_images_per_character(payload.generation_images_per_character)
+    if payload.generation_image_format is not None:
+        service.set_generation_image_format(payload.generation_image_format)
+    if payload.generation_webp_quality is not None:
+        service.set_generation_webp_quality(payload.generation_webp_quality)
     if (
         payload.generation_prompt_prefix is not None
         or payload.generation_prompt_suffix is not None

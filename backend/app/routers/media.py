@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import mimetypes
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -11,8 +12,12 @@ from app.config import settings
 
 router = APIRouter(tags=["media"])
 
-_FILENAME_RE = re.compile(r"^[a-zA-Z0-9_\-]+\.png$", re.IGNORECASE)
+mimetypes.add_type("image/webp", ".webp")
+
+_FILENAME_RE = re.compile(r"^[a-zA-Z0-9_\-]+\.(png|webp)$", re.IGNORECASE)
 _SOURCE_DIRS = {"pending_review", "catalog_selected"}
+_THUMBNAIL_FORMAT = "WEBP"
+_THUMBNAIL_MEDIA_TYPE = "image/webp"
 
 
 def _source_dir(subdir: str) -> Path:
@@ -40,15 +45,12 @@ def serve_thumbnail(
 
     cache_dir = _thumb_cache_dir(subdir, size)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cached = cache_dir / filename
+    cached = cache_dir / f"{Path(filename).stem}.webp"
 
     if not cached.exists() or cached.stat().st_mtime < source.stat().st_mtime:
         with Image.open(source) as image:
-            rgb = image.convert("RGB")
-            rgb.thumbnail((size, size), Image.Resampling.LANCZOS)
-            # optimize=True는 PNG를 여러 압축 전략으로 다시 시도해 최적 크기를 찾기
-            # 때문에 원본이 큰 NAI 이미지(800x1200+)에서 첫 캐시 생성이 눈에 띄게
-            # 느려진다. 캐시는 디스크에 영구 저장되므로 압축률보다 생성 속도를 우선한다.
-            rgb.save(cached, format="PNG", optimize=False, compress_level=1)
+            thumbnail = image.copy()
+            thumbnail.thumbnail((size, size), Image.Resampling.LANCZOS)
+            thumbnail.save(cached, format=_THUMBNAIL_FORMAT, quality=92, method=6)
 
-    return FileResponse(cached, media_type="image/png")
+    return FileResponse(cached, media_type=_THUMBNAIL_MEDIA_TYPE)

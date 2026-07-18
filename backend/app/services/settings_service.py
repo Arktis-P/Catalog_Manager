@@ -14,6 +14,8 @@ SETTING_COLLECT_MAX_CONCURRENT = "danbooru_collect_max_concurrent"
 SETTING_NAIA_BASE_URL = "naia_base_url"
 SETTING_NAIA_PORTABLE_DIR = "naia_portable_dir"
 SETTING_GENERATION_IMAGES_PER_CHARACTER = "generation_images_per_character"
+SETTING_GENERATION_IMAGE_FORMAT = "generation_image_format"
+SETTING_GENERATION_WEBP_QUALITY = "generation_webp_quality"
 SETTING_GENERATION_PROMPT_PREFIX = "generation_prompt_prefix"
 SETTING_GENERATION_PROMPT_SUFFIX = "generation_prompt_suffix"
 SETTING_GENERATION_NEGATIVE_PROMPT = "generation_negative_prompt"
@@ -62,6 +64,9 @@ DEFAULT_V2_REVIEW_CARD_WIDTH_PX = 0
 MAX_V2_REVIEW_CARD_WIDTH_PX = 1200
 DEFAULT_NAIA_BASE_URL = "http://127.0.0.1:7243"
 DEFAULT_IMAGES_PER_CHARACTER = 2
+DEFAULT_GENERATION_IMAGE_FORMAT = "webp"
+VALID_GENERATION_IMAGE_FORMATS = {"webp", "png"}
+DEFAULT_GENERATION_WEBP_QUALITY = 92
 DEFAULT_REVIEW_THUMBNAIL_SIZE = 384
 DEFAULT_REVIEW_MAX_LOADED_IMAGES = 30
 DEFAULT_MIN_CHARACTER_POST_COUNT = 10
@@ -69,6 +74,8 @@ MIN_COLLECT_MAX_CONCURRENT = 1
 MAX_COLLECT_MAX_CONCURRENT = 5
 MIN_IMAGES_PER_CHARACTER = 1
 MAX_IMAGES_PER_CHARACTER = 4
+MIN_GENERATION_WEBP_QUALITY = 1
+MAX_GENERATION_WEBP_QUALITY = 100
 MIN_REVIEW_THUMBNAIL_SIZE = 128
 MAX_REVIEW_THUMBNAIL_SIZE = 1024
 MIN_REVIEW_MAX_LOADED_IMAGES = 10
@@ -144,6 +151,34 @@ class SettingsService:
     def set_generation_images_per_character(self, value: int) -> int:
         clamped = max(MIN_IMAGES_PER_CHARACTER, min(MAX_IMAGES_PER_CHARACTER, value))
         self._set_setting(SETTING_GENERATION_IMAGES_PER_CHARACTER, str(clamped))
+        return clamped
+
+    def get_generation_image_format(self) -> str:
+        raw = (self._get_setting(SETTING_GENERATION_IMAGE_FORMAT) or "").lower()
+        if raw in VALID_GENERATION_IMAGE_FORMATS:
+            return raw
+        return DEFAULT_GENERATION_IMAGE_FORMAT
+
+    def set_generation_image_format(self, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in VALID_GENERATION_IMAGE_FORMATS:
+            normalized = DEFAULT_GENERATION_IMAGE_FORMAT
+        self._set_setting(SETTING_GENERATION_IMAGE_FORMAT, normalized)
+        return normalized
+
+    def get_generation_webp_quality(self) -> int:
+        raw = self._get_setting(SETTING_GENERATION_WEBP_QUALITY)
+        if not raw:
+            return DEFAULT_GENERATION_WEBP_QUALITY
+        try:
+            value = int(raw)
+        except ValueError:
+            return DEFAULT_GENERATION_WEBP_QUALITY
+        return max(MIN_GENERATION_WEBP_QUALITY, min(MAX_GENERATION_WEBP_QUALITY, value))
+
+    def set_generation_webp_quality(self, value: int) -> int:
+        clamped = max(MIN_GENERATION_WEBP_QUALITY, min(MAX_GENERATION_WEBP_QUALITY, value))
+        self._set_setting(SETTING_GENERATION_WEBP_QUALITY, str(clamped))
         return clamped
 
     def get_review_thumbnail_size(self) -> int:
@@ -325,6 +360,8 @@ class SettingsService:
             "naia_base_url": self.get_naia_base_url(),
             "naia_portable_dir": self.get_naia_portable_dir(),
             "generation_images_per_character": self.get_generation_images_per_character(),
+            "generation_image_format": self.get_generation_image_format(),
+            "generation_webp_quality": self.get_generation_webp_quality(),
             "generation_prompt_prefix": prompt_config.prefix,
             "generation_prompt_suffix": prompt_config.suffix,
             "generation_negative_prompt": prompt_config.negative_prompt,

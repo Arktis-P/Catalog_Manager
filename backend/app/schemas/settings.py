@@ -7,6 +7,8 @@ class SettingsResponse(BaseModel):
     naia_base_url: str
     naia_portable_dir: str
     generation_images_per_character: int = Field(ge=1, le=4)
+    generation_image_format: str = "webp"
+    generation_webp_quality: int = Field(default=92, ge=1, le=100)
     generation_prompt_prefix: str
     generation_prompt_suffix: str
     generation_negative_prompt: str
@@ -39,6 +41,8 @@ class SettingsUpdateRequest(BaseModel):
     naia_base_url: str | None = None
     naia_portable_dir: str | None = None
     generation_images_per_character: int | None = Field(default=None, ge=1, le=4)
+    generation_image_format: str | None = None
+    generation_webp_quality: int | None = Field(default=None, ge=1, le=100)
     generation_prompt_prefix: str | None = None
     generation_prompt_suffix: str | None = None
     generation_negative_prompt: str | None = None

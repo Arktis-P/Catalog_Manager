@@ -3,10 +3,12 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
 from collections.abc import Callable
 
+from PIL import Image as PILImage
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -42,6 +44,30 @@ def _safe_filename_tag(character_tag: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9_\-]+", "_", character_tag.strip().lower())
     slug = re.sub(r"_+", "_", slug).strip("_")
     return slug or "character"
+
+
+def _write_generated_image(
+    *,
+    image_bytes: bytes,
+    output_dir: Path,
+    filename_stem: str,
+    image_format: str,
+    webp_quality: int,
+) -> Path:
+    extension = ".webp" if image_format == "webp" else ".png"
+    output_path = output_dir / f"{filename_stem}{extension}"
+    counter = 1
+    while output_path.exists():
+        output_path = output_dir / f"{filename_stem}_{counter}{extension}"
+        counter += 1
+
+    if image_format == "png":
+        output_path.write_bytes(image_bytes)
+        return output_path
+
+    with PILImage.open(BytesIO(image_bytes)) as image:
+        image.save(output_path, "WEBP", quality=webp_quality, method=6)
+    return output_path
 
 
 class GenerationService:
@@ -374,13 +400,13 @@ class GenerationService:
         pending_dir = self.get_pending_images_dir()
         pending_dir.mkdir(parents=True, exist_ok=True)
         timestamp = (created_at or datetime.now()).strftime("%Y%m%d_%H%M%S")
-        filename = f"{timestamp}_{_safe_filename_tag(character.character_tag)}.png"
-        output_path = pending_dir / filename
-        counter = 1
-        while output_path.exists():
-            output_path = pending_dir / f"{timestamp}_{_safe_filename_tag(character.character_tag)}_{counter}.png"
-            counter += 1
-        output_path.write_bytes(image_bytes)
+        output_path = _write_generated_image(
+            image_bytes=image_bytes,
+            output_dir=pending_dir,
+            filename_stem=f"{timestamp}_{_safe_filename_tag(character.character_tag)}",
+            image_format=self._settings.get_generation_image_format(),
+            webp_quality=self._settings.get_generation_webp_quality(),
+        )
 
         rel_path = output_path.relative_to(settings.project_root).as_posix()
         if skip_checks:
@@ -504,6 +530,21 @@ class GenerationService:
             .limit(limit)
             .all()
         )
+
+    def list_v2_not_generated_ids(
+        self, *, min_post_count: int | None = None, limit: int | None = None
+    ) -> list[int]:
+        """V2 파이프라인 기준 미생성(generation_status == not_generated) 캐릭터 id를
+        post_count desc, id asc 순으로 반환한다."""
+        query = self.db.query(GlobalCharacter.id).filter(
+            GlobalCharacter.generation_status == "not_generated"
+        )
+        if min_post_count is not None:
+            query = query.filter(GlobalCharacter.post_count >= min_post_count)
+        query = query.order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.id.asc())
+        if limit is not None:
+            query = query.limit(limit)
+        return [row[0] for row in query.all()]
 
     def get_candidate_stats_global(self) -> dict[str, int]:
         total_completed = (
@@ -672,13 +713,13 @@ class GenerationService:
         pending_dir = self.get_pending_images_dir()
         pending_dir.mkdir(parents=True, exist_ok=True)
         timestamp = (created_at or datetime.now()).strftime("%Y%m%d_%H%M%S")
-        filename = f"{timestamp}_{_safe_filename_tag(character.character_tag)}.png"
-        output_path = pending_dir / filename
-        counter = 1
-        while output_path.exists():
-            output_path = pending_dir / f"{timestamp}_{_safe_filename_tag(character.character_tag)}_{counter}.png"
-            counter += 1
-        output_path.write_bytes(image_bytes)
+        output_path = _write_generated_image(
+            image_bytes=image_bytes,
+            output_dir=pending_dir,
+            filename_stem=f"{timestamp}_{_safe_filename_tag(character.character_tag)}",
+            image_format=self._settings.get_generation_image_format(),
+            webp_quality=self._settings.get_generation_webp_quality(),
+        )
 
         rel_path = output_path.relative_to(settings.project_root).as_posix()
         if skip_checks:
