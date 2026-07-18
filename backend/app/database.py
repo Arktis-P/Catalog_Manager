@@ -110,11 +110,27 @@ def _migrate_global_character_columns() -> None:
         "generation_attempts": (
             "ALTER TABLE global_characters ADD COLUMN generation_attempts INTEGER NOT NULL DEFAULT 0"
         ),
+        "total_generation_attempts": (
+            "ALTER TABLE global_characters ADD COLUMN total_generation_attempts INTEGER NOT NULL DEFAULT 0"
+        ),
+        "prompt_variant_attempts": (
+            "ALTER TABLE global_characters ADD COLUMN prompt_variant_attempts TEXT"
+        ),
+        "last_failure_reason": (
+            "ALTER TABLE global_characters ADD COLUMN last_failure_reason TEXT"
+        ),
     }
     with engine.begin() as connection:
         for column_name, statement in migrations.items():
             if column_name not in existing:
                 connection.execute(text(statement))
+        if "total_generation_attempts" not in existing:
+            connection.execute(
+                text(
+                    "UPDATE global_characters "
+                    "SET total_generation_attempts = generation_attempts"
+                )
+            )
 
 
 def _migrate_global_character_image_columns() -> None:

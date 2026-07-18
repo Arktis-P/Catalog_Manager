@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from io import BytesIO
 
@@ -13,7 +14,10 @@ import app.models  # noqa: F401
 from app.database import Base
 from app.models.appearance_tag_relevance import CharacterAppearanceTagRelevance
 from app.models.global_character import GlobalCharacter
+from app.models.global_character_generation_job import GlobalCharacterGenerationJob
 from app.models.global_character_image import GlobalCharacterImage
+from app.routers import generation as generation_router
+from app.schemas.generation import V2RegenerateRequest
 from app.services.identity_checker import IdentityCheckResult
 from app.services.quality_checker import QualityCheckResult
 from app.services.v2_generation_pipeline import V2GenerationPipeline
@@ -48,11 +52,6 @@ def output_paths(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config.settings, "project_root", tmp_path)
     monkeypatch.setattr(config.settings, "output_dir", tmp_path / "output")
-
-
-class FakeWikiClient:
-    def get_wiki_page(self, title: str):
-        return {"title": title, "body": "reference only"}
 
 
 def make_character(
@@ -123,7 +122,6 @@ def make_pipeline(db, generated_bytes, quality_results, identity_results):
         image_bytes_generator=generate,
         quality_checker=lambda path: next(quality_iter),
         identity_checker=check_identity,
-        wiki_client=FakeWikiClient(),
         wait_between_generations=lambda: 0.0,
     )
     return pipeline, calls
@@ -147,6 +145,9 @@ def test_quality_reject_three_times_marks_generation_failed(db, generated_bytes)
     assert result.generation_status == "generation_failed"
     assert result.generation_attempts == 3
     assert calls == {"generate": 3, "identity": 0}
+    assert character.total_generation_attempts == 3
+    assert json.loads(character.prompt_variant_attempts) == {"initial": 3}
+    assert character.last_failure_reason == "quality_reject:blank_image"
 
 
 def test_quality_pass_on_third_attempt_continues_to_identity(db, generated_bytes) -> None:
@@ -225,7 +226,46 @@ def test_level_one_revision_success_promotes_base_prompt_and_history(db, generat
     assert character.prompt_revision_reason == "primary_hair_color:black_hair->brown_hair"
 
 
-def test_all_four_revision_levels_fail(db, generated_bytes) -> None:
+def test_level_one_quality_retries_before_advancing(db, generated_bytes) -> None:
+    character = make_character(db)
+    db.add_all(
+        [
+            CharacterAppearanceTagRelevance(
+                global_character_id=character.id,
+                tag="black_hair",
+                tag_category="hair_color",
+                cooccurrence_count=80,
+                character_post_count=100,
+                relevance_score=0.8,
+                is_prompt_candidate=True,
+            ),
+            CharacterAppearanceTagRelevance(
+                global_character_id=character.id,
+                tag="brown_hair",
+                tag_category="hair_color",
+                cooccurrence_count=60,
+                character_post_count=100,
+                relevance_score=0.6,
+            ),
+        ]
+    )
+    db.commit()
+    pipeline, calls = make_pipeline(
+        db,
+        generated_bytes,
+        [PASS_QUALITY, REJECT_QUALITY, REJECT_QUALITY, PASS_QUALITY],
+        [identity("reject"), identity("warning")],
+    )
+
+    result = pipeline.run_character(character.id)
+
+    assert result.generation_status == "generated"
+    assert calls == {"generate": 4, "identity": 2}
+    assert character.prompt_revision_level == 1
+    assert json.loads(character.prompt_variant_attempts) == {"initial": 1, "level_1": 3}
+
+
+def test_all_three_revision_levels_fail_without_feature_prompt(db, generated_bytes) -> None:
     character = make_character(db, multicolor=True)
     db.add_all(
         [
@@ -270,15 +310,94 @@ def test_all_four_revision_levels_fail(db, generated_bytes) -> None:
     pipeline, calls = make_pipeline(
         db,
         generated_bytes,
-        [PASS_QUALITY] * 5,
-        [identity("reject")] * 5,
+        [PASS_QUALITY] * 4,
+        [identity("reject")] * 4,
     )
 
     result = pipeline.run_character(character.id)
 
     assert result.generation_status == "generation_failed"
-    assert calls == {"generate": 5, "identity": 5}
+    assert calls == {"generate": 4, "identity": 4}
+    assert json.loads(character.prompt_variant_attempts) == {
+        "initial": 1,
+        "level_1": 1,
+        "level_2": 1,
+        "level_3": 1,
+    }
+    jobs = db.query(GlobalCharacterGenerationJob).all()
+    assert all("glasses" not in job.prompt for job in jobs)
     assert character.prompt_revision_level is None
+
+
+def test_manual_regenerate_api_forwards_edited_prompt_and_rejects_duplicate(
+    db, monkeypatch
+) -> None:
+    character = make_character(db)
+    captured: list[tuple[int, str | None]] = []
+
+    def start_regeneration(character_id: int, *, base_prompt: str | None):
+        captured.append((character_id, base_prompt))
+        if len(captured) > 1:
+            return None
+        from app.services.v2_generation_job_manager import V2GenerationJobState
+
+        return V2GenerationJobState(job_id="manual-job", character_id=character_id, total=1)
+
+    monkeypatch.setattr(
+        generation_router.v2_generation_job_manager,
+        "start_regeneration",
+        start_regeneration,
+    )
+    response = generation_router.regenerate_v2_character(
+        character.id,
+        V2RegenerateRequest(base_prompt="1.2::edited character::, red hair"),
+        db,
+    )
+
+    assert response.job_id == "manual-job"
+    assert captured == [(character.id, "1.2::edited character::, red hair")]
+
+    with pytest.raises(generation_router.HTTPException) as exc_info:
+        generation_router.regenerate_v2_character(
+            character.id,
+            V2RegenerateRequest(base_prompt=None),
+            db,
+        )
+    assert exc_info.value.status_code == 409
+
+
+def test_manual_regenerate_uses_and_saves_edited_prompt(db, generated_bytes) -> None:
+    character = make_character(db)
+    edited_prompt = "1.2::edited character::, red hair"
+    pipeline, calls = make_pipeline(
+        db,
+        generated_bytes,
+        [PASS_QUALITY],
+        [identity("pass")],
+    )
+
+    result = pipeline.run_character(character.id, base_prompt=edited_prompt)
+
+    assert result.generation_status == "generated"
+    assert calls == {"generate": 1, "identity": 1}
+    assert character.base_prompt == edited_prompt
+    job = db.query(GlobalCharacterGenerationJob).one()
+    assert "1.2::edited character::" in job.prompt
+
+
+def test_manual_regenerate_manager_reserves_character_until_job_finishes(monkeypatch) -> None:
+    from app.services.v2_generation_job_manager import V2GenerationJobManager
+
+    manager = V2GenerationJobManager()
+    monkeypatch.setattr(manager, "_dispatch_next", lambda: None)
+
+    first = manager.start_regeneration(17, base_prompt="edited prompt")
+    duplicate = manager.start_regeneration(17, base_prompt=None)
+
+    assert first is not None
+    assert duplicate is None
+    assert manager.cancel(first.job_id) is True
+    assert manager.start_regeneration(17, base_prompt=None) is not None
 
 
 @pytest.mark.parametrize(

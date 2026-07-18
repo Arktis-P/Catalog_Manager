@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -10,7 +9,6 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.integrations.danbooru.client import DanbooruClient
 from app.integrations.naia.client import NaiaClient
 from app.integrations.naia.generation_runner import (
     generate_and_fetch_image,
@@ -32,8 +30,6 @@ from app.services.identity_checker import (
 from app.services.prompt_service import refresh_global_character_base_prompt, v2_multicolor_prompt_candidates
 from app.services.quality_checker import QUALITY_CHECKER_VERSION, check_quality
 from app.services.settings_service import SettingsService
-
-logger = logging.getLogger(__name__)
 
 ImageBytesGenerator = Callable[[str, str], bytes]
 CancelCheck = Callable[[], bool]
@@ -98,7 +94,6 @@ class V2GenerationPipeline:
         image_bytes_generator: ImageBytesGenerator | None = None,
         quality_checker: Callable[[Path], object] = check_quality,
         identity_checker: Callable[..., IdentityCheckResult] = check_identity,
-        wiki_client: DanbooruClient | None = None,
         wait_between_generations: Callable[[], float] = wait_between_naia_generations,
     ) -> None:
         self.db = db
@@ -107,7 +102,6 @@ class V2GenerationPipeline:
         self._image_bytes_generator = image_bytes_generator
         self._quality_checker = quality_checker
         self._identity_checker = identity_checker
-        self._wiki_client = wiki_client
         self._wait_between_generations = wait_between_generations
         self._client: NaiaClient | None = None
         self._known_history_ids: set[str] = set()
@@ -167,6 +161,11 @@ class V2GenerationPipeline:
             status="pending",
         )
         character.generation_attempts = (character.generation_attempts or 0) + 1
+        character.total_generation_attempts = (character.total_generation_attempts or 0) + 1
+        attempts = json.loads(character.prompt_variant_attempts or "{}")
+        variant_key = "initial" if variant.revision_level is None else f"level_{variant.revision_level}"
+        attempts[variant_key] = int(attempts.get(variant_key, 0)) + 1
+        character.prompt_variant_attempts = json.dumps(attempts, ensure_ascii=False)
         self.db.add(generation_job)
         commit_db_session(self.db)
         self.db.refresh(generation_job)
@@ -181,8 +180,9 @@ class V2GenerationPipeline:
                 image_bytes=image_bytes,
                 skip_checks=True,
             )
-        except Exception:
+        except Exception as exc:
             generation_job.status = "failed"
+            character.last_failure_reason = f"generation_error:{exc}"
             commit_db_session(self.db)
             raise
 
@@ -203,19 +203,12 @@ class V2GenerationPipeline:
 
         identity: IdentityCheckResult | None = None
         if quality.status != "reject":
-            known_character_tags = [
-                row[0]
-                for row in self.db.query(GlobalCharacter.character_tag)
-                .filter(GlobalCharacter.id != character.id)
-                .all()
-            ]
             identity = self._identity_checker(
                 image_path,
                 character_tag=character.character_tag,
                 primary_hair_color=variant.primary_hair_color,
                 expected_multicolor_tags=variant.multicolor_tags,
                 gender=character.gender,
-                known_character_tags=known_character_tags,
                 hf_token=self.settings_service.get_hf_token() or None,
                 hf_wd_model=self.settings_service.get_hf_wd_model() or None,
             )
@@ -317,33 +310,40 @@ class V2GenerationPipeline:
             )
             variants.append(current)
 
-        features = tuple(
-            row.tag for row in self._relevance_rows(character.id, "feature") if row.is_prompt_candidate
-        )
-        if features:
-            current = PromptVariant(
-                base_prompt=_replace_prompt_tags(current.base_prompt, add=features),
-                primary_hair_color=current.primary_hair_color,
-                multicolor_tags=current.multicolor_tags,
-                revision_level=4,
-                revision_reason=f"add_features:{','.join(features)}",
-            )
-            variants.append(current)
         return variants
 
-    def _collect_wiki_reference(self, character_tag: str) -> None:
-        try:
-            client = self._wiki_client or DanbooruClient()
-            page = client.get_wiki_page(character_tag)
-            body = str(page.get("body") or "") if page else ""
-            logger.info(
-                "V2 identity 보정 위키 참고: character=%s found=%s body_length=%d",
-                character_tag,
-                bool(page),
-                len(body),
-            )
-        except Exception as exc:
-            logger.warning("V2 identity 보정 위키 조회 실패: character=%s error=%s", character_tag, exc)
+    @staticmethod
+    def _failure_reason(image: GlobalCharacterImage, identity: IdentityCheckResult | None) -> str:
+        if image.quality_status == "reject":
+            reasons = json.loads(image.quality_reasons or "[]")
+            return f"quality_reject:{','.join(str(reason) for reason in reasons)}"
+        if identity is not None and identity.status == "reject":
+            return f"identity_reject:{','.join(str(reason) for reason in identity.reasons)}"
+        return "identity_result_missing"
+
+    def _run_variant(
+        self,
+        character: GlobalCharacter,
+        variant: PromptVariant,
+        *,
+        retry_max: int,
+        should_cancel: CancelCheck,
+    ) -> tuple[GlobalCharacterImage, IdentityCheckResult | None]:
+        image: GlobalCharacterImage | None = None
+        identity: IdentityCheckResult | None = None
+        for _ in range(retry_max):
+            image = self._generate_and_store(character, variant, should_cancel=should_cancel)
+            image, identity = self._check_image(image, character, variant)
+            if image.quality_status != "reject":
+                break
+            character.last_failure_reason = self._failure_reason(image, identity)
+            commit_db_session(self.db)
+        if image is None:
+            raise RuntimeError("이미지 생성 시도가 실행되지 않았습니다.")
+        if image.quality_status != "reject" and (identity is None or identity.status == "reject"):
+            character.last_failure_reason = self._failure_reason(image, identity)
+            commit_db_session(self.db)
+        return image, identity
 
     @staticmethod
     def _is_recent(character: GlobalCharacter, cutoff: str) -> bool:
@@ -355,6 +355,7 @@ class V2GenerationPipeline:
         self,
         character_id: int,
         *,
+        base_prompt: str | None = None,
         should_cancel: CancelCheck | None = None,
     ) -> V2PipelineResult:
         cancel = should_cancel or (lambda: False)
@@ -364,6 +365,10 @@ class V2GenerationPipeline:
 
         previous_status = character.generation_status
         character.generation_status = "generating"
+        character.prompt_variant_attempts = "{}"
+        character.last_failure_reason = None
+        if base_prompt is not None:
+            character.base_prompt = base_prompt
         if not character.base_prompt:
             refresh_global_character_base_prompt(self.db, character)
         commit_db_session(self.db)
@@ -376,14 +381,13 @@ class V2GenerationPipeline:
                 multicolor_tags=multicolor,
             )
             retry_max = max(1, int(self._public_settings()["v2_quality_retry_max"]))
-            image: GlobalCharacterImage | None = None
-            identity: IdentityCheckResult | None = None
-            for _ in range(retry_max):
-                image = self._generate_and_store(character, initial, should_cancel=cancel)
-                image, identity = self._check_image(image, character, initial)
-                if image.quality_status != "reject":
-                    break
-            else:
+            image, identity = self._run_variant(
+                character,
+                initial,
+                retry_max=retry_max,
+                should_cancel=cancel,
+            )
+            if image.quality_status == "reject":
                 character.generation_status = "generation_failed"
                 commit_db_session(self.db)
                 return V2PipelineResult(character.id, character.generation_status, character.generation_attempts, image.id)
@@ -401,10 +405,13 @@ class V2GenerationPipeline:
 
             if identity is None:
                 raise RuntimeError("quality 통과 이미지에 identity 검사 결과가 없습니다.")
-            self._collect_wiki_reference(character.character_tag)
             for variant in self._revision_variants(character, initial, identity):
-                revised_image = self._generate_and_store(character, variant, should_cancel=cancel)
-                revised_image, revised_identity = self._check_image(revised_image, character, variant)
+                revised_image, revised_identity = self._run_variant(
+                    character,
+                    variant,
+                    retry_max=retry_max,
+                    should_cancel=cancel,
+                )
                 image = revised_image
                 if revised_image.quality_status == "reject":
                     continue

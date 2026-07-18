@@ -126,6 +126,10 @@ class V2GenerationStartRequest(BaseModel):
     rerun: bool = False
 
 
+class V2RegenerateRequest(BaseModel):
+    base_prompt: str | None = None
+
+
 class V2GenerationJobState(BaseModel):
     job_id: str
     status: str
@@ -136,6 +140,18 @@ class V2GenerationJobState(BaseModel):
     completed: int
     failed: int
     current_character_tag: str
+    character_id: int | None = None
+    generation_status: str | None = None
+    generation_attempts: int = 0
+    total_generation_attempts: int = 0
+    prompt_variant_attempts: dict[str, int] = Field(default_factory=dict)
+    image_id: int | None = None
+    quality_status: str | None = None
+    quality_reasons: list[str] = Field(default_factory=list)
+    identity_status: str | None = None
+    identity_reasons: list[str] = Field(default_factory=list)
+    is_provisional: bool | None = None
+    last_failure_reason: str | None = None
     errors: list[dict[str, object]] = Field(default_factory=list)
     started_at: str
     finished_at: str | None = None

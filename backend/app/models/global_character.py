@@ -42,6 +42,9 @@ class GlobalCharacter(Base):
     first_post_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     generation_status: Mapped[str] = mapped_column(String(50), nullable=False, default="not_generated", index=True)
     generation_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_generation_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    prompt_variant_attempts: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # 의상 차이 등으로 태그가 분리된 동일 캐릭터를 묶기 위한 자기참조 부모 링크.
     # Series의 parent_series_id와 동일하게 1단계 깊이만 허용한다 (부모는 자식을 가질 수 없음).

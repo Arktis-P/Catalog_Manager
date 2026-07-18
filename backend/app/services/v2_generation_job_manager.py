@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 from collections import deque
@@ -8,6 +9,7 @@ from datetime import datetime, timezone
 
 from app.database import SessionLocal
 from app.models.global_character import GlobalCharacter
+from app.models.global_character_image import GlobalCharacterImage
 from app.services.db_write_queue import job_write_context
 from app.services.generation_service import GenerationService
 from app.services.v2_generation_pipeline import V2GenerationPipeline, V2PipelineCancelled
@@ -28,6 +30,18 @@ class V2GenerationJobState:
     completed: int = 0
     failed: int = 0
     current_character_tag: str = ""
+    character_id: int | None = None
+    generation_status: str | None = None
+    generation_attempts: int = 0
+    total_generation_attempts: int = 0
+    prompt_variant_attempts: dict[str, int] = field(default_factory=dict)
+    image_id: int | None = None
+    quality_status: str | None = None
+    quality_reasons: list[str] = field(default_factory=list)
+    identity_status: str | None = None
+    identity_reasons: list[str] = field(default_factory=list)
+    is_provisional: bool | None = None
+    last_failure_reason: str | None = None
     errors: list[dict[str, object]] = field(default_factory=list)
     started_at: str = field(default_factory=_utc_now)
     finished_at: str | None = None
@@ -39,8 +53,9 @@ class V2GenerationJobManager:
     def __init__(self) -> None:
         self._jobs: dict[str, V2GenerationJobState] = {}
         self._queue: deque[str] = deque()
-        self._arguments: dict[str, tuple[list[int] | None, bool]] = {}
+        self._arguments: dict[str, tuple[list[int] | None, bool, str | None, int | None]] = {}
         self._cancelled: set[str] = set()
+        self._regenerating_character_ids: set[int] = set()
         self._active_job_id: str | None = None
         self._lock = threading.Lock()
 
@@ -54,7 +69,34 @@ class V2GenerationJobManager:
         with self._lock:
             self._jobs[job.job_id] = job
             self._queue.append(job.job_id)
-            self._arguments[job.job_id] = (list(character_ids) if character_ids is not None else None, rerun)
+            self._arguments[job.job_id] = (
+                list(character_ids) if character_ids is not None else None,
+                rerun,
+                None,
+                None,
+            )
+        self._dispatch_next()
+        return job
+
+    def start_regeneration(
+        self,
+        character_id: int,
+        *,
+        base_prompt: str | None = None,
+    ) -> V2GenerationJobState | None:
+        job = V2GenerationJobState(
+            job_id=str(uuid.uuid4()),
+            message="V2 수동 재생성 대기 중...",
+            total=1,
+            character_id=character_id,
+        )
+        with self._lock:
+            if character_id in self._regenerating_character_ids:
+                return None
+            self._regenerating_character_ids.add(character_id)
+            self._jobs[job.job_id] = job
+            self._queue.append(job.job_id)
+            self._arguments[job.job_id] = ([character_id], True, base_prompt, character_id)
         self._dispatch_next()
         return job
 
@@ -73,11 +115,16 @@ class V2GenerationJobManager:
             job = self._jobs.get(job_id)
             if job is None or job.status not in {"queued", "running"}:
                 return False
+            was_queued = job.status == "queued"
             self._cancelled.add(job_id)
             job.status = "cancelled"
             job.phase = "cancelled"
             job.message = "사용자가 취소했습니다."
             job.finished_at = _utc_now()
+            if was_queued:
+                arguments = self._arguments.pop(job_id, None)
+                if arguments is not None and arguments[3] is not None:
+                    self._regenerating_character_ids.discard(arguments[3])
             return True
 
     def _is_cancelled(self, job_id: str) -> bool:
@@ -107,7 +154,7 @@ class V2GenerationJobManager:
                 job.errors.append(payload)
 
     def _dispatch_next(self) -> None:
-        selected: tuple[str, list[int] | None, bool] | None = None
+        selected: tuple[str, list[int] | None, bool, str | None, int | None] | None = None
         with self._lock:
             if self._active_job_id is not None:
                 return
@@ -116,9 +163,11 @@ class V2GenerationJobManager:
                 job = self._jobs.get(job_id)
                 if job is None or job.status != "queued":
                     continue
-                character_ids, rerun = self._arguments.pop(job_id, (None, False))
+                character_ids, rerun, base_prompt, regeneration_character_id = self._arguments.pop(
+                    job_id, (None, False, None, None)
+                )
                 self._active_job_id = job_id
-                selected = (job_id, character_ids, rerun)
+                selected = (job_id, character_ids, rerun, base_prompt, regeneration_character_id)
                 break
         if selected is None:
             return
@@ -143,7 +192,21 @@ class V2GenerationJobManager:
             query = query.filter(GlobalCharacter.generation_status == "not_generated")
         return query.order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.id.asc()).all()
 
-    def _run(self, job_id: str, character_ids: list[int] | None, rerun: bool) -> None:
+    @staticmethod
+    def _json_list(value: str | None) -> list[str]:
+        if not value:
+            return []
+        parsed = json.loads(value)
+        return [str(item) for item in parsed] if isinstance(parsed, list) else []
+
+    def _run(
+        self,
+        job_id: str,
+        character_ids: list[int] | None,
+        rerun: bool,
+        base_prompt: str | None,
+        regeneration_character_id: int | None,
+    ) -> None:
         db = SessionLocal()
         try:
             with job_write_context(job_id):
@@ -160,6 +223,16 @@ class V2GenerationJobManager:
                     return
 
                 characters = self._target_characters(db, character_ids, rerun)
+                if regeneration_character_id is not None and not characters:
+                    self._update(
+                        job_id,
+                        status="failed",
+                        phase="failed",
+                        message="Character not found",
+                        failed=1,
+                        finished_at=_utc_now(),
+                    )
+                    return
                 self._update(
                     job_id,
                     status="running",
@@ -180,13 +253,30 @@ class V2GenerationJobManager:
                     try:
                         result = pipeline.run_character(
                             character.id,
+                            base_prompt=(
+                                base_prompt if character.id == regeneration_character_id else None
+                            ),
                             should_cancel=lambda: self._is_cancelled(job_id),
                         )
+                        image = db.get(GlobalCharacterImage, result.image_id) if result.image_id else None
                         self._increment(job_id, completed=1)
                         self._update(
                             job_id,
                             current=index,
                             message=f"{character.character_tag}: {result.generation_status}",
+                            generation_status=result.generation_status,
+                            generation_attempts=result.generation_attempts,
+                            total_generation_attempts=character.total_generation_attempts,
+                            prompt_variant_attempts=json.loads(
+                                character.prompt_variant_attempts or "{}"
+                            ),
+                            image_id=result.image_id,
+                            quality_status=image.quality_status if image else None,
+                            quality_reasons=self._json_list(image.quality_reasons) if image else [],
+                            identity_status=image.identity_status if image else None,
+                            identity_reasons=self._json_list(image.identity_reasons) if image else [],
+                            is_provisional=image.is_provisional if image else None,
+                            last_failure_reason=character.last_failure_reason,
                         )
                     except V2PipelineCancelled:
                         break
@@ -234,6 +324,8 @@ class V2GenerationJobManager:
         finally:
             db.close()
             with self._lock:
+                if regeneration_character_id is not None:
+                    self._regenerating_character_ids.discard(regeneration_character_id)
                 if self._active_job_id == job_id:
                     self._active_job_id = None
             self._dispatch_next()

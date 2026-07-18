@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.global_character import GlobalCharacter
 from app.schemas.generation import (
     GenerationCandidate,
     GenerationCandidateListResponse,
@@ -20,6 +21,7 @@ from app.schemas.generation import (
     V2GenerationJobListResponse,
     V2GenerationJobState,
     V2GenerationStartRequest,
+    V2RegenerateRequest,
 )
 from app.services.generation_job_manager import generation_job_manager
 from app.services.generation_service import GenerationService
@@ -65,6 +67,18 @@ def _v2_job_to_schema(job) -> V2GenerationJobState:
         completed=job.completed,
         failed=job.failed,
         current_character_tag=job.current_character_tag,
+        character_id=job.character_id,
+        generation_status=job.generation_status,
+        generation_attempts=job.generation_attempts,
+        total_generation_attempts=job.total_generation_attempts,
+        prompt_variant_attempts=job.prompt_variant_attempts,
+        image_id=job.image_id,
+        quality_status=job.quality_status,
+        quality_reasons=job.quality_reasons,
+        identity_status=job.identity_status,
+        identity_reasons=job.identity_reasons,
+        is_provisional=job.is_provisional,
+        last_failure_reason=job.last_failure_reason,
         errors=job.errors,
         started_at=job.started_at,
         finished_at=job.finished_at,
@@ -82,6 +96,24 @@ def start_v2_generation(payload: V2GenerationStartRequest):
         character_ids=payload.character_ids,
         rerun=payload.rerun,
     )
+    return _v2_job_to_schema(job)
+
+
+@router.post("/v2/characters/{character_id}/regenerate", response_model=V2GenerationJobState)
+def regenerate_v2_character(
+    character_id: int,
+    payload: V2RegenerateRequest,
+    db: Session = Depends(get_db),
+):
+    character = db.get(GlobalCharacter, character_id)
+    if character is None:
+        raise HTTPException(status_code=404, detail="Character not found")
+    job = v2_generation_job_manager.start_regeneration(
+        character_id,
+        base_prompt=payload.base_prompt,
+    )
+    if job is None:
+        raise HTTPException(status_code=409, detail="Character generation already in progress")
     return _v2_job_to_schema(job)
 
 
