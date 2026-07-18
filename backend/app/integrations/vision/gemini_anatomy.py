@@ -65,7 +65,7 @@ def _key_from_env_file(path: Path) -> str | None:
         return None
     try:
         lines = path.read_text(encoding="utf-8-sig").splitlines()
-    except OSError:
+    except (OSError, UnicodeError):
         return None
     for raw_line in lines:
         line = raw_line.strip()
@@ -93,7 +93,7 @@ def _gemini_api_key() -> str | None:
     key_file = input_dir / "gemini_api_key.txt"
     try:
         value = key_file.read_text(encoding="utf-8-sig").strip()
-    except OSError:
+    except (OSError, UnicodeError):
         return None
     return value or None
 
@@ -121,7 +121,9 @@ def _parse_response(response: requests.Response) -> AnatomyAnalysis | None:
 
     if verdict not in {"ok", "uncertain", "anomaly"}:
         return None
-    if not isinstance(reasons, list) or any(reason not in ANATOMY_REASONS for reason in reasons):
+    if not isinstance(reasons, list) or any(
+        not isinstance(reason, str) or reason not in ANATOMY_REASONS for reason in reasons
+    ):
         return None
     if not 0.0 <= confidence <= 1.0:
         return None

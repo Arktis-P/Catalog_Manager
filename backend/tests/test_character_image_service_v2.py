@@ -155,9 +155,12 @@ def test_run_v2_quality_identity_checks_saves_results_and_registers_provisional(
     result = run_v2_quality_identity_checks(db, image, character)
 
     assert result.quality_status == "pass"
-    assert result.quality_checker_version == "v2.0"
+    from app.services.identity_checker import IDENTITY_CHECKER_VERSION
+    from app.services.quality_checker import QUALITY_CHECKER_VERSION
+
+    assert result.quality_checker_version == QUALITY_CHECKER_VERSION
     assert result.identity_status == "pass"
-    assert result.identity_checker_version == "v2.0"
+    assert result.identity_checker_version == IDENTITY_CHECKER_VERSION
     assert result.character_confidence == 0.9
     assert result.is_provisional is True
     assert "known_character_tags" not in identity_kwargs

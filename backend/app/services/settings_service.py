@@ -252,6 +252,22 @@ class SettingsService:
             return False
         return default
 
+    def get_v2_anatomy_check_enabled(self) -> bool:
+        return self._get_bool_setting(
+            SETTING_V2_ANATOMY_CHECK_ENABLED, DEFAULT_V2_ANATOMY_CHECK_ENABLED
+        )
+
+    def get_v2_anatomy_check_model(self) -> str:
+        return (
+            self._get_setting(SETTING_V2_ANATOMY_CHECK_MODEL)
+            or DEFAULT_V2_ANATOMY_CHECK_MODEL
+        )
+
+    def get_v2_anatomy_reject_confidence(self) -> float:
+        return self._get_float_setting(
+            SETTING_V2_ANATOMY_REJECT_CONFIDENCE, DEFAULT_V2_ANATOMY_REJECT_CONFIDENCE
+        )
+
     def get_generation_prompt_config(self) -> GenerationPromptConfig:
         defaults = default_generation_prompt_config()
         return GenerationPromptConfig(
@@ -321,12 +337,7 @@ class SettingsService:
             or DEFAULT_V2_RECENT_CHARACTER_CUTOFF,
             "v2_feature_tag_whitelist": self._get_setting(SETTING_V2_FEATURE_TAG_WHITELIST)
             or DEFAULT_V2_FEATURE_TAG_WHITELIST,
-            "v2_anatomy_check_enabled": self._get_bool_setting(
-                SETTING_V2_ANATOMY_CHECK_ENABLED, DEFAULT_V2_ANATOMY_CHECK_ENABLED
-            ),
-            "v2_anatomy_check_model": self._get_setting(SETTING_V2_ANATOMY_CHECK_MODEL)
-            or DEFAULT_V2_ANATOMY_CHECK_MODEL,
-            "v2_anatomy_reject_confidence": self._get_float_setting(
-                SETTING_V2_ANATOMY_REJECT_CONFIDENCE, DEFAULT_V2_ANATOMY_REJECT_CONFIDENCE
-            ),
+            "v2_anatomy_check_enabled": self.get_v2_anatomy_check_enabled(),
+            "v2_anatomy_check_model": self.get_v2_anatomy_check_model(),
+            "v2_anatomy_reject_confidence": self.get_v2_anatomy_reject_confidence(),
         }

@@ -175,18 +175,17 @@ def _anatomy_settings() -> tuple[bool, str, float]:
     """DB 설정을 읽되, 설정 저장소 문제는 기본 비활성으로 처리한다."""
     try:
         from app.database import SessionLocal
-        from app.services.settings_service import (
-            DEFAULT_V2_ANATOMY_CHECK_MODEL,
-            DEFAULT_V2_ANATOMY_REJECT_CONFIDENCE,
-            SettingsService,
-        )
+        from app.services.settings_service import SettingsService
 
         with SessionLocal() as db:
-            values = SettingsService(db).get_public_settings()
+            service = SettingsService(db)
+            enabled = service.get_v2_anatomy_check_enabled()
+            model = service.get_v2_anatomy_check_model()
+            reject_confidence = service.get_v2_anatomy_reject_confidence()
         return (
-            bool(values["v2_anatomy_check_enabled"]),
-            str(values["v2_anatomy_check_model"]),
-            float(values["v2_anatomy_reject_confidence"]),
+            enabled,
+            model,
+            reject_confidence,
         )
     except Exception:
         return False, "gemini-2.5-flash", 0.8
