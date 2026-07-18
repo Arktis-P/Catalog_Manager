@@ -167,12 +167,6 @@ def run_v2_quality_identity_checks(
     image.quality_checker_version = QUALITY_CHECKER_VERSION
 
     if quality.status != "reject":
-        known_character_tags = [
-            row[0]
-            for row in db.query(GlobalCharacter.character_tag)
-            .filter(GlobalCharacter.id != character.id)
-            .all()
-        ]
         expected_multicolor_tags = v2_multicolor_prompt_candidates(db, character.id)
 
         identity = check_identity(
@@ -181,7 +175,6 @@ def run_v2_quality_identity_checks(
             primary_hair_color=character.primary_hair_color,
             expected_multicolor_tags=expected_multicolor_tags,
             gender=character.gender,
-            known_character_tags=known_character_tags,
             hf_token=hf_token,
             hf_wd_model=hf_wd_model,
         )

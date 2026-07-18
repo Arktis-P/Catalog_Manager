@@ -94,38 +94,16 @@ def evaluate_identity(
     if primary_hair_color and primary_hair_color.strip():
         expected_hair_tags.add(_normalize_tag(primary_hair_color))
 
-    known_tags = {
-        _normalize_tag(t) for t in known_character_tags if t and _normalize_tag(t) != own_tag
-    }
+    # Compatibility-only parameter. Current HF WD tagger predictions expose only
+    # tag/score, not WD category metadata, so DB-wide character tag comparison
+    # would create false conflicts and force an expensive full-character scan.
+    _ = known_character_tags
 
     hair_color_confidence = _max_hair_confidence(normalized_scores, expected_hair_tags)
     suggested_multicolor = _suggest_multicolor_tags(normalized_scores, expected_multicolor)
 
-    # 1) 다른 캐릭터 태그 충돌 검사 (최우선 — 명확한 다른 캐릭터로 판단되면 reject)
-    conflicting_tag: str | None = None
-    conflicting_confidence: float | None = None
-    for tag in known_tags:
-        score = normalized_scores.get(tag)
-        if score is None or score < CHARACTER_CONFLICT_THRESHOLD:
-            continue
-        if conflicting_confidence is None or score > conflicting_confidence:
-            conflicting_tag, conflicting_confidence = tag, score
-
+    # Conflict detection is skipped until tagger output includes category data.
     character_confidence = normalized_scores.get(own_tag)
-
-    if conflicting_tag is not None:
-        reasons = ["conflicting_character_tag"]
-        if suggested_multicolor:
-            reasons.append("unexpected_multicolor_tag")
-        return IdentityCheckResult(
-            status="reject",
-            character_confidence=character_confidence,
-            hair_color_confidence=hair_color_confidence,
-            conflicting_character_tag=conflicting_tag,
-            conflicting_character_confidence=conflicting_confidence,
-            reasons=reasons,
-            suggested_multicolor_tags=suggested_multicolor,
-        )
 
     reasons = []
     if suggested_multicolor:

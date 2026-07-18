@@ -4,33 +4,32 @@ from pathlib import Path
 
 from app.services.identity_checker import (
     CHARACTER_CONFIDENT_THRESHOLD,
-    CHARACTER_CONFLICT_THRESHOLD,
     check_identity,
     evaluate_identity,
 )
 
 
-def test_other_character_high_confidence_rejects() -> None:
+def test_other_character_string_without_category_metadata_does_not_reject() -> None:
     result = evaluate_identity(
-        {"hakurei_reimu": 0.20, "kirisame_marisa": 0.88, "black_hair": 0.60},
+        {"hakurei_reimu": 0.95, "kirisame_marisa": 0.88, "black_hair": 0.60},
         character_tag="hakurei_reimu",
         primary_hair_color="black_hair",
         known_character_tags=["kirisame_marisa", "izayoi_sakuya"],
     )
-    assert result.status == "reject"
-    assert result.conflicting_character_tag == "kirisame_marisa"
-    assert result.conflicting_character_confidence == 0.88
-    assert "conflicting_character_tag" in result.reasons
+    assert result.status == "pass"
+    assert result.conflicting_character_tag is None
+    assert result.conflicting_character_confidence is None
+    assert "conflicting_character_tag" not in result.reasons
 
 
-def test_conflict_threshold_boundary_does_not_reject_below_threshold() -> None:
+def test_known_character_tags_parameter_is_compatibility_only() -> None:
     result = evaluate_identity(
-        {"hakurei_reimu": 0.9, "kirisame_marisa": CHARACTER_CONFLICT_THRESHOLD - 0.01},
+        {"hakurei_reimu": 0.9, "kirisame_marisa": 0.99, "black_hair": 0.8},
         character_tag="hakurei_reimu",
         primary_hair_color="black_hair",
         known_character_tags=["kirisame_marisa"],
     )
-    assert result.status != "reject"
+    assert result.status == "pass"
     assert result.conflicting_character_tag is None
 
 

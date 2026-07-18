@@ -133,12 +133,14 @@ def test_run_v2_quality_identity_checks_saves_results_and_registers_provisional(
     _passing_quality_image(tmp_path)
 
     character = make_character(db)
+    make_character(db, tag="kirisame_marisa")
     image = make_image(db, character, image_path="generated.png")
 
-    monkeypatch.setattr(
-        character_image_service,
-        "check_identity",
-        lambda *args, **kwargs: IdentityCheckResult(
+    identity_kwargs = {}
+
+    def fake_check_identity(*args, **kwargs):
+        identity_kwargs.update(kwargs)
+        return IdentityCheckResult(
             status="pass",
             character_confidence=0.9,
             hair_color_confidence=0.8,
@@ -146,8 +148,9 @@ def test_run_v2_quality_identity_checks_saves_results_and_registers_provisional(
             conflicting_character_confidence=None,
             reasons=["character_tag_confident"],
             suggested_multicolor_tags=[],
-        ),
-    )
+        )
+
+    monkeypatch.setattr(character_image_service, "check_identity", fake_check_identity)
 
     result = run_v2_quality_identity_checks(db, image, character)
 
@@ -157,6 +160,7 @@ def test_run_v2_quality_identity_checks_saves_results_and_registers_provisional(
     assert result.identity_checker_version == "v2.0"
     assert result.character_confidence == 0.9
     assert result.is_provisional is True
+    assert "known_character_tags" not in identity_kwargs
 
 
 def test_run_v2_quality_identity_checks_skips_identity_when_quality_rejected(
