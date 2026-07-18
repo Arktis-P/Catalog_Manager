@@ -5,6 +5,19 @@ import { pendingReviewImageUrl } from "../utils/reviewImages";
 
 const CANDIDATE_PREVIEW_SIZE = 600;
 
+const MATCH_REASON_LABELS: Record<string, string> = {
+  base_tag_match: "기본 태그 일치",
+  same_series: "동일 시리즈",
+  name_similarity: "이름 유사",
+};
+
+function matchReasonLabel(reason: string | null): string | null {
+  if (!reason) {
+    return null;
+  }
+  return MATCH_REASON_LABELS[reason] ?? reason;
+}
+
 type LinkMode = "as_child" | "as_parent";
 
 interface CharacterLinkModalProps {
@@ -260,6 +273,9 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
                               {!candidate.linkable ? " · 연결 불가" : ""}
                               {candidate.similarity_score > 0
                                 ? ` · match ${Math.round(candidate.similarity_score * 100)}%`
+                                : ""}
+                              {matchReasonLabel(candidate.match_reason)
+                                ? ` · 추천 근거: ${matchReasonLabel(candidate.match_reason)}`
                                 : ""}
                             </span>
                             {candidate.review_status === "completed" ? (

@@ -30,6 +30,8 @@ class SettingsResponse(BaseModel):
     v2_anatomy_check_enabled: bool = False
     v2_anatomy_check_model: str = "gemini-2.5-flash"
     v2_anatomy_reject_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+    v2_review_card_size: str = "medium"
+    v2_review_card_width_px: int = Field(default=0, ge=0, le=1200)
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -47,3 +49,5 @@ class SettingsUpdateRequest(BaseModel):
     hf_wd_model: str | None = None
     notification_mode: str | None = None
     notification_display: str | None = None
+    v2_review_card_size: str | None = None
+    v2_review_card_width_px: int | None = Field(default=None, ge=0, le=1200)

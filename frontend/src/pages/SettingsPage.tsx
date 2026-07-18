@@ -7,6 +7,13 @@ import {
   getNotificationPermissionStatus,
   type NotificationPermissionStatus,
 } from "../utils/notifications";
+import {
+  getV2ReviewCardSize,
+  getV2ReviewCardWidthPx,
+  setV2ReviewCardSize,
+  setV2ReviewCardWidthPx,
+  type V2ReviewCardSize,
+} from "../utils/v2ReviewCardSettings";
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -22,6 +29,8 @@ export function SettingsPage() {
   const [minCharacterPostCount, setMinCharacterPostCount] = useState(20);
   const [hfToken, setHfToken] = useState("");
   const [hfWdModel, setHfWdModel] = useState("");
+  const [v2CardSize, setV2CardSize] = useState<V2ReviewCardSize>("medium");
+  const [v2CardWidthPx, setV2CardWidthPx] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +67,8 @@ export function SettingsPage() {
         setMinCharacterPostCount(response.min_character_post_count);
         setHfToken(response.hf_token ?? "");
         setHfWdModel(response.hf_wd_model ?? "");
+        setV2CardSize(getV2ReviewCardSize() ?? (response.v2_review_card_size as V2ReviewCardSize) ?? "medium");
+        setV2CardWidthPx(getV2ReviewCardWidthPx() ?? response.v2_review_card_width_px ?? 0);
         if (response.notification_mode) {
           setNotificationMode(response.notification_mode as NotificationMode);
         }
@@ -80,6 +91,16 @@ export function SettingsPage() {
     setNotificationDisplay(contextNotificationDisplay);
   }, [contextNotificationDisplay]);
 
+  const handleCardSizeChange = (size: V2ReviewCardSize) => {
+    setV2CardSize(size);
+    setV2ReviewCardSize(size);
+  };
+
+  const handleCardWidthChange = (px: number) => {
+    setV2CardWidthPx(px);
+    setV2ReviewCardWidthPx(px);
+  };
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setSaving(true);
@@ -101,6 +122,8 @@ export function SettingsPage() {
         hf_wd_model: hfWdModel,
         notification_mode: notificationMode,
         notification_display: notificationDisplay,
+        v2_review_card_size: v2CardSize,
+        v2_review_card_width_px: v2CardWidthPx,
       });
       setContextNotificationMode(notificationMode);
       setContextNotificationDisplay(notificationDisplay);
@@ -267,6 +290,40 @@ export function SettingsPage() {
               </div>
               <p className="field-help">
                 가상 스크롤 뷰포트 주변에서 유지할 이미지 수 상한입니다.
+              </p>
+            </div>
+
+            <div className="field full-width">
+              <label>V2 리뷰 카드 크기</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {(["small", "medium", "large"] as const).map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    className={`btn btn-small${v2CardSize === size ? " btn-primary" : ""}`}
+                    onClick={() => handleCardSizeChange(size)}
+                  >
+                    {size === "small" ? "작게" : size === "medium" ? "보통" : "크게"}
+                  </button>
+                ))}
+              </div>
+              <div className="settings-range-row" style={{ marginTop: 8 }}>
+                <label htmlFor="v2-card-width-px" style={{ whiteSpace: "nowrap" }}>
+                  사용자 지정 너비 (px, 0 = 사전 설정 사용)
+                </label>
+                <input
+                  id="v2-card-width-px"
+                  type="number"
+                  min={0}
+                  max={1200}
+                  step={10}
+                  value={v2CardWidthPx}
+                  onChange={(event) => handleCardWidthChange(Number(event.target.value))}
+                  style={{ width: 90 }}
+                />
+              </div>
+              <p className="field-help">
+                V2 Review 카드 그리드에 즉시 반영됩니다. 이 값은 브라우저에 저장되며 Save 버튼과 무관하게 바로 적용됩니다.
               </p>
             </div>
 

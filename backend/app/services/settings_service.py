@@ -39,6 +39,8 @@ SETTING_V2_FEATURE_TAG_WHITELIST = "v2_feature_tag_whitelist"
 SETTING_V2_ANATOMY_CHECK_ENABLED = "v2_anatomy_check_enabled"
 SETTING_V2_ANATOMY_CHECK_MODEL = "v2_anatomy_check_model"
 SETTING_V2_ANATOMY_REJECT_CONFIDENCE = "v2_anatomy_reject_confidence"
+SETTING_V2_REVIEW_CARD_SIZE = "v2_review_card_size"
+SETTING_V2_REVIEW_CARD_WIDTH_PX = "v2_review_card_width_px"
 VALID_NOTIFICATION_DISPLAYS = {"toast", "browser", "both"}
 DEFAULT_NOTIFICATION_DISPLAY = "toast"
 DEFAULT_V2_RELEVANCE_MIN_COOCCURRENCE = 10
@@ -54,6 +56,10 @@ DEFAULT_V2_FEATURE_TAG_WHITELIST = "glasses,horns,eyepatch,dark_skin,scar,animal
 DEFAULT_V2_ANATOMY_CHECK_ENABLED = False
 DEFAULT_V2_ANATOMY_CHECK_MODEL = "gemini-2.5-flash"
 DEFAULT_V2_ANATOMY_REJECT_CONFIDENCE = 0.8
+VALID_V2_REVIEW_CARD_SIZES = {"small", "medium", "large"}
+DEFAULT_V2_REVIEW_CARD_SIZE = "medium"
+DEFAULT_V2_REVIEW_CARD_WIDTH_PX = 0
+MAX_V2_REVIEW_CARD_WIDTH_PX = 1200
 DEFAULT_NAIA_BASE_URL = "http://127.0.0.1:7243"
 DEFAULT_IMAGES_PER_CHARACTER = 2
 DEFAULT_REVIEW_THUMBNAIL_SIZE = 384
@@ -268,6 +274,26 @@ class SettingsService:
             SETTING_V2_ANATOMY_REJECT_CONFIDENCE, DEFAULT_V2_ANATOMY_REJECT_CONFIDENCE
         )
 
+    def get_v2_review_card_size(self) -> str:
+        val = self._get_setting(SETTING_V2_REVIEW_CARD_SIZE)
+        if val in VALID_V2_REVIEW_CARD_SIZES:
+            return val
+        return DEFAULT_V2_REVIEW_CARD_SIZE
+
+    def set_v2_review_card_size(self, value: str) -> str:
+        if value not in VALID_V2_REVIEW_CARD_SIZES:
+            value = DEFAULT_V2_REVIEW_CARD_SIZE
+        self._set_setting(SETTING_V2_REVIEW_CARD_SIZE, value)
+        return value
+
+    def get_v2_review_card_width_px(self) -> int:
+        return self._get_int_setting(SETTING_V2_REVIEW_CARD_WIDTH_PX, DEFAULT_V2_REVIEW_CARD_WIDTH_PX)
+
+    def set_v2_review_card_width_px(self, value: int) -> int:
+        clamped = max(0, min(MAX_V2_REVIEW_CARD_WIDTH_PX, value))
+        self._set_setting(SETTING_V2_REVIEW_CARD_WIDTH_PX, str(clamped))
+        return clamped
+
     def get_generation_prompt_config(self) -> GenerationPromptConfig:
         defaults = default_generation_prompt_config()
         return GenerationPromptConfig(
@@ -340,4 +366,6 @@ class SettingsService:
             "v2_anatomy_check_enabled": self.get_v2_anatomy_check_enabled(),
             "v2_anatomy_check_model": self.get_v2_anatomy_check_model(),
             "v2_anatomy_reject_confidence": self.get_v2_anatomy_reject_confidence(),
+            "v2_review_card_size": self.get_v2_review_card_size(),
+            "v2_review_card_width_px": self.get_v2_review_card_width_px(),
         }

@@ -245,6 +245,7 @@ export interface CharacterLinkCandidate {
   display_name: string;
   post_count: number;
   similarity_score: number;
+  match_reason: string | null;
   linkable: boolean;
   review_status: string | null;
   rating: number | null;
@@ -378,6 +379,8 @@ export interface AppSettings {
   hf_wd_model: string;
   notification_mode: NotificationMode;
   notification_display: NotificationDisplay;
+  v2_review_card_size: string;
+  v2_review_card_width_px: number;
 }
 
 export interface AppearanceReviewItem {
@@ -539,6 +542,11 @@ export interface V2ReviewCharacter {
   danbooru_wiki_url: string | null;
   series_ids: number[];
   series_tags: string[];
+  is_alternative: boolean;
+  parent_character_id: number | null;
+  parent_character_tag: string | null;
+  parent_display_name: string | null;
+  child_count: number;
   multi_color_hair: string | null;
   hair_color: string | null;
   hair_shape: string | null;
@@ -606,6 +614,33 @@ export interface V2ReviewStats {
   pending: number;
   in_progress: number;
   completed: number;
+}
+
+export interface V2GenerationJobState {
+  job_id: string;
+  status: string;
+  phase: string;
+  message: string;
+  current: number;
+  total: number;
+  completed: number;
+  failed: number;
+  current_character_tag: string;
+  character_id: number | null;
+  generation_status: string | null;
+  generation_attempts: number;
+  total_generation_attempts: number;
+  prompt_variant_attempts: Record<string, number>;
+  image_id: number | null;
+  quality_status: string | null;
+  quality_reasons: string[];
+  identity_status: string | null;
+  identity_reasons: string[];
+  is_provisional: boolean | null;
+  last_failure_reason: string | null;
+  errors: Array<Record<string, unknown>>;
+  started_at: string;
+  finished_at: string | null;
 }
 
 export interface DanbooruStatus {

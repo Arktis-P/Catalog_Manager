@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api } from "../../api/client";
 import { CharacterLinkModal } from "../CharacterLinkModal";
 import { SeriesSearchSelect } from "../SeriesSearchSelect";
-import { useReviewRegenerateJobs } from "../../context/ReviewRegenerateContext";
-import type { LinkableCharacterSummary, Series, V2ReviewCharacter, V2ReviewStats } from "../../types";
+import type { LinkableCharacterSummary, Series, V2GenerationJobState, V2ReviewCharacter, V2ReviewStats } from "../../types";
 import { cycleGender, defaultEnabledTagKeys } from "../../utils/reviewPrompt";
 import { pendingReviewImageUrl } from "../../utils/reviewImages";
+import {
+  getV2ReviewCardSize,
+  getV2ReviewCardWidthPx,
+  onV2ReviewCardSettingsChanged,
+  resolveV2ReviewCardWidthPx,
+  type V2ReviewCardSize,
+} from "../../utils/v2ReviewCardSettings";
 import {
   createV2DraftForItem,
   resolveV2FinalPrompt,
@@ -58,16 +64,14 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function toLinkableSummary(item: V2ReviewCharacter): LinkableCharacterSummary {
-  // V2ReviewCharacterResponse(WP7)에는 parent/alternative 정보가 없어 기본값으로 채운다.
-  // 병합 상태를 정확히 반영하려면 backend 스키마 확장이 필요하다(스코프 밖).
   return {
     id: item.id,
     character_tag: item.character_tag,
     display_name: item.display_name,
-    is_alternative: false,
-    parent_character_tag: null,
-    parent_display_name: null,
-    child_count: 0,
+    is_alternative: item.is_alternative,
+    parent_character_tag: item.parent_character_tag,
+    parent_display_name: item.parent_display_name,
+    child_count: item.child_count,
   };
 }
 
@@ -96,28 +100,34 @@ export function V2ReviewPanel() {
   const [drafts, setDrafts] = useState<Record<number, V2CharacterDraft>>({});
   const [submittingId, setSubmittingId] = useState<number | null>(null);
   const [thumbSize, setThumbSize] = useState(384);
+  const [cardSize, setCardSize] = useState<V2ReviewCardSize>("medium");
+  const [cardWidthPx, setCardWidthPx] = useState(0);
+  const [gridCols, setGridCols] = useState(1);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewFit, setPreviewFit] = useState(true);
   const [linkingItem, setLinkingItem] = useState<V2ReviewCharacter | null>(null);
   const [popupOpen, setPopupOpen] = useState(false);
   const [popupIndex, setPopupIndex] = useState(0);
   const [popupPosition, setPopupPosition] = useState<{ top: number; left: number } | null>(null);
-  const appliedRegenerateJobIdsRef = useRef<Set<string>>(new Set());
 
-  const {
-    enqueueRegenerateGlobal,
-    isCharacterRegenerating,
-    getCharacterJob,
-    lastCompletedJob,
-    clearLastCompletedJob,
-    lastError: regenerateError,
-    clearLastError: clearRegenerateError,
-  } = useReviewRegenerateJobs();
+  // V2 재생성은 F1이 만든 V2 전용 파이프라인(POST .../v2/characters/{id}/regenerate)만 사용한다.
+  // V1 catalog-global 재생성 Job Context(ReviewRegenerateContext)는 CatalogReviewItem 형태를
+  // 반환하므로 V2 카드 형태와 맞지 않아 여기서는 쓰지 않는다.
+  const [v2Jobs, setV2Jobs] = useState<Record<number, V2GenerationJobState>>({});
+  const processedV2JobIdsRef = useRef<Set<string>>(new Set());
 
   const itemsRef = useRef<V2ReviewCharacter[]>([]);
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
+
+  const isCharacterRegenerating = useCallback(
+    (characterId: number) => {
+      const job = v2Jobs[characterId];
+      return Boolean(job && (job.status === "queued" || job.status === "running"));
+    },
+    [v2Jobs],
+  );
   const regenCheckRef = useRef(isCharacterRegenerating);
   useEffect(() => {
     regenCheckRef.current = isCharacterRegenerating;
@@ -126,8 +136,37 @@ export function V2ReviewPanel() {
   useEffect(() => {
     void api.getSettings().then((settings) => {
       setThumbSize(settings.review_thumbnail_size);
+      setCardSize(getV2ReviewCardSize() ?? (settings.v2_review_card_size as V2ReviewCardSize) ?? "medium");
+      setCardWidthPx(getV2ReviewCardWidthPx() ?? settings.v2_review_card_width_px ?? 0);
     });
   }, []);
+
+  useEffect(
+    () =>
+      onV2ReviewCardSettingsChanged(() => {
+        setCardSize(getV2ReviewCardSize() ?? "medium");
+        setCardWidthPx(getV2ReviewCardWidthPx() ?? 0);
+      }),
+    [],
+  );
+
+  const effectiveCardWidthPx = resolveV2ReviewCardWidthPx(cardSize, cardWidthPx);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) {
+      return;
+    }
+    const measure = () => {
+      const style = window.getComputedStyle(node);
+      const cols = style.gridTemplateColumns.split(" ").filter(Boolean).length;
+      setGridCols(Math.max(1, cols));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [effectiveCardWidthPx]);
 
   const loadStats = useCallback(async () => {
     try {
@@ -161,11 +200,11 @@ export function V2ReviewPanel() {
         limit: PAGE_SIZE,
       });
       // 재생성 진행 중인 항목이 목록 응답에서 일시적으로 빠질 수 있으므로, 재생성이
-      // 끝날 때까지 기존 위치에 유지한다(GlobalCatalogReviewPanel과 동일한 패턴).
+      // 끝날 때까지 기존 위치에 유지한다.
       const fetchedIds = new Set(response.items.map((item) => item.id));
       const kept = itemsRef.current
         .map((item, index) => ({ item, index }))
-        .filter(({ item }) => !fetchedIds.has(item.id) && regenCheckRef.current(item.id, "global"));
+        .filter(({ item }) => !fetchedIds.has(item.id) && regenCheckRef.current(item.id));
       const merged = [...response.items];
       for (const { item, index } of kept) {
         merged.splice(Math.min(index, merged.length), 0, item);
@@ -272,35 +311,100 @@ export function V2ReviewPanel() {
     }
   };
 
-  useEffect(() => {
-    if (!lastCompletedJob?.result || lastCompletedJob.scope !== "global") {
-      return;
-    }
-    if (appliedRegenerateJobIdsRef.current.has(lastCompletedJob.job_id)) {
-      return;
-    }
-    appliedRegenerateJobIdsRef.current.add(lastCompletedJob.job_id);
-    // 재생성 Job의 결과는 CatalogReviewItem 형태(V1 catalog-global 응답)라 V2 카드 형태와 다르므로,
-    // 로컬 병합 대신 V2 목록을 다시 불러와 최신 quality/identity 상태를 반영한다.
-    setActionMessage(
-      `${lastCompletedJob.character_tag} 이미지 ${lastCompletedJob.result.images.length}장 재생성 완료 (기존 이미지 교체됨)`,
-    );
-    clearLastCompletedJob();
-    void loadReviews();
-    void loadStats();
-  }, [clearLastCompletedJob, lastCompletedJob, loadReviews, loadStats]);
+  // V2 응답(quality/identity 상태, image_id 등)으로 해당 카드 하나만 다시 조회해 직접 갱신한다.
+  // V1 job의 CatalogReviewItem 변환을 거치지 않는다.
+  const refreshSingleCharacter = useCallback(
+    async (characterId: number, characterTag: string) => {
+      try {
+        const response = await api.listV2ReviewCharacters({ search: characterTag, skip: 0, limit: 10 });
+        const updated =
+          response.items.find((entry) => entry.id === characterId) ??
+          response.items.find((entry) => entry.character_tag === characterTag);
+        if (!updated) {
+          await loadReviews();
+          return;
+        }
+        setItems((current) => current.map((entry) => (entry.id === characterId ? updated : entry)));
+        setDrafts((current) => ({ ...current, [characterId]: createV2DraftForItem(updated) }));
+      } catch {
+        await loadReviews();
+      }
+    },
+    [loadReviews],
+  );
+
+  const onV2JobSettled = useCallback(
+    async (job: V2GenerationJobState) => {
+      if (processedV2JobIdsRef.current.has(job.job_id)) {
+        return;
+      }
+      processedV2JobIdsRef.current.add(job.job_id);
+      if (job.status === "failed") {
+        setError(job.last_failure_reason || job.message || `${job.current_character_tag} 재생성 실패`);
+        return;
+      }
+      if (job.status !== "completed") {
+        return;
+      }
+      setActionMessage(
+        `${job.current_character_tag} 재생성 완료 (품질: ${job.quality_status ?? "-"} · 재현: ${job.identity_status ?? "-"})`,
+      );
+      if (job.character_id != null) {
+        await refreshSingleCharacter(job.character_id, job.current_character_tag);
+      }
+      await loadStats();
+    },
+    [loadStats, refreshSingleCharacter],
+  );
+
+  const runningV2JobIds = useMemo(
+    () =>
+      Object.values(v2Jobs)
+        .filter((job) => job.status === "queued" || job.status === "running")
+        .map((job) => job.job_id),
+    [v2Jobs],
+  );
 
   useEffect(() => {
-    if (regenerateError) {
-      setError(regenerateError);
-      clearRegenerateError();
+    if (runningV2JobIds.length === 0) {
+      return;
     }
-  }, [clearRegenerateError, regenerateError]);
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const updates = await Promise.all(runningV2JobIds.map((jobId) => api.getV2GenerationJob(jobId)));
+        if (cancelled) return;
+        setV2Jobs((current) => {
+          const next = { ...current };
+          for (const job of updates) {
+            if (job.character_id != null) {
+              next[job.character_id] = job;
+            }
+          }
+          return next;
+        });
+        for (const job of updates) {
+          if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+            void onV2JobSettled(job);
+          }
+        }
+      } catch {
+        // 폴링 실패는 무시하고 다음 tick에 재시도한다.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 800);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runningV2JobIds.join("|")]);
 
   const focusedItem = items[focusIndex] ?? null;
   const focusedDraft = focusedItem ? drafts[focusedItem.id] ?? createV2DraftForItem(focusedItem) : null;
   const focusedLocked = focusedItem
-    ? submittingId === focusedItem.id || isCharacterRegenerating(focusedItem.id, "global")
+    ? submittingId === focusedItem.id || isCharacterRegenerating(focusedItem.id)
     : false;
   const focusedImage = focusedItem?.images[focusedDraft?.imageIndex ?? 0] ?? null;
   const previewSrc = focusedImage ? pendingReviewImageUrl(focusedImage.image_path) : null;
@@ -394,6 +498,10 @@ export function V2ReviewPanel() {
     if (!focusedItem || !focusedDraft) {
       return;
     }
+    if (isCharacterRegenerating(focusedItem.id)) {
+      // 실행 중 중복 재생성 시도는 무시한다.
+      return;
+    }
     const chips = v2AppearanceTagChips(focusedItem);
     const enabledTags = focusedDraft.enabledTags.size > 0 ? focusedDraft.enabledTags : defaultEnabledTagKeys(chips);
     const finalPrompt = resolveV2FinalPrompt(focusedItem, { ...focusedDraft, enabledTags });
@@ -403,17 +511,20 @@ export function V2ReviewPanel() {
     }
     setError(null);
     try {
-      const job = await enqueueRegenerateGlobal(focusedItem.id, {
-        prompt: finalPrompt,
-        gender: focusedDraft.gender,
-      });
+      const job = await api.regenerateV2Character(focusedItem.id, { base_prompt: finalPrompt });
+      setV2Jobs((current) => ({ ...current, [focusedItem.id]: job }));
       setPreviewOpen(false);
-      setActionMessage(job.message);
+      setActionMessage(`${focusedItem.character_tag} 재생성 시작`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "재생성에 실패했습니다.");
+      const message = err instanceof Error ? err.message : "재생성에 실패했습니다.";
+      if (message.toLowerCase().includes("already in progress")) {
+        // 409: 백엔드에서 이미 진행 중으로 판단 - 조용히 무시한다.
+        return;
+      }
+      setError(message);
       setActionMessage(null);
     }
-  }, [enqueueRegenerateGlobal, focusedDraft, focusedItem]);
+  }, [focusedDraft, focusedItem, isCharacterRegenerating]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -489,13 +600,13 @@ export function V2ReviewPanel() {
 
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setFocusIndex((index) => Math.max(0, index - 1));
+        setFocusIndex((index) => Math.max(0, index - gridCols));
         return;
       }
 
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setFocusIndex((index) => Math.min(items.length - 1, index + 1));
+        setFocusIndex((index) => Math.min(items.length - 1, index + gridCols));
         return;
       }
 
@@ -568,6 +679,7 @@ export function V2ReviewPanel() {
     focusedDraft,
     focusedItem,
     focusedLocked,
+    gridCols,
     items.length,
     linkingItem,
     multicolorChips,
@@ -580,6 +692,7 @@ export function V2ReviewPanel() {
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.floor(skip / PAGE_SIZE) + 1;
+  const gridStyle = { "--v2-card-width": `${effectiveCardWidthPx}px` } as CSSProperties;
 
   return (
     <>
@@ -726,40 +839,36 @@ export function V2ReviewPanel() {
       ) : items.length === 0 ? (
         <div className="empty-state panel">검수할 캐릭터가 없습니다.</div>
       ) : (
-        <div ref={scrollRef} className="catalog-review-scroll" style={{ overflowY: "auto" }}>
+        <div ref={scrollRef} className="v2-review-grid" style={gridStyle}>
           {items.map((item, rowIndex) => {
             const draft = drafts[item.id] ?? createV2DraftForItem(item);
             const focused = rowIndex === focusIndex;
-            const locked = submittingId === item.id || isCharacterRegenerating(item.id, "global");
-            const regenerateJob = getCharacterJob(item.id, "global");
+            const locked = submittingId === item.id || isCharacterRegenerating(item.id);
+            const regenerateJob = v2Jobs[item.id];
             return (
-              <div
+              <V2ReviewRow
                 key={item.id}
-                className="global-catalog-review-row-wrapper"
-                onMouseDown={() => setFocusIndex(rowIndex)}
-              >
-                <V2ReviewRow
-                  item={item}
-                  rowIndex={rowIndex}
-                  focused={focused}
-                  draft={draft}
-                  thumbSize={thumbSize}
-                  locked={locked}
-                  regenerateMessage={regenerateJob?.message}
-                  regenerateProgress={
-                    regenerateJob && regenerateJob.total > 0
-                      ? { current: regenerateJob.current, total: regenerateJob.total }
-                      : null
-                  }
-                  onDraftChange={(next) => updateDraft(item.id, next)}
-                  onToggleTag={(tagKey) => toggleTag(item.id, tagKey)}
-                  onRate={(value) => setRating(item.id, value)}
-                  onRegenerate={focused ? () => void regenerateFocused() : undefined}
-                  onComplete={() => void completeItem(item)}
-                  onOpenLinkModal={() => setLinkingItem(item)}
-                  regenerating={locked}
-                />
-              </div>
+                item={item}
+                rowIndex={rowIndex}
+                focused={focused}
+                draft={draft}
+                thumbSize={thumbSize}
+                locked={locked}
+                regenerateMessage={regenerateJob?.message}
+                regenerateProgress={
+                  regenerateJob && regenerateJob.total > 0
+                    ? { current: regenerateJob.current, total: regenerateJob.total }
+                    : null
+                }
+                onSelect={() => setFocusIndex(rowIndex)}
+                onDraftChange={(next) => updateDraft(item.id, next)}
+                onToggleTag={(tagKey) => toggleTag(item.id, tagKey)}
+                onRate={(value) => setRating(item.id, value)}
+                onRegenerate={focused ? () => void regenerateFocused() : undefined}
+                onComplete={() => void completeItem(item)}
+                onOpenLinkModal={() => setLinkingItem(item)}
+                regenerating={locked}
+              />
             );
           })}
         </div>

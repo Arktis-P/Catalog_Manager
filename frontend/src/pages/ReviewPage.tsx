@@ -12,7 +12,9 @@ export function ReviewPage() {
     searchParams.get("scope") === "series" ? "series" : "characters",
   );
   const rawMode = searchParams.get("mode");
-  const initialMode = rawMode === "appearance" ? "appearance" : rawMode === "v2" ? "v2" : "catalog";
+  // V2 Review가 기본 탭이다. catalog/appearance는 명시적 쿼리로만 진입하고,
+  // 그 외 잘못된 mode 값(예: 오타)도 V2로 폴백한다.
+  const initialMode = rawMode === "catalog" ? "catalog" : rawMode === "appearance" ? "appearance" : "v2";
   const initialSeriesId = useMemo(() => {
     const raw = searchParams.get("series_id");
     if (!raw) {
@@ -36,12 +38,20 @@ export function ReviewPage() {
         <div>
           <h1 className="page-title">Review</h1>
           <p className="page-description">
-            카탈로그 이미지 검수와 외형 태그 확인을 진행합니다. Catalog Review는 시리즈 단위 집중 검수 모드입니다.
+            V2 Review가 기본 검수 화면입니다. Catalog Review(시리즈 단위 집중 검수)와 Appearance는 탭에서 따로 엽니다.
           </p>
         </div>
 
         <div className="review-header-tabs">
           <div className="review-mode-tabs" role="tablist" aria-label="Review mode">
+            <Link
+              className={`review-mode-tab${initialMode === "v2" ? " review-mode-tab--active" : ""}`}
+              to="/review?mode=v2"
+              role="tab"
+              aria-selected={initialMode === "v2"}
+            >
+              V2
+            </Link>
             <Link
               className={`review-mode-tab${initialMode === "catalog" ? " review-mode-tab--active" : ""}`}
               to="/review?mode=catalog"
@@ -57,14 +67,6 @@ export function ReviewPage() {
               aria-selected={initialMode === "appearance"}
             >
               Appearance
-            </Link>
-            <Link
-              className={`review-mode-tab${initialMode === "v2" ? " review-mode-tab--active" : ""}`}
-              to="/review?mode=v2"
-              role="tab"
-              aria-selected={initialMode === "v2"}
-            >
-              V2
             </Link>
           </div>
 

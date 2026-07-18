@@ -35,6 +35,7 @@ import type {
   ReviewRegenerateJob,
   ReviewRegenerateJobListResponse,
   Series,
+  V2GenerationJobState,
   V2ReviewCharacterListResponse,
   V2ReviewCompleteResponse,
   V2ReviewFilters,
@@ -356,6 +357,8 @@ export const api = {
         | "hf_token"
         | "hf_wd_model"
         | "notification_mode"
+        | "v2_review_card_size"
+        | "v2_review_card_width_px"
       >
     > & { notification_mode?: NotificationMode; notification_display?: NotificationDisplay },
   ) => request<AppSettings>("/settings", { method: "PATCH", body: JSON.stringify(payload) }),
@@ -509,6 +512,14 @@ export const api = {
     }),
 
   getV2ReviewStats: () => request<V2ReviewStats>("/review/v2/stats"),
+
+  regenerateV2Character: (characterId: number, payload: { base_prompt?: string | null }) =>
+    request<V2GenerationJobState>(`/generation/v2/characters/${characterId}/regenerate`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  getV2GenerationJob: (jobId: string) => request<V2GenerationJobState>(`/generation/v2/jobs/${jobId}`),
 
   dismissCatalogNeedsCheck: (characterId: number) =>
     request<{ id: number; character_status: string; needs_check_reason: string | null }>(

@@ -57,5 +57,9 @@ def update_settings(
         service.set_notification_mode(payload.notification_mode)
     if payload.notification_display is not None:
         service.set_notification_display(payload.notification_display)
+    if payload.v2_review_card_size is not None:
+        service.set_v2_review_card_size(payload.v2_review_card_size)
+    if payload.v2_review_card_width_px is not None:
+        service.set_v2_review_card_width_px(payload.v2_review_card_width_px)
     data = service.get_public_settings()
     return SettingsResponse(**data)

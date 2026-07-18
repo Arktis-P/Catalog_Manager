@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { V2ReviewCharacter, V2ReviewImage } from "../../types";
 import { danbooruPostsUrl, danbooruWikiUrl } from "../../utils/danbooruLinks";
 import {
@@ -134,32 +135,30 @@ export function v2SelectedTagsPayload(character: V2ReviewCharacter, enabledTagKe
   return rawTags.length > 0 ? rawTags.join(",") : null;
 }
 
-function qualityBadgeClass(status: string | null | undefined): string {
-  if (status === "pass") return "badge badge-success";
-  if (status === "warning") return "badge badge-warning";
-  if (status === "reject") return "badge badge-danger";
-  return "badge badge-muted";
+function statusDotClass(status: string | null | undefined): string {
+  if (status === "warning") return "v2-status-dot v2-status-dot--warning";
+  if (status === "reject") return "v2-status-dot v2-status-dot--reject";
+  return "v2-status-dot v2-status-dot--pass";
 }
 
-function qualityBadgeLabel(status: string | null | undefined): string {
-  if (status === "pass") return "품질 확인됨";
-  if (status === "warning") return "품질 확인 필요";
-  if (status === "reject") return "품질 실패";
-  return "품질 미검사";
+function qualityDotTitle(image: V2ReviewImage): string {
+  const label =
+    image.quality_status === "warning"
+      ? "품질 확인 필요"
+      : image.quality_status === "reject"
+        ? "품질 실패"
+        : "품질 확인됨";
+  return image.quality_reasons ? `${label}: ${image.quality_reasons}` : label;
 }
 
-function identityBadgeClass(status: string | null | undefined): string {
-  if (status === "pass") return "badge badge-success";
-  if (status === "warning") return "badge badge-warning";
-  if (status === "reject") return "badge badge-danger";
-  return "badge badge-muted";
-}
-
-function identityBadgeLabel(status: string | null | undefined): string {
-  if (status === "pass") return "캐릭터 재현 확인됨";
-  if (status === "warning") return "캐릭터 재현 확인 필요";
-  if (status === "reject") return "캐릭터 재현 실패";
-  return "캐릭터 재현 미검사";
+function identityDotTitle(image: V2ReviewImage): string {
+  const label =
+    image.identity_status === "warning"
+      ? "캐릭터 재현 확인 필요"
+      : image.identity_status === "reject"
+        ? "캐릭터 재현 실패"
+        : "캐릭터 재현 확인됨";
+  return image.identity_reasons ? `${label}: ${image.identity_reasons}` : label;
 }
 
 function generationStatusBadge(status: string): { label: string; className: string } | null {
@@ -172,48 +171,8 @@ function generationStatusBadge(status: string): { label: string; className: stri
   return null;
 }
 
-function renderImageSlot(
-  image: V2ReviewImage | null,
-  index: number,
-  item: V2ReviewCharacter,
-  focused: boolean,
-  draft: V2CharacterDraft,
-  thumbSize: number,
-  onDraftChange: (draft: V2CharacterDraft) => void,
-  locked: boolean,
-) {
-  if (!image) {
-    return (
-      <div key={`empty-${index}`} className="catalog-review-image-cell">
-        <div className="review-image-slot review-image-slot--empty">
-          <span className="review-image-placeholder">No image</span>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div key={image.id} className="catalog-review-image-cell">
-      <LazyReviewImage
-        imagePath={image.image_path}
-        alt={`${item.character_tag} ${index + 1}`}
-        active={focused}
-        selected={focused && !locked && draft.imageIndex === index}
-        previewAnchor={focused && draft.imageIndex === index}
-        thumbSize={thumbSize}
-        onClick={locked ? undefined : () => onDraftChange({ ...draft, imageIndex: index })}
-      />
-      <div className="catalog-review-image-meta">
-        <span className={qualityBadgeClass(image.quality_status)} title={image.quality_reasons ?? undefined}>
-          {qualityBadgeLabel(image.quality_status)}
-        </span>
-        <span className={identityBadgeClass(image.identity_status)} title={image.identity_reasons ?? undefined}>
-          {identityBadgeLabel(image.identity_status)}
-        </span>
-        {image.is_provisional ? <span className="badge badge-warning">임시 대표</span> : null}
-      </div>
-    </div>
-  );
+function humanizeTag(tag: string): string {
+  return tag.replace(/_/g, " ");
 }
 
 interface V2ReviewRowProps {
@@ -225,6 +184,7 @@ interface V2ReviewRowProps {
   locked?: boolean;
   regenerateMessage?: string;
   regenerateProgress?: { current: number; total: number } | null;
+  onSelect?: () => void;
   onDraftChange: (draft: V2CharacterDraft) => void;
   onToggleTag: (tagKey: string) => void;
   onRate: (value: number) => void;
@@ -243,6 +203,7 @@ export function V2ReviewRow({
   locked = false,
   regenerateMessage,
   regenerateProgress,
+  onSelect,
   onDraftChange,
   onToggleTag,
   onRate,
@@ -251,6 +212,7 @@ export function V2ReviewRow({
   onOpenLinkModal,
   regenerating = false,
 }: V2ReviewRowProps) {
+  const [showParentInfo, setShowParentInfo] = useState(false);
   const chips = v2AppearanceTagChips(item);
   const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
   const promptText = resolveV2FinalPrompt(item, draft);
@@ -264,20 +226,30 @@ export function V2ReviewRow({
     (option) => !suggestedChips.some((chip) => chip.key === option.key),
   );
   const featureRowChips = chips.filter((chip) => chip.group === "eyes" || chip.group === "features");
-  const imageSlots = item.images.slice(0, 4);
-  const slotCount = Math.max(1, imageSlots.length);
-  const paddedSlots = [...imageSlots, ...Array(Math.max(0, slotCount - imageSlots.length)).fill(null)];
   const genStatusBadge = generationStatusBadge(item.generation_status);
-  const seriesLabel = item.series_tags.length > 0 ? item.series_tags.join(", ") : "-";
+  const currentImage = item.images[draft.imageIndex] ?? null;
+  const hasMultipleImages = item.images.length > 1;
+  const displayName = humanizeTag(item.display_name || item.character_tag);
+  const primarySeriesTag = item.series_tags[0] ?? null;
+
+  const shiftImage = (delta: -1 | 1) => {
+    if (locked) return;
+    const maxIndex = Math.max(0, item.images.length - 1);
+    const nextIndex = Math.min(maxIndex, Math.max(0, draft.imageIndex + delta));
+    if (nextIndex !== draft.imageIndex) {
+      onDraftChange({ ...draft, imageIndex: nextIndex });
+    }
+  };
 
   return (
     <article
-      className={`catalog-review-row${focused ? " catalog-review-row--focused" : ""}${locked ? " catalog-review-row--regenerating" : ""}`}
+      className={`v2-review-card${focused ? " v2-review-card--focused" : ""}${locked ? " v2-review-card--locked" : ""}`}
       data-row-index={rowIndex}
       data-character-id={item.id}
+      onMouseDown={onSelect}
     >
       {locked && regenerateMessage ? (
-        <div className="catalog-review-regenerate-banner">
+        <div className="v2-review-card-regenerate-banner">
           <span>{regenerateMessage}</span>
           {regenerateProgress && regenerateProgress.total > 0 ? (
             <span className="catalog-review-regenerate-progress">
@@ -287,54 +259,86 @@ export function V2ReviewRow({
         </div>
       ) : null}
 
-      <div className="catalog-review-images">
-        {paddedSlots.slice(0, slotCount).map((image, index) =>
-          renderImageSlot(image, index, item, focused, draft, thumbSize, onDraftChange, locked),
+      <div className="v2-review-card-image-wrap">
+        {currentImage ? (
+          <>
+            <LazyReviewImage
+              imagePath={currentImage.image_path}
+              alt={`${item.character_tag} ${draft.imageIndex + 1}`}
+              active={focused}
+              thumbSize={thumbSize}
+            />
+            <div className="v2-review-card-overlay">
+              <span className={statusDotClass(currentImage.quality_status)} title={qualityDotTitle(currentImage)} />
+              <span className={statusDotClass(currentImage.identity_status)} title={identityDotTitle(currentImage)} />
+              {currentImage.is_provisional ? <span className="badge badge-warning">임시 대표</span> : null}
+              {item.images.length > 1 ? (
+                <span className="v2-review-card-image-count">
+                  {draft.imageIndex + 1}/{item.images.length}
+                </span>
+              ) : null}
+            </div>
+            {hasMultipleImages ? (
+              <>
+                <button
+                  type="button"
+                  className="v2-review-card-nav-btn v2-review-card-nav-btn--prev"
+                  disabled={locked || draft.imageIndex === 0}
+                  onClick={() => shiftImage(-1)}
+                  aria-label="이전 이미지"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="v2-review-card-nav-btn v2-review-card-nav-btn--next"
+                  disabled={locked || draft.imageIndex >= item.images.length - 1}
+                  onClick={() => shiftImage(1)}
+                  aria-label="다음 이미지"
+                >
+                  ›
+                </button>
+              </>
+            ) : null}
+          </>
+        ) : (
+          <div className="review-image-slot review-image-slot--empty">
+            <span className="review-image-placeholder">No image</span>
+          </div>
         )}
       </div>
 
-      <aside className="catalog-review-info">
-        <div className="catalog-review-info-header">
-          <div>
-            <h3 className="catalog-review-name">{item.character_tag}</h3>
-            <div className="catalog-review-series">{seriesLabel}</div>
-          </div>
-          <div className="catalog-review-links">
-            <a
-              className="btn btn-small"
-              href={danbooruPostsUrl(item.character_tag, item.series_tags[0] ?? "")}
-              target="_blank"
-              rel="noreferrer"
+      <div className="v2-review-card-body">
+        <div className="v2-review-card-name-row">
+          <h3 className="v2-review-card-name">{displayName}</h3>
+          {item.is_alternative ? (
+            <button
+              type="button"
+              className="badge badge-alternative v2-review-card-altered-tag"
+              onClick={() => setShowParentInfo((current) => !current)}
+              title="상위 캐릭터 정보 보기"
             >
-              Posts
-            </a>
-            <a
-              className="btn btn-small"
-              href={danbooruWikiUrl(item.character_tag, item.danbooru_wiki_url)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Wiki
-            </a>
-            {onOpenLinkModal ? (
-              <button className="btn btn-small" type="button" onClick={onOpenLinkModal}>
-                Merge
-              </button>
-            ) : null}
+              altered
+            </button>
+          ) : null}
+        </div>
+        {showParentInfo && item.is_alternative ? (
+          <div className="catalog-card-subtitle">
+            상위: {humanizeTag(item.parent_display_name || item.parent_character_tag || "미상")}
+            {item.parent_character_tag ? ` (${item.parent_character_tag})` : ""}
           </div>
+        ) : null}
+
+        <div className="v2-review-card-series-row">
+          <span className="catalog-card-subtitle">{primarySeriesTag ? humanizeTag(primarySeriesTag) : "-"}</span>
+          <span className="badge">{item.post_count.toLocaleString()} posts</span>
         </div>
 
         <div className="catalog-review-meta">
-          <span className="badge">{item.post_count.toLocaleString()} posts</span>
-          <span className="badge">시도 {item.generation_attempts}회</span>
-          {item.first_post_at ? <span className="badge">최초 포스트 {item.first_post_at.slice(0, 10)}</span> : null}
           {genStatusBadge ? <span className={genStatusBadge.className}>{genStatusBadge.label}</span> : null}
           {item.prompt_modified ? <span className="badge badge-warning">프롬프트 보정됨</span> : null}
           {item.primary_hair_needs_review ? <span className="badge badge-warning">대표 머리색 확인 필요</span> : null}
-        </div>
-
-        <div className="catalog-review-meta">
-          <span className="badge badge-muted">원래 성별: {item.gender ?? "미지정"}</span>
+          <span className="badge badge-muted">시도 {item.generation_attempts}회</span>
         </div>
 
         <ReviewRatingStars rating={draft.rating} onRate={locked ? () => undefined : onRate} />
@@ -410,33 +414,21 @@ export function V2ReviewRow({
         <div className="catalog-review-prompt-field">
           <div className="catalog-review-prompt-header">
             <label htmlFor={`v2-review-prompt-${item.id}`}>Base Prompt</label>
-            <div className="catalog-review-prompt-actions">
-              {onRegenerate ? (
-                <button
-                  className="btn btn-small btn-primary"
-                  type="button"
-                  disabled={regenerating || !promptText.trim()}
-                  onClick={onRegenerate}
-                >
-                  {regenerating ? "재생성 중..." : "Regenerate"}
-                </button>
-              ) : null}
-              {draft.promptEdited ? (
-                <button
-                  type="button"
-                  className="btn btn-small btn-ghost"
-                  onClick={() =>
-                    onDraftChange({
-                      ...draft,
-                      customPrompt: null,
-                      promptEdited: false,
-                    })
-                  }
-                >
-                  Reset tags
-                </button>
-              ) : null}
-            </div>
+            {draft.promptEdited ? (
+              <button
+                type="button"
+                className="btn btn-small btn-ghost"
+                onClick={() =>
+                  onDraftChange({
+                    ...draft,
+                    customPrompt: null,
+                    promptEdited: false,
+                  })
+                }
+              >
+                Reset tags
+              </button>
+            ) : null}
           </div>
           <textarea
             id={`v2-review-prompt-${item.id}`}
@@ -456,14 +448,50 @@ export function V2ReviewRow({
           />
         </div>
 
-        {onComplete ? (
-          <div className="catalog-review-complete-row">
-            <button className="btn btn-primary btn-small" type="button" disabled={locked} onClick={onComplete}>
-              리뷰 완료
+        <div className="v2-review-card-actions">
+          <a
+            className="btn btn-small"
+            href={danbooruPostsUrl(item.character_tag, item.series_tags[0] ?? "")}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Posts
+          </a>
+          <a
+            className="btn btn-small"
+            href={danbooruWikiUrl(item.character_tag, item.danbooru_wiki_url)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Wiki
+          </a>
+          {onOpenLinkModal ? (
+            <button className="btn btn-small" type="button" onClick={onOpenLinkModal}>
+              Merge
             </button>
-          </div>
-        ) : null}
-      </aside>
+          ) : null}
+          {onRegenerate ? (
+            <button
+              className="btn btn-small"
+              type="button"
+              disabled={regenerating || !promptText.trim()}
+              onClick={onRegenerate}
+            >
+              {regenerating ? "재생성 중..." : "Regenerate"}
+            </button>
+          ) : null}
+          {onComplete ? (
+            <button
+              className="btn btn-primary btn-small v2-review-card-complete"
+              type="button"
+              disabled={locked}
+              onClick={onComplete}
+            >
+              Complete
+            </button>
+          ) : null}
+        </div>
+      </div>
     </article>
   );
 }
