@@ -179,6 +179,7 @@ class CharacterLinkCandidate(BaseModel):
     display_name: str
     post_count: int = 0
     similarity_score: float = 0.0
+    match_reason: str | None = None
     linkable: bool = True
     review_status: str | None = None
     rating: int | None = None

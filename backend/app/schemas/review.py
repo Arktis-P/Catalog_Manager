@@ -251,6 +251,11 @@ class V2ReviewCharacterResponse(BaseModel):
     danbooru_wiki_url: str | None = None
     series_ids: list[int] = Field(default_factory=list)
     series_tags: list[str] = Field(default_factory=list)
+    is_alternative: bool = False
+    parent_character_id: int | None = None
+    parent_character_tag: str | None = None
+    parent_display_name: str | None = None
+    child_count: int = 0
     multi_color_hair: str | None = None
     hair_color: str | None = None
     hair_shape: str | None = None

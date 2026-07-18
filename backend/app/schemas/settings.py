@@ -27,6 +27,9 @@ class SettingsResponse(BaseModel):
     v2_quality_retry_max: int = 3
     v2_recent_character_cutoff: str = "2025-05-01"
     v2_feature_tag_whitelist: str = "glasses,horns,eyepatch,dark_skin,scar,animal_ears,halo,wings,tail"
+    v2_anatomy_check_enabled: bool = False
+    v2_anatomy_check_model: str = "gemini-2.5-flash"
+    v2_anatomy_reject_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
 
 
 class SettingsUpdateRequest(BaseModel):

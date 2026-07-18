@@ -36,6 +36,9 @@ SETTING_V2_RELEVANCE_MIN_POSTS_AUTO_CONFIRM = "v2_relevance_min_posts_auto_confi
 SETTING_V2_QUALITY_RETRY_MAX = "v2_quality_retry_max"
 SETTING_V2_RECENT_CHARACTER_CUTOFF = "v2_recent_character_cutoff"
 SETTING_V2_FEATURE_TAG_WHITELIST = "v2_feature_tag_whitelist"
+SETTING_V2_ANATOMY_CHECK_ENABLED = "v2_anatomy_check_enabled"
+SETTING_V2_ANATOMY_CHECK_MODEL = "v2_anatomy_check_model"
+SETTING_V2_ANATOMY_REJECT_CONFIDENCE = "v2_anatomy_reject_confidence"
 VALID_NOTIFICATION_DISPLAYS = {"toast", "browser", "both"}
 DEFAULT_NOTIFICATION_DISPLAY = "toast"
 DEFAULT_V2_RELEVANCE_MIN_COOCCURRENCE = 10
@@ -48,6 +51,9 @@ DEFAULT_V2_RELEVANCE_MIN_POSTS_AUTO_CONFIRM = 20
 DEFAULT_V2_QUALITY_RETRY_MAX = 3
 DEFAULT_V2_RECENT_CHARACTER_CUTOFF = "2025-05-01"
 DEFAULT_V2_FEATURE_TAG_WHITELIST = "glasses,horns,eyepatch,dark_skin,scar,animal_ears,halo,wings,tail"
+DEFAULT_V2_ANATOMY_CHECK_ENABLED = False
+DEFAULT_V2_ANATOMY_CHECK_MODEL = "gemini-2.5-flash"
+DEFAULT_V2_ANATOMY_REJECT_CONFIDENCE = 0.8
 DEFAULT_NAIA_BASE_URL = "http://127.0.0.1:7243"
 DEFAULT_IMAGES_PER_CHARACTER = 2
 DEFAULT_REVIEW_THUMBNAIL_SIZE = 384
@@ -235,6 +241,17 @@ class SettingsService:
         except ValueError:
             return default
 
+    def _get_bool_setting(self, key: str, default: bool) -> bool:
+        raw = self._get_setting(key)
+        if not raw:
+            return default
+        normalized = raw.lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return default
+
     def get_generation_prompt_config(self) -> GenerationPromptConfig:
         defaults = default_generation_prompt_config()
         return GenerationPromptConfig(
@@ -258,7 +275,7 @@ class SettingsService:
             self._set_setting(SETTING_GENERATION_NEGATIVE_PROMPT, negative_prompt)
         return self.get_generation_prompt_config()
 
-    def get_public_settings(self) -> dict[str, int | float | str]:
+    def get_public_settings(self) -> dict[str, bool | int | float | str]:
         prompt_config = self.get_generation_prompt_config()
         return {
             "danbooru_collect_max_concurrent": self.get_collect_max_concurrent(),
@@ -304,4 +321,12 @@ class SettingsService:
             or DEFAULT_V2_RECENT_CHARACTER_CUTOFF,
             "v2_feature_tag_whitelist": self._get_setting(SETTING_V2_FEATURE_TAG_WHITELIST)
             or DEFAULT_V2_FEATURE_TAG_WHITELIST,
+            "v2_anatomy_check_enabled": self._get_bool_setting(
+                SETTING_V2_ANATOMY_CHECK_ENABLED, DEFAULT_V2_ANATOMY_CHECK_ENABLED
+            ),
+            "v2_anatomy_check_model": self._get_setting(SETTING_V2_ANATOMY_CHECK_MODEL)
+            or DEFAULT_V2_ANATOMY_CHECK_MODEL,
+            "v2_anatomy_reject_confidence": self._get_float_setting(
+                SETTING_V2_ANATOMY_REJECT_CONFIDENCE, DEFAULT_V2_ANATOMY_REJECT_CONFIDENCE
+            ),
         }

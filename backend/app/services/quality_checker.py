@@ -5,7 +5,9 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageFilter, ImageStat, UnidentifiedImageError
 
-QUALITY_CHECKER_VERSION = "v2.0"
+from app.integrations.vision.gemini_anatomy import analyze_anatomy
+
+QUALITY_CHECKER_VERSION = "v2.1"
 
 # ── 임계값 (조정 가능) ──────────────────────────────────────────────
 # 1단계: 기본 유효성
@@ -169,8 +171,49 @@ def _quality_score(
     return round(max(0.0, min(1.0, value)), 4)
 
 
+def _anatomy_settings() -> tuple[bool, str, float]:
+    """DB 설정을 읽되, 설정 저장소 문제는 기본 비활성으로 처리한다."""
+    try:
+        from app.database import SessionLocal
+        from app.services.settings_service import (
+            DEFAULT_V2_ANATOMY_CHECK_MODEL,
+            DEFAULT_V2_ANATOMY_REJECT_CONFIDENCE,
+            SettingsService,
+        )
+
+        with SessionLocal() as db:
+            values = SettingsService(db).get_public_settings()
+        return (
+            bool(values["v2_anatomy_check_enabled"]),
+            str(values["v2_anatomy_check_model"]),
+            float(values["v2_anatomy_reject_confidence"]),
+        )
+    except Exception:
+        return False, "gemini-2.5-flash", 0.8
+
+
+def _apply_anatomy_check(image_path: Path, result: QualityCheckResult) -> QualityCheckResult:
+    if result.status == "reject":
+        return result
+
+    enabled, model, reject_confidence = _anatomy_settings()
+    if not enabled:
+        return result
+
+    analysis = analyze_anatomy(image_path, model=model)
+    if analysis is None or analysis.verdict == "ok":
+        return result
+
+    reasons = list(result.reasons)
+    if analysis.verdict == "anomaly" and analysis.confidence >= reject_confidence:
+        reasons.extend(reason for reason in analysis.reasons if reason not in reasons)
+        return QualityCheckResult(status="reject", score=result.score, reasons=reasons)
+
+    return QualityCheckResult(status="warning", score=result.score, reasons=reasons)
+
+
 def check_quality(image_path: Path) -> QualityCheckResult:
-    """3단계 자동 품질 검사 (기본 유효성 → 얼굴 → 신체).
+    """4단계 자동 품질 검사 (기본 유효성 → 얼굴 → 신체 → anatomy).
 
     1단계에서 명확한 실패만 reject한다. 2·3단계는 보조 지표로만 사용하며,
     단독으로 reject를 발생시키지 않고 warning 사유를 누적한다.
@@ -242,4 +285,5 @@ def check_quality(image_path: Path) -> QualityCheckResult:
         eye_contrast=eye_contrast,
         reasons=reasons,
     )
-    return QualityCheckResult(status=status, score=score, reasons=reasons)
+    result = QualityCheckResult(status=status, score=score, reasons=reasons)
+    return _apply_anatomy_check(image_path, result)

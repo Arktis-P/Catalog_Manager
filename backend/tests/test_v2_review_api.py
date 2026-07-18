@@ -138,6 +138,44 @@ def test_v2_review_list_filters_and_returns_preview_metadata(db: Session) -> Non
     assert item["first_post_at"] == "2020-01-02T03:04:05"
 
 
+def test_v2_review_list_includes_merge_status_fields(db: Session) -> None:
+    parent = make_character(db, tag="murasaki_shion")
+    child = make_character(db, tag="murasaki_shion_(1st_costume)")
+    child.parent_character_id = parent.id
+    db.commit()
+
+    response = review_router.list_v2_review_characters(
+        review_status=None,
+        rating=None,
+        quality_status=None,
+        identity_status=None,
+        generation_status=None,
+        gender=None,
+        series_id=None,
+        multicolor=None,
+        prompt_modified=None,
+        search=None,
+        skip=0,
+        limit=30,
+        service=ReviewService(db),
+    )
+
+    body = response.model_dump()
+    by_tag = {item["character_tag"]: item for item in body["items"]}
+
+    child_item = by_tag["murasaki_shion_(1st_costume)"]
+    assert child_item["is_alternative"] is True
+    assert child_item["parent_character_id"] == parent.id
+    assert child_item["parent_character_tag"] == "murasaki_shion"
+    assert child_item["parent_display_name"] == parent.display_name
+    assert child_item["child_count"] == 0
+
+    parent_item = by_tag["murasaki_shion"]
+    assert parent_item["is_alternative"] is False
+    assert parent_item["parent_character_id"] is None
+    assert parent_item["child_count"] == 1
+
+
 def test_v2_review_complete_saves_review_and_previous_base_prompt(db: Session) -> None:
     character = make_character(db, tag="hakurei_reimu")
     old_prompt = character.base_prompt

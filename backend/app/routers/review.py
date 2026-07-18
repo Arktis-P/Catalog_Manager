@@ -110,6 +110,7 @@ def _to_v2_review_character(character) -> V2ReviewCharacterResponse:
         danbooru_wiki_url=ReviewService.build_wiki_url(character.character_tag),
         series_ids=[link.series_id for link in series_links],
         series_tags=[link.series.series_tag for link in series_links if link.series],
+        **ReviewService.merge_status_fields(character),
         multi_color_hair=character.multi_color_hair,
         hair_color=character.hair_color,
         hair_shape=character.hair_shape,

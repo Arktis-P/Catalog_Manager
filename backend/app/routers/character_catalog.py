@@ -227,11 +227,13 @@ def list_character_link_candidates(
                 excluded.add(int(part))
 
     if mode == "parent":
-        candidates = link_service.list_parent_candidates(character, search=search, limit=limit, exclude_ids=excluded or None)
+        ranked = link_service.list_parent_candidates(character, search=search, limit=limit, exclude_ids=excluded or None)
     else:
-        candidates = link_service.list_child_candidates(character, search=search, limit=limit, exclude_ids=excluded or None)
+        ranked = link_service.list_child_candidates(character, search=search, limit=limit, exclude_ids=excluded or None)
 
     role = "parent" if mode == "parent" else "child"
+    candidates = [item.character for item in ranked]
+    reason_map = {item.character.id: item.match_reason for item in ranked}
 
     # 후보들의 리뷰 상태/이미지 수/커버 경로를 한 번에 조회해 병합 판단에 필요한
     # 정보(이미 생성·선택된 캐릭터인지)를 배지로 보여줄 수 있게 한다.
@@ -275,6 +277,7 @@ def list_character_link_candidates(
                 display_name=item.display_name,
                 post_count=item.post_count,
                 similarity_score=similarity_score(character, item),
+                match_reason=reason_map.get(item.id) or None,
                 linkable=link_service.candidate_is_linkable(item, role=role),
                 review_status=review_map[item.id].review_status if item.id in review_map else None,
                 rating=review_map[item.id].rating if item.id in review_map else None,

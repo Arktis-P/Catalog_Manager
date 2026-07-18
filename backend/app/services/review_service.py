@@ -132,6 +132,20 @@ class ReviewService:
     def build_wiki_url(character_tag: str) -> str:
         return f"{settings.danbooru_base_url}/wiki_pages/{quote(character_tag)}"
 
+    @staticmethod
+    def merge_status_fields(character: GlobalCharacter) -> dict:
+        """병합(부모/자식) 상태 필드. `character.parent`/`character.children`이
+        쿼리 단계에서 이미 eager load(joinedload/selectinload)되어 있어야
+        N+1 없이 호출할 수 있다."""
+        parent = character.parent
+        return {
+            "is_alternative": character.parent_character_id is not None,
+            "parent_character_id": character.parent_character_id,
+            "parent_character_tag": parent.character_tag if parent else None,
+            "parent_display_name": parent.display_name if parent else None,
+            "child_count": len(character.children),
+        }
+
     def _character_has_images(self):
         return exists(
             select(1).where(
