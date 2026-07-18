@@ -825,6 +825,34 @@ button,
   text-overflow: ellipsis;
 }
 
+/* ─── Characters 상단 섹션 카드 (F12) ────────────────────────────────────── */
+.characters-top-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 14px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+.characters-section-card {
+  margin: 0;
+}
+
+.characters-section-title {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.characters-section-divider {
+  border: none;
+  border-top: 1px dashed var(--border);
+  margin: 12px 0;
+}
+
 .badge-gender-boy {
   color: #9fd3f5;
   border-color: rgba(66, 148, 212, 0.4);

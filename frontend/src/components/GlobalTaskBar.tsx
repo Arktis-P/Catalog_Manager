@@ -2,12 +2,20 @@ import { useMemo } from "react";
 import { CatalogProgressPanel } from "./CatalogProgressPanel";
 import { CollectProgressPanel } from "./CollectProgressPanel";
 import { GenerationProgressPanel } from "./GenerationProgressPanel";
+import { RelevanceProgressPanel } from "./RelevanceProgressPanel";
 import { ReviewRegenerateProgressPanel } from "./ReviewRegenerateProgressPanel";
+import { V2GenerationProgressPanel } from "./V2GenerationProgressPanel";
 import { useCharacterCatalogJobs } from "../context/CharacterCatalogJobContext";
 import { useCollectJobs } from "../context/CollectJobContext";
 import { useGenerationJobs } from "../context/GenerationJobContext";
 import { useReviewRegenerateJobs } from "../context/ReviewRegenerateContext";
-import type { CatalogJob, CollectJob, ReviewRegenerateJob } from "../types";
+import type {
+  CatalogJob,
+  CollectJob,
+  RelevanceCollectJob,
+  ReviewRegenerateJob,
+  V2GenerationJobState,
+} from "../types";
 
 function jobSortRank(job: { status: string }): number {
   if (job.status === "running") {
@@ -24,6 +32,16 @@ function jobSortRank(job: { status: string }): number {
   }
   return 4;
 }
+
+type ActiveJobEntry =
+  | { kind: "collect"; job: CollectJob }
+  | { kind: "generation"; job: CollectJob }
+  | { kind: "catalog"; job: CatalogJob }
+  | { kind: "regenerate"; job: ReviewRegenerateJob }
+  | { kind: "relevance"; job: RelevanceCollectJob }
+  | { kind: "v2"; job: V2GenerationJobState };
+
+const VISIBLE_STATUSES = new Set(["queued", "running", "paused", "completed", "failed", "cancelled"]);
 
 export function GlobalTaskBar() {
   const {
@@ -43,6 +61,9 @@ export function GlobalTaskBar() {
     resumeJob: resumeGenerationJob,
     lastError: generationError,
     clearLastError: clearGenerationError,
+    v2Jobs,
+    cancelV2Job,
+    dismissV2Job,
   } = useGenerationJobs();
   const {
     jobs: catalogJobs,
@@ -52,47 +73,57 @@ export function GlobalTaskBar() {
     dismissJob: dismissCatalogJob,
     lastError: catalogError,
     clearLastError: clearCatalogError,
+    relevanceJobs,
+    cancelRelevanceJob,
+    dismissRelevanceJob,
   } = useCharacterCatalogJobs();
   const { jobs: regenerateJobs, dismissJob: dismissRegenerateJob } = useReviewRegenerateJobs();
 
-  const isCatalogJob = (job: CollectJob | CatalogJob | (typeof generationJobs)[number]): job is CatalogJob =>
-    job.job_type === "character_catalog_list" || job.job_type === "character_catalog_tags";
-
-  const isRegenerateJob = (
-    job: CollectJob | CatalogJob | ReviewRegenerateJob | (typeof generationJobs)[number],
-  ): job is ReviewRegenerateJob => "job_id" in job && !("job_type" in job);
-
-  const activeJobs = useMemo(
-    () =>
-      [...collectJobs, ...generationJobs, ...catalogJobs, ...regenerateJobs]
-        .filter(
-          (job) =>
-            job.status === "queued" ||
-            job.status === "running" ||
-            job.status === "paused" ||
-            job.status === "completed" ||
-            job.status === "failed" ||
-            job.status === "cancelled",
-        )
-        .sort((a, b) => jobSortRank(a) - jobSortRank(b) || b.started_at.localeCompare(a.started_at)),
-    [collectJobs, generationJobs, catalogJobs, regenerateJobs],
-  );
+  const activeJobs = useMemo(() => {
+    const entries: ActiveJobEntry[] = [
+      ...collectJobs.map((job): ActiveJobEntry => ({ kind: "collect", job })),
+      ...generationJobs.map((job): ActiveJobEntry => ({ kind: "generation", job })),
+      ...catalogJobs.map((job): ActiveJobEntry => ({ kind: "catalog", job })),
+      ...regenerateJobs.map((job): ActiveJobEntry => ({ kind: "regenerate", job })),
+      ...relevanceJobs.map((job): ActiveJobEntry => ({ kind: "relevance", job })),
+      ...v2Jobs.map((job): ActiveJobEntry => ({ kind: "v2", job })),
+    ];
+    return entries
+      .filter((entry) => VISIBLE_STATUSES.has(entry.job.status))
+      .sort(
+        (a, b) => jobSortRank(a.job) - jobSortRank(b.job) || b.job.started_at.localeCompare(a.job.started_at),
+      );
+  }, [collectJobs, generationJobs, catalogJobs, regenerateJobs, relevanceJobs, v2Jobs]);
 
   const dismissibleJobs = useMemo(
-    () => activeJobs.filter((job) => job.status === "completed" || job.status === "failed" || job.status === "cancelled"),
+    () =>
+      activeJobs.filter(
+        (entry) =>
+          entry.job.status === "completed" || entry.job.status === "failed" || entry.job.status === "cancelled",
+      ),
     [activeJobs],
   );
 
   const dismissAllCompleted = () => {
-    for (const job of dismissibleJobs) {
-      if (isRegenerateJob(job)) {
-        dismissRegenerateJob(job.job_id);
-      } else if (job.job_type === "image_generation") {
-        dismissGenerationJob(job.job_id);
-      } else if (isCatalogJob(job)) {
-        dismissCatalogJob(job.job_id);
-      } else {
-        dismissCollectJob(job.job_id);
+    for (const entry of dismissibleJobs) {
+      switch (entry.kind) {
+        case "regenerate":
+          dismissRegenerateJob(entry.job.job_id);
+          break;
+        case "generation":
+          dismissGenerationJob(entry.job.job_id);
+          break;
+        case "catalog":
+          dismissCatalogJob(entry.job.job_id);
+          break;
+        case "relevance":
+          dismissRelevanceJob(entry.job.job_id);
+          break;
+        case "v2":
+          dismissV2Job(entry.job.job_id);
+          break;
+        default:
+          dismissCollectJob(entry.job.job_id);
       }
     }
   };
@@ -100,7 +131,7 @@ export function GlobalTaskBar() {
   const lastError = collectError || generationError || catalogError;
 
   const queuedCount = useMemo(
-    () => activeJobs.filter((j) => j.status === "queued").length,
+    () => activeJobs.filter((entry) => entry.job.status === "queued").length,
     [activeJobs],
   );
 
@@ -141,70 +172,113 @@ export function GlobalTaskBar() {
           </div>
         ) : null}
         <div className="global-task-bar-jobs">
-          {activeJobs.map((job) =>
-            isRegenerateJob(job) ? (
-              <ReviewRegenerateProgressPanel
-                key={job.job_id}
-                job={job}
-                onDismiss={
-                  job.status === "completed" || job.status === "failed"
-                    ? () => dismissRegenerateJob(job.job_id)
-                    : undefined
-                }
-              />
-            ) : job.job_type === "image_generation" ? (
-              <GenerationProgressPanel
-                key={job.job_id}
-                job={job}
-                onCancel={
-                  job.status === "queued" || job.status === "running" || job.status === "paused"
-                    ? () => void cancelJob(job.job_id)
-                    : undefined
-                }
-                onPause={job.status === "running" ? () => void pauseGenerationJob(job.job_id) : undefined}
-                onResume={job.status === "paused" ? () => void resumeGenerationJob(job.job_id) : undefined}
-                onDismiss={
-                  job.status === "completed" || job.status === "failed" || job.status === "cancelled"
-                    ? () => dismissGenerationJob(job.job_id)
-                    : undefined
-                }
-              />
-            ) : isCatalogJob(job) ? (
-              <CatalogProgressPanel
-                key={job.job_id}
-                job={job}
-                onCancel={
-                  job.status === "queued" || job.status === "running" || job.status === "paused"
-                    ? () => void cancelCatalogJob(job.job_id)
-                    : undefined
-                }
-                onPause={job.status === "running" ? () => void pauseCatalogJob(job.job_id) : undefined}
-                onResume={job.status === "paused" ? () => void resumeCatalogJob(job.job_id) : undefined}
-                onDismiss={
-                  job.status === "completed" || job.status === "failed" || job.status === "cancelled"
-                    ? () => dismissCatalogJob(job.job_id)
-                    : undefined
-                }
-              />
-            ) : (
-              <CollectProgressPanel
-                key={job.job_id}
-                job={job}
-                onCancel={
-                  job.status === "queued" || job.status === "running" || job.status === "paused"
-                    ? () => void cancelCollectJob(job.job_id)
-                    : undefined
-                }
-                onPause={job.status === "running" ? () => void pauseCollectJob(job.job_id) : undefined}
-                onResume={job.status === "paused" ? () => void resumeCollectJob(job.job_id) : undefined}
-                onDismiss={
-                  job.status === "completed" || job.status === "failed" || job.status === "cancelled"
-                    ? () => dismissCollectJob(job.job_id)
-                    : undefined
-                }
-              />
-            ),
-          )}
+          {activeJobs.map((entry) => {
+            switch (entry.kind) {
+              case "regenerate":
+                return (
+                  <ReviewRegenerateProgressPanel
+                    key={entry.job.job_id}
+                    job={entry.job}
+                    onDismiss={
+                      entry.job.status === "completed" || entry.job.status === "failed"
+                        ? () => dismissRegenerateJob(entry.job.job_id)
+                        : undefined
+                    }
+                  />
+                );
+              case "generation":
+                return (
+                  <GenerationProgressPanel
+                    key={entry.job.job_id}
+                    job={entry.job}
+                    onCancel={
+                      entry.job.status === "queued" || entry.job.status === "running" || entry.job.status === "paused"
+                        ? () => void cancelJob(entry.job.job_id)
+                        : undefined
+                    }
+                    onPause={entry.job.status === "running" ? () => void pauseGenerationJob(entry.job.job_id) : undefined}
+                    onResume={entry.job.status === "paused" ? () => void resumeGenerationJob(entry.job.job_id) : undefined}
+                    onDismiss={
+                      entry.job.status === "completed" || entry.job.status === "failed" || entry.job.status === "cancelled"
+                        ? () => dismissGenerationJob(entry.job.job_id)
+                        : undefined
+                    }
+                  />
+                );
+              case "catalog":
+                return (
+                  <CatalogProgressPanel
+                    key={entry.job.job_id}
+                    job={entry.job}
+                    onCancel={
+                      entry.job.status === "queued" || entry.job.status === "running" || entry.job.status === "paused"
+                        ? () => void cancelCatalogJob(entry.job.job_id)
+                        : undefined
+                    }
+                    onPause={entry.job.status === "running" ? () => void pauseCatalogJob(entry.job.job_id) : undefined}
+                    onResume={entry.job.status === "paused" ? () => void resumeCatalogJob(entry.job.job_id) : undefined}
+                    onDismiss={
+                      entry.job.status === "completed" || entry.job.status === "failed" || entry.job.status === "cancelled"
+                        ? () => dismissCatalogJob(entry.job.job_id)
+                        : undefined
+                    }
+                  />
+                );
+              case "relevance":
+                return (
+                  <RelevanceProgressPanel
+                    key={entry.job.job_id}
+                    job={entry.job}
+                    onCancel={
+                      entry.job.status === "queued" || entry.job.status === "running"
+                        ? () => void cancelRelevanceJob(entry.job.job_id)
+                        : undefined
+                    }
+                    onDismiss={
+                      entry.job.status === "completed" || entry.job.status === "failed" || entry.job.status === "cancelled"
+                        ? () => dismissRelevanceJob(entry.job.job_id)
+                        : undefined
+                    }
+                  />
+                );
+              case "v2":
+                return (
+                  <V2GenerationProgressPanel
+                    key={entry.job.job_id}
+                    job={entry.job}
+                    onCancel={
+                      entry.job.status === "queued" || entry.job.status === "running"
+                        ? () => void cancelV2Job(entry.job.job_id)
+                        : undefined
+                    }
+                    onDismiss={
+                      entry.job.status === "completed" || entry.job.status === "failed" || entry.job.status === "cancelled"
+                        ? () => dismissV2Job(entry.job.job_id)
+                        : undefined
+                    }
+                  />
+                );
+              default:
+                return (
+                  <CollectProgressPanel
+                    key={entry.job.job_id}
+                    job={entry.job}
+                    onCancel={
+                      entry.job.status === "queued" || entry.job.status === "running" || entry.job.status === "paused"
+                        ? () => void cancelCollectJob(entry.job.job_id)
+                        : undefined
+                    }
+                    onPause={entry.job.status === "running" ? () => void pauseCollectJob(entry.job.job_id) : undefined}
+                    onResume={entry.job.status === "paused" ? () => void resumeCollectJob(entry.job.job_id) : undefined}
+                    onDismiss={
+                      entry.job.status === "completed" || entry.job.status === "failed" || entry.job.status === "cancelled"
+                        ? () => dismissCollectJob(entry.job.job_id)
+                        : undefined
+                    }
+                  />
+                );
+            }
+          })}
         </div>
       </div>
     </section>

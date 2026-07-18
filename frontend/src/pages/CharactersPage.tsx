@@ -214,19 +214,13 @@ export function CharactersPage() {
     isJobActive,
     lastError,
     clearLastError,
-    relevanceJobs,
     startRelevanceCollect,
-    cancelRelevanceJob,
-    dismissRelevanceJob,
     isRelevanceJobActive,
   } = useCharacterCatalogJobs();
   const {
     startCharacterGeneration,
     isGeneratingCharacters,
-    v2Jobs,
     startV2Generation,
-    cancelV2Job,
-    dismissV2Job,
     isV2GenerationActive,
   } = useGenerationJobs();
 
@@ -473,197 +467,174 @@ export function CharactersPage() {
         </div>
       ) : null}
 
-      <section className="panel">
-        <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-          <label className="series-toolbar-label" htmlFor="min-post-count">최소 포스트 수</label>
-          <input
-            id="min-post-count"
-            style={{ width: 100 }}
-            type="number"
-            min={0}
-            value={minPostCountInput}
-            onChange={(e) => setMinPostCountInput(e.target.value)}
-          />
-          <label className="series-toolbar-label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <div className="characters-top-sections">
+        <section className="panel characters-section-card">
+          <h2 className="characters-section-title">목록 수집</h2>
+          <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <label className="series-toolbar-label" htmlFor="min-post-count">최소 포스트 수</label>
             <input
-              type="checkbox"
-              checked={onlyNewInput}
-              onChange={(e) => setOnlyNewInput(e.target.checked)}
-            />
-            신규 캐릭터만 추가 (기존 항목 유지)
-          </label>
-          <button className="btn btn-primary" type="button" disabled={listJobActive} onClick={() => void handleStartListCollect()}>
-            전체 캐릭터 목록 수집
-          </button>
-          <button className="btn" type="button" disabled={selectedIds.size === 0} onClick={() => void handleCollectSelected()}>
-            선택 캐릭터 통합 태그 수집 ({selectedIds.size})
-          </button>
-          <button className="btn" type="button" onClick={() => void handleRetryFailed()}>
-            실패/부분완료 재시도
-          </button>
-          <button className="btn" type="button" onClick={() => void handleCollectAllUncollected()}>
-            미수집 전체 태그 수집
-          </button>
-          <span className="series-toolbar-label" style={{ marginLeft: 12 }}>이미지 생성</span>
-          <button className="btn" type="button" disabled={selectedIds.size === 0} onClick={() => void handleGenerateSelected()}>
-            선택 캐릭터 이미지 생성 ({selectedIds.size})
-          </button>
-          <button className="btn" type="button" disabled={items.length === 0} onClick={() => void handleGeneratePage()}>
-            현재 페이지 이미지 생성
-          </button>
-          {isGeneratingCharacters() ? (
-            <span className="badge badge-info">캐릭터 목록 이미지 생성 진행/대기 중</span>
-          ) : null}
-        </div>
-        <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
-          <label className="series-toolbar-label" htmlFor="add-character-tag">캐릭터 개별 추가</label>
-          <input
-            id="add-character-tag"
-            style={{ width: 260 }}
-            value={addTagInput}
-            onChange={(e) => setAddTagInput(e.target.value)}
-            placeholder="예: gold_ship_(umamusume)"
-            disabled={addingCharacter}
-          />
-          <button
-            className="btn"
-            type="button"
-            disabled={addingCharacter || !addTagInput.trim()}
-            onClick={() => void handleAddCharacter()}
-          >
-            {addingCharacter ? "추가 중..." : "+ 캐릭터 추가"}
-          </button>
-          {addCharacterError ? <span className="error-banner" style={{ padding: "4px 8px" }}>{addCharacterError}</span> : null}
-        </div>
-
-        <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
-          <label className="series-toolbar-label" htmlFor="relevance-target">외형(관련도) 수집 대상</label>
-          <select
-            id="relevance-target"
-            value={relevanceTarget}
-            onChange={(e) => setRelevanceTarget(e.target.value as RelevanceCollectTarget)}
-          >
-            {RELEVANCE_TARGET_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-          {relevanceTarget === "min_posts" ? (
-            <input
-              aria-label="관련도 수집 최소 포스트 수"
+              id="min-post-count"
               style={{ width: 100 }}
               type="number"
               min={0}
-              value={relevanceMinPostCountInput}
-              onChange={(e) => setRelevanceMinPostCountInput(e.target.value)}
+              value={minPostCountInput}
+              onChange={(e) => setMinPostCountInput(e.target.value)}
             />
-          ) : null}
-          <button
-            className="btn"
-            type="button"
-            disabled={
-              relevanceStarting ||
-              isRelevanceJobActive() ||
-              (relevanceTarget === "selected" && selectedIds.size === 0)
-            }
-            onClick={() => void handleStartRelevanceCollect()}
-          >
-            {relevanceStarting ? "시작 중..." : "관련도 수집 시작"}
-          </button>
-          {relevanceTarget === "selected" ? (
-            <span className="catalog-card-subtitle">선택 {selectedIds.size}개</span>
-          ) : null}
-          {relevanceStartError ? (
-            <span className="error-banner" style={{ padding: "4px 8px" }}>{relevanceStartError}</span>
-          ) : null}
-        </div>
-        {relevanceJobs.length > 0 ? (
-          <div className="card-actions" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6, marginTop: 8 }}>
-            {relevanceJobs.map((job) => (
-              <div key={job.job_id} className="catalog-card-subtitle" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span className={collectStatusBadgeClass(job.status)}>{job.status}</span>
-                <span>
-                  {job.message} ({job.current}/{job.total} · 성공 {job.success_count} · 실패 {job.error_count})
-                </span>
-                {job.status === "queued" || job.status === "running" ? (
-                  <button className="btn btn-small" type="button" onClick={() => void cancelRelevanceJob(job.job_id)}>
-                    취소
-                  </button>
-                ) : (
-                  <button className="btn btn-small" type="button" onClick={() => dismissRelevanceJob(job.job_id)}>
-                    닫기
-                  </button>
-                )}
-              </div>
-            ))}
+            <label className="series-toolbar-label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input
+                type="checkbox"
+                checked={onlyNewInput}
+                onChange={(e) => setOnlyNewInput(e.target.checked)}
+              />
+              신규 캐릭터만 추가 (기존 항목 유지)
+            </label>
+            <button className="btn btn-primary" type="button" disabled={listJobActive} onClick={() => void handleStartListCollect()}>
+              전체 캐릭터 목록 수집
+            </button>
           </div>
-        ) : null}
+        </section>
 
-        <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
-          <label className="series-toolbar-label" htmlFor="v2-generation-target">이미지 생성 (V2) 대상</label>
-          <select
-            id="v2-generation-target"
-            value={v2GenTarget}
-            onChange={(e) => setV2GenTarget(e.target.value as V2GenerationTarget)}
-          >
-            {V2_GENERATION_TARGET_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-          {v2GenTarget === "min_posts" ? (
-            <input
-              aria-label="V2 이미지 생성 최소 포스트 수"
-              style={{ width: 100 }}
-              type="number"
-              min={0}
-              value={v2GenMinPostCountInput}
-              onChange={(e) => setV2GenMinPostCountInput(e.target.value)}
-            />
-          ) : null}
-          <button
-            className="btn"
-            type="button"
-            disabled={
-              v2GenStarting ||
-              isV2GenerationActive() ||
-              (v2GenTarget === "selected" && selectedIds.size === 0) ||
-              (v2GenTarget === "page" && items.length === 0)
-            }
-            onClick={() => void handleStartV2Generation()}
-          >
-            {v2GenStarting ? "시작 중..." : "V2 이미지 생성 시작"}
-          </button>
-          {v2GenTarget === "selected" ? (
-            <span className="catalog-card-subtitle">선택 {selectedIds.size}개</span>
-          ) : null}
-          {v2GenTarget === "page" ? (
-            <span className="catalog-card-subtitle">현재 페이지 {items.length}개</span>
-          ) : null}
-          {v2GenStartError ? (
-            <span className="error-banner" style={{ padding: "4px 8px" }}>{v2GenStartError}</span>
-          ) : null}
-        </div>
-        {v2Jobs.length > 0 ? (
-          <div className="card-actions" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6, marginTop: 8 }}>
-            {v2Jobs.map((job) => (
-              <div key={job.job_id} className="catalog-card-subtitle" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span className={collectStatusBadgeClass(job.status)}>{job.status}</span>
-                <span>
-                  {job.message} ({job.current}/{job.total} · 완료 {job.completed} · 실패 {job.failed})
-                </span>
-                {job.status === "queued" || job.status === "running" ? (
-                  <button className="btn btn-small" type="button" onClick={() => void cancelV2Job(job.job_id)}>
-                    취소
-                  </button>
-                ) : (
-                  <button className="btn btn-small" type="button" onClick={() => dismissV2Job(job.job_id)}>
-                    닫기
-                  </button>
-                )}
-              </div>
-            ))}
+        <section className="panel characters-section-card">
+          <h2 className="characters-section-title">태그 수집</h2>
+          <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <label className="series-toolbar-label" htmlFor="relevance-target">외형(관련도) 수집 대상</label>
+            <select
+              id="relevance-target"
+              value={relevanceTarget}
+              onChange={(e) => setRelevanceTarget(e.target.value as RelevanceCollectTarget)}
+            >
+              {RELEVANCE_TARGET_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            {relevanceTarget === "min_posts" ? (
+              <input
+                aria-label="관련도 수집 최소 포스트 수"
+                style={{ width: 100 }}
+                type="number"
+                min={0}
+                value={relevanceMinPostCountInput}
+                onChange={(e) => setRelevanceMinPostCountInput(e.target.value)}
+              />
+            ) : null}
+            <button
+              className="btn"
+              type="button"
+              disabled={
+                relevanceStarting ||
+                isRelevanceJobActive() ||
+                (relevanceTarget === "selected" && selectedIds.size === 0)
+              }
+              onClick={() => void handleStartRelevanceCollect()}
+            >
+              {relevanceStarting ? "시작 중..." : "관련도 수집 시작"}
+            </button>
+            {relevanceTarget === "selected" ? (
+              <span className="catalog-card-subtitle">선택 {selectedIds.size}개</span>
+            ) : null}
+            {relevanceStartError ? (
+              <span className="error-banner" style={{ padding: "4px 8px" }}>{relevanceStartError}</span>
+            ) : null}
           </div>
-        ) : null}
-      </section>
+          <hr className="characters-section-divider" />
+          <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <button className="btn" type="button" disabled={selectedIds.size === 0} onClick={() => void handleCollectSelected()}>
+              선택 캐릭터 통합 태그 수집 ({selectedIds.size})
+            </button>
+            <button className="btn" type="button" onClick={() => void handleRetryFailed()}>
+              실패/부분완료 재시도
+            </button>
+            <button className="btn" type="button" onClick={() => void handleCollectAllUncollected()}>
+              미수집 전체 태그 수집
+            </button>
+          </div>
+        </section>
+
+        <section className="panel characters-section-card">
+          <h2 className="characters-section-title">이미지 생성</h2>
+          <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <label className="series-toolbar-label" htmlFor="v2-generation-target">이미지 생성 (V2) 대상</label>
+            <select
+              id="v2-generation-target"
+              value={v2GenTarget}
+              onChange={(e) => setV2GenTarget(e.target.value as V2GenerationTarget)}
+            >
+              {V2_GENERATION_TARGET_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            {v2GenTarget === "min_posts" ? (
+              <input
+                aria-label="V2 이미지 생성 최소 포스트 수"
+                style={{ width: 100 }}
+                type="number"
+                min={0}
+                value={v2GenMinPostCountInput}
+                onChange={(e) => setV2GenMinPostCountInput(e.target.value)}
+              />
+            ) : null}
+            <button
+              className="btn"
+              type="button"
+              disabled={
+                v2GenStarting ||
+                isV2GenerationActive() ||
+                (v2GenTarget === "selected" && selectedIds.size === 0) ||
+                (v2GenTarget === "page" && items.length === 0)
+              }
+              onClick={() => void handleStartV2Generation()}
+            >
+              {v2GenStarting ? "시작 중..." : "V2 이미지 생성 시작"}
+            </button>
+            {v2GenTarget === "selected" ? (
+              <span className="catalog-card-subtitle">선택 {selectedIds.size}개</span>
+            ) : null}
+            {v2GenTarget === "page" ? (
+              <span className="catalog-card-subtitle">현재 페이지 {items.length}개</span>
+            ) : null}
+            {v2GenStartError ? (
+              <span className="error-banner" style={{ padding: "4px 8px" }}>{v2GenStartError}</span>
+            ) : null}
+          </div>
+          <hr className="characters-section-divider" />
+          <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <span className="badge badge-muted">V1(구)</span>
+            <button className="btn" type="button" disabled={selectedIds.size === 0} onClick={() => void handleGenerateSelected()}>
+              선택 캐릭터 이미지 생성 ({selectedIds.size})
+            </button>
+            <button className="btn" type="button" disabled={items.length === 0} onClick={() => void handleGeneratePage()}>
+              현재 페이지 이미지 생성
+            </button>
+            {isGeneratingCharacters() ? (
+              <span className="badge badge-info">캐릭터 목록 이미지 생성 진행/대기 중</span>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="panel characters-section-card">
+          <h2 className="characters-section-title">캐릭터 개별 추가</h2>
+          <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <label className="series-toolbar-label" htmlFor="add-character-tag">캐릭터 태그</label>
+            <input
+              id="add-character-tag"
+              style={{ width: 260 }}
+              value={addTagInput}
+              onChange={(e) => setAddTagInput(e.target.value)}
+              placeholder="예: gold_ship_(umamusume)"
+              disabled={addingCharacter}
+            />
+            <button
+              className="btn"
+              type="button"
+              disabled={addingCharacter || !addTagInput.trim()}
+              onClick={() => void handleAddCharacter()}
+            >
+              {addingCharacter ? "추가 중..." : "+ 캐릭터 추가"}
+            </button>
+            {addCharacterError ? <span className="error-banner" style={{ padding: "4px 8px" }}>{addCharacterError}</span> : null}
+          </div>
+        </section>
+      </div>
 
       <section className="panel series-list-panel">
         <div className="series-sticky-toolbar">
