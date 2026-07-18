@@ -5,6 +5,16 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.integrations.danbooru.appearance_extractor import (
+    EYE_COLORS,
+    HAIR_COLORS,
+    HAIR_LENGTH_TAGS,
+    MULTI_COLOR_HAIR_FALLBACK,
+    MULTI_COLOR_HAIR_PRIORITY,
+    load_feature_tag_candidates,
+    load_hair_style_candidates,
+    parse_related_tags,
+)
 from app.integrations.danbooru.client import DanbooruClient
 from app.models.appearance_tag_relevance import CharacterAppearanceTagRelevance
 from app.models.global_character import GlobalCharacter
@@ -105,6 +115,42 @@ class TagRelevanceService:
             candidates.setdefault(tag, "feature")
         return candidates
 
+    @staticmethod
+    def _appearance_category_for_tag(tag: str) -> str | None:
+        if tag in HAIR_COLORS:
+            return "hair_color"
+        if tag in HAIR_LENGTH_TAGS or tag in load_hair_style_candidates():
+            return "hair_shape"
+        if tag in (*MULTI_COLOR_HAIR_PRIORITY, MULTI_COLOR_HAIR_FALLBACK):
+            return "multicolor"
+        if tag in EYE_COLORS:
+            return "eye_color"
+        if tag in load_feature_tag_candidates():
+            return "feature"
+        return None
+
+    def _related_candidate_tags(self, character_tag: str) -> dict[str, str]:
+        if self.client is None:
+            return {}
+        try:
+            payload = self.client.get_related_tags(character_tag, category=0)
+            related = parse_related_tags(payload)
+        except Exception:
+            return {}
+
+        candidates: dict[str, str] = {}
+        for item in related:
+            category = self._appearance_category_for_tag(item.name)
+            if category is not None:
+                candidates.setdefault(item.name, category)
+        return candidates
+
+    def _candidate_tags_for_collection(self, character: GlobalCharacter) -> dict[str, str]:
+        candidates = self._related_candidate_tags(character.character_tag)
+        for tag, category in self.candidate_tags(character).items():
+            candidates.setdefault(tag, category)
+        return candidates
+
     def _threshold_for(self, category: str, post_count: int) -> float | None:
         base = {
             "hair_shape": self.config.threshold_hair_shape,
@@ -141,7 +187,7 @@ class TagRelevanceService:
     def collect_for_character(self, character: GlobalCharacter) -> CharacterRelevanceResult:
         if self.client is None:
             self.client = DanbooruClient()
-        candidates = self.candidate_tags(character)
+        candidates = self._candidate_tags_for_collection(character)
         post_count = self.client.count_posts(character.character_tag)
         raw_rows: list[tuple[str, str, int, float]] = []
         for tag, category in candidates.items():

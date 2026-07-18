@@ -13,11 +13,20 @@ from app.services.tag_relevance_service import RelevanceConfig, TagRelevanceServ
 
 
 class FakeDanbooruClient:
-    def __init__(self, counts: dict[str, int], created_at: str = "2020-01-02T03:04:05Z"):
+    def __init__(
+        self,
+        counts: dict[str, int],
+        created_at: str = "2020-01-02T03:04:05Z",
+        related_payload: dict[str, object] | None = None,
+        related_error: Exception | None = None,
+    ):
         self.counts = counts
         self.created_at = created_at
+        self.related_payload = related_payload or {"related_tags": []}
+        self.related_error = related_error
         self.count_calls: list[str] = []
         self.post_calls: list[tuple[str, int]] = []
+        self.related_calls: list[tuple[str, int | None]] = []
 
     def count_posts(self, tags: str) -> int:
         self.count_calls.append(tags)
@@ -26,6 +35,12 @@ class FakeDanbooruClient:
     def list_posts(self, *, tags: str, limit: int):
         self.post_calls.append((tags, limit))
         return [{"created_at": self.created_at}]
+
+    def get_related_tags(self, query: str, *, category: int | None = 0) -> dict[str, object]:
+        self.related_calls.append((query, category))
+        if self.related_error is not None:
+            raise self.related_error
+        return self.related_payload
 
 
 @pytest.fixture
@@ -112,6 +127,7 @@ def test_collect_calculates_thresholds_small_sample_and_primary_hair(db, config)
     assert character.primary_hair_color == "black_hair"
     assert character.primary_hair_needs_review is True
     assert character.first_post_at == datetime(2020, 1, 2, 3, 4, 5)
+    assert client.related_calls == [("sample_character", 0)]
     assert client.post_calls == [("sample_character order:id_asc", 1)]
 
 
@@ -210,3 +226,81 @@ def test_equal_hair_scores_are_deterministic_and_need_review(db, config):
 
     assert result.primary_hair_color == "black_hair"
     assert result.primary_hair_needs_review is True
+
+
+def test_related_tags_add_only_appearance_candidates(db, config):
+    character = make_character(
+        db,
+        hair_color=None,
+        hair_shape=None,
+        multi_color_hair=None,
+        eye_color=None,
+        feature_tags=None,
+    )
+    client = FakeDanbooruClient(
+        {
+            "sample_character": 100,
+            "sample_character red_hair": 55,
+            "sample_character twintails": 45,
+            "sample_character gradient_hair": 40,
+            "sample_character green_eyes": 38,
+            "sample_character fang": 25,
+            "sample_character glasses": 0,
+            "sample_character tail": 0,
+        },
+        related_payload={
+            "related_tags": [
+                {"tag": {"name": "red_hair", "category": 0}, "frequency": 0.55},
+                {"tag": {"name": "twintails", "category": 0}, "frequency": 0.45},
+                {"tag": {"name": "gradient_hair", "category": 0}, "frequency": 0.40},
+                {"tag": {"name": "green_eyes", "category": 0}, "frequency": 0.38},
+                {"tag": {"name": "fang", "category": 0}, "frequency": 0.25},
+                {"tag": {"name": "vocaloid", "category": 3}, "frequency": 0.90},
+                {"tag": {"name": "solo", "category": 0}, "frequency": 0.80},
+            ]
+        },
+    )
+
+    TagRelevanceService(db, client=client, config=config).collect_for_character(character)
+    rows = rows_by_tag(db)
+
+    assert rows["red_hair"].tag_category == "hair_color"
+    assert rows["red_hair"].is_prompt_candidate is True
+    assert rows["twintails"].tag_category == "hair_shape"
+    assert rows["twintails"].is_prompt_candidate is True
+    assert rows["gradient_hair"].tag_category == "multicolor"
+    assert rows["gradient_hair"].is_prompt_candidate is True
+    assert rows["green_eyes"].tag_category == "eye_color"
+    assert rows["green_eyes"].is_prompt_candidate is True
+    assert rows["fang"].tag_category == "feature"
+    assert rows["fang"].is_prompt_candidate is True
+    assert "vocaloid" not in rows
+    assert "solo" not in rows
+
+
+def test_related_tags_failure_falls_back_to_existing_candidates(db, config):
+    character = make_character(
+        db,
+        hair_color="black_hair",
+        hair_shape=None,
+        multi_color_hair=None,
+        eye_color=None,
+        feature_tags=None,
+    )
+    client = FakeDanbooruClient(
+        {
+            "sample_character": 100,
+            "sample_character black_hair": 60,
+            "sample_character glasses": 0,
+            "sample_character tail": 0,
+        },
+        related_error=RuntimeError("related unavailable"),
+    )
+
+    TagRelevanceService(db, client=client, config=config).collect_for_character(character)
+    rows = rows_by_tag(db)
+
+    assert client.related_calls == [("sample_character", 0)]
+    assert rows["black_hair"].is_prompt_candidate is True
+    assert rows["glasses"].is_prompt_candidate is False
+    assert rows["tail"].is_prompt_candidate is False
