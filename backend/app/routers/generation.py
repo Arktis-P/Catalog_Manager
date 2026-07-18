@@ -91,9 +91,24 @@ def get_naia_status(db: Session = Depends(get_db)):
 
 
 @router.post("/v2/start", response_model=V2GenerationJobState)
-def start_v2_generation(payload: V2GenerationStartRequest):
+def start_v2_generation(payload: V2GenerationStartRequest, db: Session = Depends(get_db)):
+    if payload.target in ("selected", "page"):
+        character_ids = list(dict.fromkeys(payload.character_ids or []))
+        if not character_ids:
+            raise HTTPException(status_code=400, detail="character_ids must not be empty")
+    elif payload.target == "min_posts":
+        if payload.min_post_count is None:
+            raise HTTPException(status_code=400, detail="min_post_count is required for min_posts target")
+        character_ids = GenerationService(db).list_v2_not_generated_ids(min_post_count=payload.min_post_count)
+        if not character_ids:
+            raise HTTPException(status_code=404, detail="No characters to generate")
+    else:  # "not_generated"
+        character_ids = GenerationService(db).list_v2_not_generated_ids()
+        if not character_ids:
+            raise HTTPException(status_code=404, detail="No characters to generate")
+
     job = v2_generation_job_manager.start(
-        character_ids=payload.character_ids,
+        character_ids=character_ids,
         rerun=payload.rerun,
     )
     return _v2_job_to_schema(job)

@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "../api/client";
-import type { CatalogJob } from "../types";
+import type { CatalogJob, RelevanceCollectJob, RelevanceCollectStartPayload } from "../types";
 import { useNotificationMode } from "./NotificationModeContext";
 import { ensureNotificationPermission, showTaskCompleteNotification } from "../utils/notifications";
 
@@ -26,11 +26,16 @@ interface CharacterCatalogJobContextValue {
   isJobActive: (jobType?: CatalogJob["job_type"]) => boolean;
   lastError: string | null;
   clearLastError: () => void;
+  relevanceJobs: RelevanceCollectJob[];
+  startRelevanceCollect: (payload: RelevanceCollectStartPayload) => Promise<RelevanceCollectJob>;
+  cancelRelevanceJob: (jobId: string) => Promise<void>;
+  dismissRelevanceJob: (jobId: string) => void;
+  isRelevanceJobActive: () => boolean;
 }
 
 const CharacterCatalogJobContext = createContext<CharacterCatalogJobContextValue | null>(null);
 
-function upsertJob(jobs: CatalogJob[], nextJob: CatalogJob): CatalogJob[] {
+function upsertJob<T extends { job_id: string }>(jobs: T[], nextJob: T): T[] {
   const index = jobs.findIndex((job) => job.job_id === nextJob.job_id);
   if (index === -1) {
     return [nextJob, ...jobs];
@@ -54,6 +59,8 @@ function notifyJobComplete(job: CatalogJob) {
 export function CharacterCatalogJobProvider({ children }: { children: ReactNode }) {
   const [jobs, setJobs] = useState<CatalogJob[]>([]);
   const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(() => new Set());
+  const [relevanceJobs, setRelevanceJobs] = useState<RelevanceCollectJob[]>([]);
+  const [dismissedRelevanceJobIds, setDismissedRelevanceJobIds] = useState<Set<string>>(() => new Set());
   const [lastError, setLastError] = useState<string | null>(null);
   const notifiedJobIdsRef = useRef<Set<string>>(new Set());
   const { mode: notificationMode } = useNotificationMode();
@@ -71,6 +78,19 @@ export function CharacterCatalogJobProvider({ children }: { children: ReactNode 
         .filter((job) => job.status === "queued" || job.status === "running" || job.status === "paused")
         .map((job) => job.job_id),
     [visibleJobs],
+  );
+
+  const visibleRelevanceJobs = useMemo(
+    () => relevanceJobs.filter((job) => !dismissedRelevanceJobIds.has(job.job_id)),
+    [relevanceJobs, dismissedRelevanceJobIds],
+  );
+
+  const runningRelevanceJobIds = useMemo(
+    () =>
+      visibleRelevanceJobs
+        .filter((job) => job.status === "queued" || job.status === "running")
+        .map((job) => job.job_id),
+    [visibleRelevanceJobs],
   );
 
   useEffect(() => {
@@ -141,6 +161,31 @@ export function CharacterCatalogJobProvider({ children }: { children: ReactNode 
     const timer = window.setInterval(() => void poll(), 1000);
     return () => window.clearInterval(timer);
   }, [runningJobIds.join("|"), handleJobUpdates]);
+
+  useEffect(() => {
+    if (runningRelevanceJobIds.length === 0) {
+      return;
+    }
+    const poll = async () => {
+      try {
+        const updates = await Promise.all(
+          runningRelevanceJobIds.map((jobId) => api.getRelevanceCollectJob(jobId)),
+        );
+        setRelevanceJobs((current) => {
+          let merged = current;
+          for (const job of updates) {
+            merged = upsertJob(merged, job);
+          }
+          return merged;
+        });
+      } catch {
+        // Ignore transient poll errors.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 1000);
+    return () => window.clearInterval(timer);
+  }, [runningRelevanceJobIds.join("|")]);
 
   const registerStartedJob = useCallback((job: CatalogJob) => {
     setDismissedJobIds((current) => {
@@ -226,6 +271,38 @@ export function CharacterCatalogJobProvider({ children }: { children: ReactNode 
     [visibleJobs],
   );
 
+  const startRelevanceCollect = useCallback(async (payload: RelevanceCollectStartPayload) => {
+    setLastError(null);
+    const job = await api.startRelevanceCollect(payload);
+    setDismissedRelevanceJobIds((current) => {
+      if (!current.has(job.job_id)) return current;
+      const next = new Set(current);
+      next.delete(job.job_id);
+      return next;
+    });
+    setRelevanceJobs((current) => upsertJob(current, job));
+    return job;
+  }, []);
+
+  const cancelRelevanceJob = useCallback(async (jobId: string) => {
+    try {
+      setLastError(null);
+      const job = await api.cancelRelevanceCollectJob(jobId);
+      setRelevanceJobs((current) => upsertJob(current, job));
+    } catch (err) {
+      setLastError(err instanceof Error ? err.message : "Failed to cancel job");
+    }
+  }, []);
+
+  const dismissRelevanceJob = useCallback((jobId: string) => {
+    setDismissedRelevanceJobIds((current) => new Set(current).add(jobId));
+  }, []);
+
+  const isRelevanceJobActive = useCallback(
+    () => visibleRelevanceJobs.some((job) => job.status === "queued" || job.status === "running"),
+    [visibleRelevanceJobs],
+  );
+
   const value = useMemo(
     () => ({
       jobs: visibleJobs,
@@ -240,6 +317,11 @@ export function CharacterCatalogJobProvider({ children }: { children: ReactNode 
       isJobActive,
       lastError,
       clearLastError: () => setLastError(null),
+      relevanceJobs: visibleRelevanceJobs,
+      startRelevanceCollect,
+      cancelRelevanceJob,
+      dismissRelevanceJob,
+      isRelevanceJobActive,
     }),
     [
       visibleJobs,
@@ -253,6 +335,11 @@ export function CharacterCatalogJobProvider({ children }: { children: ReactNode 
       dismissJob,
       isJobActive,
       lastError,
+      visibleRelevanceJobs,
+      startRelevanceCollect,
+      cancelRelevanceJob,
+      dismissRelevanceJob,
+      isRelevanceJobActive,
     ],
   );
 

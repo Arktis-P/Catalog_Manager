@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.integrations.danbooru.appearance_extractor import (
@@ -272,6 +273,26 @@ class TagRelevanceService:
             primary_hair_needs_review=hair_needs_review,
             first_post_at=first_post_at,
         )
+
+    def list_uncollected_ids(
+        self, *, min_post_count: int | None = None, limit: int | None = None
+    ) -> list[int]:
+        """관련도 미수집(수집 이력 없음 또는 appearance_status != completed) 캐릭터 id를
+        post_count desc, id asc 순으로 반환한다. min_post_count가 주어지면 그 이상만 포함한다."""
+        has_history = (
+            select(CharacterAppearanceTagRelevance.id)
+            .where(CharacterAppearanceTagRelevance.global_character_id == GlobalCharacter.id)
+            .exists()
+        )
+        query = self.db.query(GlobalCharacter.id).filter(
+            or_(~has_history, GlobalCharacter.appearance_status != "completed")
+        )
+        if min_post_count is not None:
+            query = query.filter(GlobalCharacter.post_count >= min_post_count)
+        query = query.order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.id.asc())
+        if limit is not None:
+            query = query.limit(limit)
+        return [row[0] for row in query.all()]
 
     def list_for_character(self, character_id: int) -> list[CharacterAppearanceTagRelevance]:
         return (

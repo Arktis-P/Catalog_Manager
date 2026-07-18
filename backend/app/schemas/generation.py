@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -122,7 +124,9 @@ class GlobalGenerationStartRequest(BaseModel):
 
 
 class V2GenerationStartRequest(BaseModel):
+    target: Literal["selected", "page", "not_generated", "min_posts"] = "selected"
     character_ids: list[int] | None = Field(default=None, max_length=300)
+    min_post_count: int | None = Field(default=None, ge=0)
     rerun: bool = False
 
 

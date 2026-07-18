@@ -1,10 +1,13 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 
 class RelevanceCollectStartRequest(BaseModel):
+    target: Literal["selected", "uncollected", "min_posts"] = "selected"
     character_ids: list[int] | None = Field(default=None)
+    min_post_count: int | None = Field(default=None, ge=0)
 
 
 class RelevanceCollectError(BaseModel):

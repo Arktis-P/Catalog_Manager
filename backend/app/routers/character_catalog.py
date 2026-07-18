@@ -58,15 +58,8 @@ def start_relevance_collect(
     db: Session = Depends(get_db),
 ):
     _require_danbooru()
-    if payload.character_ids is None:
-        character_ids = [
-            row[0]
-            for row in db.query(GlobalCharacter.id)
-            .order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.id.asc())
-            .all()
-        ]
-    else:
-        character_ids = list(dict.fromkeys(payload.character_ids))
+    if payload.target == "selected":
+        character_ids = list(dict.fromkeys(payload.character_ids or []))
         if not character_ids:
             raise HTTPException(status_code=400, detail="character_ids must not be empty")
         found_ids = {
@@ -78,9 +71,15 @@ def start_relevance_collect(
         missing = [character_id for character_id in character_ids if character_id not in found_ids]
         if missing:
             raise HTTPException(status_code=404, detail=f"Character not found: {missing[0]}")
+    elif payload.target == "min_posts":
+        if payload.min_post_count is None:
+            raise HTTPException(status_code=400, detail="min_post_count is required for min_posts target")
+        character_ids = TagRelevanceService(db).list_uncollected_ids(min_post_count=payload.min_post_count)
+    else:  # "uncollected"
+        character_ids = TagRelevanceService(db).list_uncollected_ids()
 
     if not character_ids:
-        raise HTTPException(status_code=400, detail="No characters to collect")
+        raise HTTPException(status_code=404, detail="No characters to collect")
     job = relevance_collect_job_manager.start(character_ids)
     return RelevanceCollectJobResponse.from_state(job)
 

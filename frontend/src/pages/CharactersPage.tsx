@@ -3,7 +3,12 @@ import { api } from "../api/client";
 import { CharacterLinkModal } from "../components/CharacterLinkModal";
 import { useCharacterCatalogJobs } from "../context/CharacterCatalogJobContext";
 import { useGenerationJobs } from "../context/GenerationJobContext";
-import type { GlobalCharacter, GlobalCharacterImage } from "../types";
+import type {
+  GlobalCharacter,
+  GlobalCharacterImage,
+  RelevanceCollectTarget,
+  V2GenerationTarget,
+} from "../types";
 import { collectStatusBadgeClass, collectStatusLabel } from "../utils/characterCatalogStatus";
 import { danbooruWikiUrl, openExternal } from "../utils/danbooruLinks";
 import { pendingReviewImageUrl } from "../utils/reviewImages";
@@ -15,6 +20,17 @@ const ALTERNATIVE_OPTIONS: { value: "" | "yes" | "no"; label: string }[] = [
   { value: "", label: "All" },
   { value: "yes", label: "Alternative만" },
   { value: "no", label: "일반만" },
+];
+const RELEVANCE_TARGET_OPTIONS: { value: RelevanceCollectTarget; label: string }[] = [
+  { value: "selected", label: "선택된 캐릭터들" },
+  { value: "uncollected", label: "미수집 전체" },
+  { value: "min_posts", label: "포스트 수 n개 이상" },
+];
+const V2_GENERATION_TARGET_OPTIONS: { value: V2GenerationTarget; label: string }[] = [
+  { value: "selected", label: "선택된 캐릭터들" },
+  { value: "page", label: "현재 페이지 캐릭터들" },
+  { value: "not_generated", label: "미생성 전체" },
+  { value: "min_posts", label: "포스트 수 n개 이상" },
 ];
 
 function formatDate(value: string | null): string {
@@ -189,9 +205,30 @@ function CharacterImagesModal({ character, onClose }: { character: GlobalCharact
 }
 
 export function CharactersPage() {
-  const { jobs, startListJob, startTagsJob, retryFailed, collectAllUncollected, isJobActive, lastError, clearLastError } =
-    useCharacterCatalogJobs();
-  const { startCharacterGeneration, isGeneratingCharacters } = useGenerationJobs();
+  const {
+    jobs,
+    startListJob,
+    startTagsJob,
+    retryFailed,
+    collectAllUncollected,
+    isJobActive,
+    lastError,
+    clearLastError,
+    relevanceJobs,
+    startRelevanceCollect,
+    cancelRelevanceJob,
+    dismissRelevanceJob,
+    isRelevanceJobActive,
+  } = useCharacterCatalogJobs();
+  const {
+    startCharacterGeneration,
+    isGeneratingCharacters,
+    v2Jobs,
+    startV2Generation,
+    cancelV2Job,
+    dismissV2Job,
+    isV2GenerationActive,
+  } = useGenerationJobs();
 
   const [items, setItems] = useState<GlobalCharacter[]>([]);
   const [total, setTotal] = useState(0);
@@ -219,6 +256,28 @@ export function CharactersPage() {
   const [addTagInput, setAddTagInput] = useState("");
   const [addingCharacter, setAddingCharacter] = useState(false);
   const [addCharacterError, setAddCharacterError] = useState<string | null>(null);
+
+  const [relevanceTarget, setRelevanceTarget] = useState<RelevanceCollectTarget>("selected");
+  const [relevanceMinPostCountInput, setRelevanceMinPostCountInput] = useState("500");
+  const [relevanceStarting, setRelevanceStarting] = useState(false);
+  const [relevanceStartError, setRelevanceStartError] = useState<string | null>(null);
+
+  const [v2GenTarget, setV2GenTarget] = useState<V2GenerationTarget>("selected");
+  const [v2GenMinPostCountInput, setV2GenMinPostCountInput] = useState("500");
+  const [v2GenStarting, setV2GenStarting] = useState(false);
+  const [v2GenStartError, setV2GenStartError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api
+      .getSettings()
+      .then((settings) => {
+        setRelevanceMinPostCountInput(String(settings.min_character_post_count));
+        setV2GenMinPostCountInput(String(settings.min_character_post_count));
+      })
+      .catch(() => {
+        // 설정을 불러오지 못해도 기본값(500)으로 계속 진행한다.
+      });
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(searchInput.trim()), 300);
@@ -350,6 +409,49 @@ export function CharactersPage() {
     setSelectedIds(new Set());
   };
 
+  const handleStartRelevanceCollect = async () => {
+    if (relevanceTarget === "selected" && selectedIds.size === 0) return;
+    setRelevanceStartError(null);
+    setRelevanceStarting(true);
+    try {
+      if (relevanceTarget === "selected") {
+        await startRelevanceCollect({ target: "selected", character_ids: [...selectedIds] });
+      } else if (relevanceTarget === "uncollected") {
+        await startRelevanceCollect({ target: "uncollected" });
+      } else {
+        const minPostCount = Math.max(0, parseInt(relevanceMinPostCountInput, 10) || 0);
+        await startRelevanceCollect({ target: "min_posts", min_post_count: minPostCount });
+      }
+    } catch (err) {
+      setRelevanceStartError(err instanceof Error ? err.message : "관련도 수집 시작에 실패했습니다.");
+    } finally {
+      setRelevanceStarting(false);
+    }
+  };
+
+  const handleStartV2Generation = async () => {
+    if (v2GenTarget === "selected" && selectedIds.size === 0) return;
+    if (v2GenTarget === "page" && items.length === 0) return;
+    setV2GenStartError(null);
+    setV2GenStarting(true);
+    try {
+      if (v2GenTarget === "selected") {
+        await startV2Generation({ target: "selected", character_ids: [...selectedIds] });
+      } else if (v2GenTarget === "page") {
+        await startV2Generation({ target: "page", character_ids: items.map((item) => item.id) });
+      } else if (v2GenTarget === "not_generated") {
+        await startV2Generation({ target: "not_generated" });
+      } else {
+        const minPostCount = Math.max(0, parseInt(v2GenMinPostCountInput, 10) || 0);
+        await startV2Generation({ target: "min_posts", min_post_count: minPostCount });
+      }
+    } catch (err) {
+      setV2GenStartError(err instanceof Error ? err.message : "V2 이미지 생성 시작에 실패했습니다.");
+    } finally {
+      setV2GenStarting(false);
+    }
+  };
+
   const listJobActive = isJobActive("character_catalog_list");
 
   return (
@@ -433,6 +535,134 @@ export function CharactersPage() {
           </button>
           {addCharacterError ? <span className="error-banner" style={{ padding: "4px 8px" }}>{addCharacterError}</span> : null}
         </div>
+
+        <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
+          <label className="series-toolbar-label" htmlFor="relevance-target">외형(관련도) 수집 대상</label>
+          <select
+            id="relevance-target"
+            value={relevanceTarget}
+            onChange={(e) => setRelevanceTarget(e.target.value as RelevanceCollectTarget)}
+          >
+            {RELEVANCE_TARGET_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          {relevanceTarget === "min_posts" ? (
+            <input
+              aria-label="관련도 수집 최소 포스트 수"
+              style={{ width: 100 }}
+              type="number"
+              min={0}
+              value={relevanceMinPostCountInput}
+              onChange={(e) => setRelevanceMinPostCountInput(e.target.value)}
+            />
+          ) : null}
+          <button
+            className="btn"
+            type="button"
+            disabled={
+              relevanceStarting ||
+              isRelevanceJobActive() ||
+              (relevanceTarget === "selected" && selectedIds.size === 0)
+            }
+            onClick={() => void handleStartRelevanceCollect()}
+          >
+            {relevanceStarting ? "시작 중..." : "관련도 수집 시작"}
+          </button>
+          {relevanceTarget === "selected" ? (
+            <span className="catalog-card-subtitle">선택 {selectedIds.size}개</span>
+          ) : null}
+          {relevanceStartError ? (
+            <span className="error-banner" style={{ padding: "4px 8px" }}>{relevanceStartError}</span>
+          ) : null}
+        </div>
+        {relevanceJobs.length > 0 ? (
+          <div className="card-actions" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6, marginTop: 8 }}>
+            {relevanceJobs.map((job) => (
+              <div key={job.job_id} className="catalog-card-subtitle" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className={collectStatusBadgeClass(job.status)}>{job.status}</span>
+                <span>
+                  {job.message} ({job.current}/{job.total} · 성공 {job.success_count} · 실패 {job.error_count})
+                </span>
+                {job.status === "queued" || job.status === "running" ? (
+                  <button className="btn btn-small" type="button" onClick={() => void cancelRelevanceJob(job.job_id)}>
+                    취소
+                  </button>
+                ) : (
+                  <button className="btn btn-small" type="button" onClick={() => dismissRelevanceJob(job.job_id)}>
+                    닫기
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="card-actions" style={{ alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
+          <label className="series-toolbar-label" htmlFor="v2-generation-target">이미지 생성 (V2) 대상</label>
+          <select
+            id="v2-generation-target"
+            value={v2GenTarget}
+            onChange={(e) => setV2GenTarget(e.target.value as V2GenerationTarget)}
+          >
+            {V2_GENERATION_TARGET_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          {v2GenTarget === "min_posts" ? (
+            <input
+              aria-label="V2 이미지 생성 최소 포스트 수"
+              style={{ width: 100 }}
+              type="number"
+              min={0}
+              value={v2GenMinPostCountInput}
+              onChange={(e) => setV2GenMinPostCountInput(e.target.value)}
+            />
+          ) : null}
+          <button
+            className="btn"
+            type="button"
+            disabled={
+              v2GenStarting ||
+              isV2GenerationActive() ||
+              (v2GenTarget === "selected" && selectedIds.size === 0) ||
+              (v2GenTarget === "page" && items.length === 0)
+            }
+            onClick={() => void handleStartV2Generation()}
+          >
+            {v2GenStarting ? "시작 중..." : "V2 이미지 생성 시작"}
+          </button>
+          {v2GenTarget === "selected" ? (
+            <span className="catalog-card-subtitle">선택 {selectedIds.size}개</span>
+          ) : null}
+          {v2GenTarget === "page" ? (
+            <span className="catalog-card-subtitle">현재 페이지 {items.length}개</span>
+          ) : null}
+          {v2GenStartError ? (
+            <span className="error-banner" style={{ padding: "4px 8px" }}>{v2GenStartError}</span>
+          ) : null}
+        </div>
+        {v2Jobs.length > 0 ? (
+          <div className="card-actions" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6, marginTop: 8 }}>
+            {v2Jobs.map((job) => (
+              <div key={job.job_id} className="catalog-card-subtitle" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className={collectStatusBadgeClass(job.status)}>{job.status}</span>
+                <span>
+                  {job.message} ({job.current}/{job.total} · 완료 {job.completed} · 실패 {job.failed})
+                </span>
+                {job.status === "queued" || job.status === "running" ? (
+                  <button className="btn btn-small" type="button" onClick={() => void cancelV2Job(job.job_id)}>
+                    취소
+                  </button>
+                ) : (
+                  <button className="btn btn-small" type="button" onClick={() => dismissV2Job(job.job_id)}>
+                    닫기
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="panel series-list-panel">

@@ -260,6 +260,44 @@ export interface CharacterLinkResult {
   parent_character_tag: string;
 }
 
+export type RelevanceCollectTarget = "selected" | "uncollected" | "min_posts";
+
+export interface RelevanceCollectError {
+  character_id: number;
+  character_tag: string;
+  error: string;
+}
+
+export interface RelevanceCollectJob {
+  job_id: string;
+  status: string;
+  phase: string;
+  message: string;
+  current: number;
+  total: number;
+  success_count: number;
+  error_count: number;
+  current_character_tag: string;
+  errors: RelevanceCollectError[];
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface RelevanceCollectStartPayload {
+  target: RelevanceCollectTarget;
+  character_ids?: number[];
+  min_post_count?: number;
+}
+
+export type V2GenerationTarget = "selected" | "page" | "not_generated" | "min_posts";
+
+export interface V2GenerationStartPayload {
+  target: V2GenerationTarget;
+  character_ids?: number[];
+  min_post_count?: number;
+  rerun?: boolean;
+}
+
 export interface CatalogJob {
   job_id: string;
   job_type: "character_catalog_list" | "character_catalog_tags";

@@ -32,10 +32,13 @@ import type {
   NotificationDisplay,
   NotificationMode,
   PipelineStatus,
+  RelevanceCollectJob,
+  RelevanceCollectStartPayload,
   ReviewRegenerateJob,
   ReviewRegenerateJobListResponse,
   Series,
   V2GenerationJobState,
+  V2GenerationStartPayload,
   V2ReviewCharacterListResponse,
   V2ReviewCompleteResponse,
   V2ReviewFilters,
@@ -338,6 +341,18 @@ export const api = {
   resumeCatalogJob: (jobId: string) =>
     request<CatalogJob>(`/character-catalog/jobs/${jobId}/resume`, { method: "POST" }),
 
+  startRelevanceCollect: (payload: RelevanceCollectStartPayload) =>
+    request<RelevanceCollectJob>("/character-catalog/relevance/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  getRelevanceCollectJob: (jobId: string) =>
+    request<RelevanceCollectJob>(`/character-catalog/relevance/jobs/${jobId}`),
+
+  cancelRelevanceCollectJob: (jobId: string) =>
+    request<RelevanceCollectJob>(`/character-catalog/relevance/jobs/${jobId}/cancel`, { method: "POST" }),
+
   getSettings: () => request<AppSettings>("/settings"),
 
   updateSettings: (
@@ -637,4 +652,15 @@ export const api = {
 
   resumeGenerationJob: (jobId: string) =>
     request<CollectJob>(`/generation/jobs/${jobId}/resume`, { method: "POST" }),
+
+  startV2Generation: (payload: V2GenerationStartPayload) =>
+    request<V2GenerationJobState>("/generation/v2/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  listV2GenerationJobs: () => request<{ items: V2GenerationJobState[] }>("/generation/v2/jobs"),
+
+  cancelV2GenerationJob: (jobId: string) =>
+    request<V2GenerationJobState>(`/generation/v2/jobs/${jobId}/cancel`, { method: "POST" }),
 };
