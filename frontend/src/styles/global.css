@@ -3653,40 +3653,37 @@ button,
   border-color: var(--danger);
 }
 
-.v2-review-card-image-count {
+.v2-review-card-image-chips {
   margin-left: auto;
-  font-size: 11px;
-  color: #fff;
-  font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
 }
 
-.v2-review-card-nav-btn {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
+.v2-review-card-image-chip {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
-  font-size: 16px;
+  font-size: 10px;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 
-.v2-review-card-nav-btn:disabled {
-  opacity: 0.3;
+.v2-review-card-image-chip:disabled {
+  opacity: 0.4;
   cursor: default;
 }
 
-.v2-review-card-nav-btn--prev {
-  left: 6px;
-}
-
-.v2-review-card-nav-btn--next {
-  right: 6px;
+.v2-review-card-image-chip--active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
 }
 
 .v2-review-card-body {
@@ -3719,14 +3716,22 @@ button,
 .v2-review-card-series-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.v2-review-card-series-row .catalog-card-subtitle {
+  margin-right: auto;
 }
 
 .v2-review-card-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
+}
+
+.v2-review-card-actions .btn {
+  white-space: nowrap;
 }
 
 .v2-review-card-complete {

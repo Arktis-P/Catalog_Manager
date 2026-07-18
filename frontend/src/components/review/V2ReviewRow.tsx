@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { V2ReviewCharacter, V2ReviewImage } from "../../types";
-import { danbooruPostsUrl, danbooruWikiUrl } from "../../utils/danbooruLinks";
+import { danbooruWikiUrl } from "../../utils/danbooruLinks";
 import {
   appearanceTagChips,
   buildFinalPrompt,
@@ -8,7 +8,6 @@ import {
   defaultEnabledTagKeys,
   genderChipClass,
   genderChipLabel,
-  MULTI_HAIR_OPTIONS,
   stripHairSuffix,
 } from "../../utils/reviewPrompt";
 import { LazyReviewImage } from "./LazyReviewImage";
@@ -222,9 +221,6 @@ export function V2ReviewRow({
       (chip.group === "hair" || chip.group === "multi" || chip.group === "shape") && !chip.optional && !chip.suggested,
   );
   const suggestedChips = chips.filter((chip) => chip.suggested);
-  const optionalMultiChips = MULTI_HAIR_OPTIONS.filter(
-    (option) => !suggestedChips.some((chip) => chip.key === option.key),
-  );
   const featureRowChips = chips.filter((chip) => chip.group === "eyes" || chip.group === "features");
   const genStatusBadge = generationStatusBadge(item.generation_status);
   const currentImage = item.images[draft.imageIndex] ?? null;
@@ -232,13 +228,9 @@ export function V2ReviewRow({
   const displayName = humanizeTag(item.display_name || item.character_tag);
   const primarySeriesTag = item.series_tags[0] ?? null;
 
-  const shiftImage = (delta: -1 | 1) => {
-    if (locked) return;
-    const maxIndex = Math.max(0, item.images.length - 1);
-    const nextIndex = Math.min(maxIndex, Math.max(0, draft.imageIndex + delta));
-    if (nextIndex !== draft.imageIndex) {
-      onDraftChange({ ...draft, imageIndex: nextIndex });
-    }
+  const selectImage = (index: number) => {
+    if (locked || index === draft.imageIndex) return;
+    onDraftChange({ ...draft, imageIndex: index });
   };
 
   return (
@@ -272,34 +264,25 @@ export function V2ReviewRow({
               <span className={statusDotClass(currentImage.quality_status)} title={qualityDotTitle(currentImage)} />
               <span className={statusDotClass(currentImage.identity_status)} title={identityDotTitle(currentImage)} />
               {currentImage.is_provisional ? <span className="badge badge-warning">임시 대표</span> : null}
-              {item.images.length > 1 ? (
-                <span className="v2-review-card-image-count">
-                  {draft.imageIndex + 1}/{item.images.length}
-                </span>
+              {hasMultipleImages ? (
+                <div className="v2-review-card-image-chips">
+                  {item.images.map((_, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      className={`v2-review-card-image-chip${
+                        index === draft.imageIndex ? " v2-review-card-image-chip--active" : ""
+                      }`}
+                      disabled={locked}
+                      onClick={() => selectImage(index)}
+                      aria-label={`이미지 ${index + 1}`}
+                    >
+                      {index + 1}
+                    </button>
+                  ))}
+                </div>
               ) : null}
             </div>
-            {hasMultipleImages ? (
-              <>
-                <button
-                  type="button"
-                  className="v2-review-card-nav-btn v2-review-card-nav-btn--prev"
-                  disabled={locked || draft.imageIndex === 0}
-                  onClick={() => shiftImage(-1)}
-                  aria-label="이전 이미지"
-                >
-                  ‹
-                </button>
-                <button
-                  type="button"
-                  className="v2-review-card-nav-btn v2-review-card-nav-btn--next"
-                  disabled={locked || draft.imageIndex >= item.images.length - 1}
-                  onClick={() => shiftImage(1)}
-                  aria-label="다음 이미지"
-                >
-                  ›
-                </button>
-              </>
-            ) : null}
           </>
         ) : (
           <div className="review-image-slot review-image-slot--empty">
@@ -332,83 +315,59 @@ export function V2ReviewRow({
         <div className="v2-review-card-series-row">
           <span className="catalog-card-subtitle">{primarySeriesTag ? humanizeTag(primarySeriesTag) : "-"}</span>
           <span className="badge">{item.post_count.toLocaleString()} posts</span>
-        </div>
-
-        <div className="catalog-review-meta">
+          {item.generation_attempts > 0 ? (
+            <span className="badge badge-muted">시도 {item.generation_attempts}회</span>
+          ) : null}
           {genStatusBadge ? <span className={genStatusBadge.className}>{genStatusBadge.label}</span> : null}
           {item.prompt_modified ? <span className="badge badge-warning">프롬프트 보정됨</span> : null}
           {item.primary_hair_needs_review ? <span className="badge badge-warning">대표 머리색 확인 필요</span> : null}
-          <span className="badge badge-muted">시도 {item.generation_attempts}회</span>
         </div>
 
         <ReviewRatingStars rating={draft.rating} onRate={locked ? () => undefined : onRate} />
 
-        <div className="catalog-review-tags-stack">
-          <div className="catalog-review-tags catalog-review-tags--hair">
+        <div className="catalog-review-tags v2-review-card-tags">
+          <button
+            type="button"
+            className={genderChipClass(displayGender)}
+            disabled={locked}
+            onClick={() => onDraftChange({ ...draft, gender: cycleGender(displayGender) })}
+          >
+            {genderChipLabel(displayGender)}
+          </button>
+          {hairRowChips.map((chip) => (
             <button
+              key={chip.key}
               type="button"
-              className={genderChipClass(displayGender)}
+              className={`review-tag${enabledTags.has(chip.key) ? " review-tag--enabled" : ""}`}
+              onClick={() => onToggleTag(chip.key)}
               disabled={locked}
-              onClick={() => onDraftChange({ ...draft, gender: cycleGender(displayGender) })}
             >
-              {genderChipLabel(displayGender)}
+              {chip.group === "multi" ? stripHairSuffix(chip.label) : chip.label}
             </button>
-            {hairRowChips.map((chip) => (
-              <button
-                key={chip.key}
-                type="button"
-                className={`review-tag${enabledTags.has(chip.key) ? " review-tag--enabled" : ""}`}
-                onClick={() => onToggleTag(chip.key)}
-                disabled={locked}
-              >
-                {chip.group === "multi" ? stripHairSuffix(chip.label) : chip.label}
-              </button>
-            ))}
-          </div>
-          <div className="catalog-review-tags catalog-review-tags--multi-options">
-            {optionalMultiChips.map((option) => (
-              <button
-                key={option.key}
-                type="button"
-                className={`review-tag${enabledTags.has(option.key) ? " review-tag--enabled" : ""}`}
-                onClick={() => onToggleTag(option.key)}
-                disabled={locked}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          {suggestedChips.length > 0 ? (
-            <div className="catalog-review-tags catalog-review-tags--suggested">
-              {suggestedChips.map((chip) => (
-                <button
-                  key={chip.key}
-                  type="button"
-                  className={`review-tag review-tag--suggested${enabledTags.has(chip.key) ? " review-tag--enabled" : ""}`}
-                  onClick={() => onToggleTag(chip.key)}
-                  disabled={locked}
-                  title="자동 재현 검사 추천 multicolor 태그"
-                >
-                  추천: {stripHairSuffix(chip.label)}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {featureRowChips.length > 0 ? (
-            <div className="catalog-review-tags catalog-review-tags--features">
-              {featureRowChips.map((chip) => (
-                <button
-                  key={chip.key}
-                  type="button"
-                  className={`review-tag${enabledTags.has(chip.key) ? " review-tag--enabled" : ""}`}
-                  onClick={() => onToggleTag(chip.key)}
-                  disabled={locked}
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
+          ))}
+          {featureRowChips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              className={`review-tag${enabledTags.has(chip.key) ? " review-tag--enabled" : ""}`}
+              onClick={() => onToggleTag(chip.key)}
+              disabled={locked}
+            >
+              {chip.label}
+            </button>
+          ))}
+          {suggestedChips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              className={`review-tag review-tag--suggested${enabledTags.has(chip.key) ? " review-tag--enabled" : ""}`}
+              onClick={() => onToggleTag(chip.key)}
+              disabled={locked}
+              title="자동 재현 검사 추천 multicolor 태그"
+            >
+              추천: {stripHairSuffix(chip.label)}
+            </button>
+          ))}
         </div>
 
         <div className="catalog-review-prompt-field">
@@ -451,23 +410,15 @@ export function V2ReviewRow({
         <div className="v2-review-card-actions">
           <a
             className="btn btn-small"
-            href={danbooruPostsUrl(item.character_tag, item.series_tags[0] ?? "")}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Posts
-          </a>
-          <a
-            className="btn btn-small"
             href={danbooruWikiUrl(item.character_tag, item.danbooru_wiki_url)}
             target="_blank"
             rel="noreferrer"
           >
-            Wiki
+            위키
           </a>
           {onOpenLinkModal ? (
             <button className="btn btn-small" type="button" onClick={onOpenLinkModal}>
-              Merge
+              병합
             </button>
           ) : null}
           {onRegenerate ? (
@@ -477,7 +428,7 @@ export function V2ReviewRow({
               disabled={regenerating || !promptText.trim()}
               onClick={onRegenerate}
             >
-              {regenerating ? "재생성 중..." : "Regenerate"}
+              {regenerating ? "재생성 중..." : "재생성"}
             </button>
           ) : null}
           {onComplete ? (
@@ -487,7 +438,7 @@ export function V2ReviewRow({
               disabled={locked}
               onClick={onComplete}
             >
-              Complete
+              완료
             </button>
           ) : null}
         </div>

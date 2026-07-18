@@ -166,7 +166,8 @@ export function V2ReviewPanel() {
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [effectiveCardWidthPx]);
+    // items.length: 그리드는 목록 로드 후에 렌더되므로, 첫 로드 시점에 ref가 채워진 뒤 다시 측정해야 한다.
+  }, [effectiveCardWidthPx, items.length]);
 
   const loadStats = useCallback(async () => {
     try {
@@ -482,14 +483,15 @@ export function V2ReviewPanel() {
     };
   }, [popupOpen, focusIndex, updatePopupPosition]);
 
-  const shiftFocusedImage = useCallback(
-    (delta: -1 | 1) => {
+  const selectFocusedImage = useCallback(
+    (index: number) => {
       if (!focusedItem || !focusedDraft || focusedLocked) {
         return;
       }
-      const maxIndex = Math.max(0, focusedItem.images.length - 1);
-      const nextIndex = Math.min(maxIndex, Math.max(0, focusedDraft.imageIndex + delta));
-      updateDraft(focusedItem.id, { ...focusedDraft, imageIndex: nextIndex });
+      if (index < 0 || index >= focusedItem.images.length) {
+        return;
+      }
+      updateDraft(focusedItem.id, { ...focusedDraft, imageIndex: index });
     },
     [focusedDraft, focusedItem, focusedLocked],
   );
@@ -572,7 +574,13 @@ export function V2ReviewPanel() {
       if (focusedLocked) {
         const key = event.key.toLowerCase();
         const allowed =
-          event.key === "ArrowUp" || event.key === "ArrowDown" || key === "q" || key === "w" || key === "a";
+          event.key === "ArrowUp" ||
+          event.key === "ArrowDown" ||
+          event.key === "ArrowLeft" ||
+          event.key === "ArrowRight" ||
+          key === "q" ||
+          key === "w" ||
+          key === "a";
         if (!allowed) {
           event.preventDefault();
           return;
@@ -588,13 +596,13 @@ export function V2ReviewPanel() {
 
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        shiftFocusedImage(-1);
+        setFocusIndex((index) => Math.max(0, index - 1));
         return;
       }
 
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        shiftFocusedImage(1);
+        setFocusIndex((index) => Math.min(items.length - 1, index + 1));
         return;
       }
 
@@ -607,6 +615,12 @@ export function V2ReviewPanel() {
       if (event.key === "ArrowDown") {
         event.preventDefault();
         setFocusIndex((index) => Math.min(items.length - 1, index + gridCols));
+        return;
+      }
+
+      if (event.ctrlKey && event.key >= "1" && event.key <= "9") {
+        event.preventDefault();
+        selectFocusedImage(Number(event.key) - 1);
         return;
       }
 
@@ -686,7 +700,7 @@ export function V2ReviewPanel() {
     popupIndex,
     popupOpen,
     regenerateFocused,
-    shiftFocusedImage,
+    selectFocusedImage,
     togglePreview,
   ]);
 
@@ -814,7 +828,7 @@ export function V2ReviewPanel() {
             Refresh
           </button>
         </div>
-        <ReviewShortcutGuide includeMerge includeMulticolor />
+        <ReviewShortcutGuide includeMerge includeMulticolor v2Layout />
       </div>
 
       <V2RatingGuide />
