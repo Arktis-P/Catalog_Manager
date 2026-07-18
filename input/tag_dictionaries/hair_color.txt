@@ -1,11 +1,14 @@
+aqua_hair
 black_hair
 blonde_hair
 blue_hair
 brown_hair
 green_hair
 grey_hair
+light_brown_hair
 orange_hair
 pink_hair
+platinum_blonde_hair
 purple_hair
 red_hair
 silver_hair

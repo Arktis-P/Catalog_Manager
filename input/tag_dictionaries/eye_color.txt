@@ -1,7 +1,14 @@
+aqua_eyes
+amber_eyes
+black_eyes
 blue_eyes
 brown_eyes
 green_eyes
+grey_eyes
+heterochromia
+orange_eyes
+pink_eyes
 purple_eyes
 red_eyes
+white_eyes
 yellow_eyes
-heterochromia
