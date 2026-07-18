@@ -42,6 +42,7 @@ def make_character(
     tag: str,
     review_status: str | None = None,
     rating: int | None = None,
+    review_updated_at: datetime | None = None,
     generation_status: str = "generated",
     quality_status: str | None = "pass",
     identity_status: str | None = "match",
@@ -73,11 +74,15 @@ def make_character(
         )
     )
     if review_status:
+        review_kwargs = {}
+        if review_updated_at is not None:
+            review_kwargs["updated_at"] = review_updated_at
         character.review = GlobalCharacterReview(
             review_status=review_status,
             rating=rating,
             rating_stage="primary",
             gender=gender,
+            **review_kwargs,
         )
     if series:
         character.series_links.append(
@@ -136,6 +141,42 @@ def test_v2_review_list_filters_and_returns_preview_metadata(db: Session) -> Non
     assert item["preview_image"]["identity_status"] == "mismatch"
     assert item["preview_image"]["suggested_multicolor_tags"] == "gradient_hair"
     assert item["first_post_at"] == "2020-01-02T03:04:05"
+
+
+def test_v2_review_completed_recent_filters_completed_and_orders_by_review_updated_at(db: Session) -> None:
+    make_character(
+        db,
+        tag="aaa_older_completed",
+        review_status="completed",
+        review_updated_at=datetime(2024, 1, 1, 12, 0, 0),
+    )
+    make_character(db, tag="middle_pending", review_status="pending")
+    make_character(
+        db,
+        tag="zzz_newer_completed",
+        review_status="completed",
+        review_updated_at=datetime(2024, 1, 2, 12, 0, 0),
+    )
+
+    response = review_router.list_v2_review_characters(
+        review_status="completed_recent",
+        rating=None,
+        quality_status=None,
+        identity_status=None,
+        generation_status=None,
+        gender=None,
+        series_id=None,
+        multicolor=None,
+        prompt_modified=None,
+        search=None,
+        skip=0,
+        limit=30,
+        service=ReviewService(db),
+    )
+
+    body = response.model_dump()
+    assert body["total"] == 2
+    assert [item["character_tag"] for item in body["items"]] == ["zzz_newer_completed", "aaa_older_completed"]
 
 
 def test_v2_review_list_includes_merge_status_fields(db: Session) -> None:

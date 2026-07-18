@@ -524,6 +524,8 @@ class ReviewService:
                         GlobalCharacterReview.review_status == "pending",
                     )
                 )
+            elif review_status == "completed_recent":
+                query = query.filter(GlobalCharacterReview.review_status == "completed")
             else:
                 query = query.filter(GlobalCharacterReview.review_status == review_status)
 
@@ -612,8 +614,12 @@ class ReviewService:
 
         query = query.distinct()
         total = query.order_by(None).count()
+        if review_status == "completed_recent":
+            ordering = (GlobalCharacterReview.updated_at.desc(), GlobalCharacter.id.desc())
+        else:
+            ordering = (GlobalCharacter.post_count.desc(), GlobalCharacter.character_tag.asc(), GlobalCharacter.id.asc())
         items = (
-            query.order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.character_tag.asc(), GlobalCharacter.id.asc())
+            query.order_by(*ordering)
             .offset(skip)
             .limit(limit)
             .all()

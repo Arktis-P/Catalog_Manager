@@ -165,7 +165,7 @@ def _job_to_response(job: ReviewRegenerateJobState) -> ReviewRegenerateJobRespon
 
 @router.get("/v2/characters", response_model=V2ReviewCharacterListResponse)
 def list_v2_review_characters(
-    review_status: str | None = Query(default=None, pattern="^(pending|in_progress|completed)$"),
+    review_status: str | None = Query(default=None, pattern="^(pending|in_progress|completed|completed_recent)$"),
     rating: str | None = None,
     quality_status: str | None = None,
     identity_status: str | None = None,

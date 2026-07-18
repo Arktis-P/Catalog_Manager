@@ -2,7 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { api } from "../../api/client";
 import { CharacterLinkModal } from "../CharacterLinkModal";
 import { SeriesSearchSelect } from "../SeriesSearchSelect";
-import type { LinkableCharacterSummary, Series, V2GenerationJobState, V2ReviewCharacter, V2ReviewStats } from "../../types";
+import type {
+  LinkableCharacterSummary,
+  Series,
+  V2GenerationJobState,
+  V2ReviewCharacter,
+  V2ReviewStats,
+  V2ReviewStatus,
+} from "../../types";
 import { cycleGender, defaultEnabledTagKeys } from "../../utils/reviewPrompt";
 import { pendingReviewImageUrl } from "../../utils/reviewImages";
 import {
@@ -81,7 +88,7 @@ export function V2ReviewPanel() {
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<V2ReviewStats | null>(null);
 
-  const [reviewStatus, setReviewStatus] = useState("pending");
+  const [reviewStatus, setReviewStatus] = useState<V2ReviewStatus>("pending");
   const [ratingFilter, setRatingFilter] = useState("");
   const [qualityStatus, setQualityStatus] = useState("");
   const [identityStatus, setIdentityStatus] = useState("");
@@ -707,20 +714,72 @@ export function V2ReviewPanel() {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.floor(skip / PAGE_SIZE) + 1;
   const gridStyle = { "--v2-card-width": `${effectiveCardWidthPx}px` } as CSSProperties;
+  const statsSummary = stats
+    ? `전체 ${stats.total.toLocaleString()} · 대기 ${stats.pending.toLocaleString()} · 진행 ${stats.in_progress.toLocaleString()} · 완료 ${stats.completed.toLocaleString()}`
+    : "통계 로딩 중";
 
   return (
     <>
       <div className="toolbar review-toolbar">
         <div className="field">
           <label htmlFor="v2-review-status">리뷰 상태</label>
-          <select id="v2-review-status" value={reviewStatus} onChange={(event) => setReviewStatus(event.target.value)}>
-            <option value="">전체</option>
-            <option value="pending">Pending</option>
-            <option value="in_progress">In progress</option>
-            <option value="completed">Completed</option>
+          <select
+            id="v2-review-status"
+            value={reviewStatus}
+            onChange={(event) => setReviewStatus(event.target.value as V2ReviewStatus)}
+          >
+            <option value="pending">대기 중</option>
+            <option value="completed_recent">완료(최근순)</option>
           </select>
         </div>
         <div className="field">
+          <label htmlFor="v2-review-search">Search</label>
+          <input
+            id="v2-review-search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="character tag"
+          />
+        </div>
+        <div className="field" style={{ justifyContent: "flex-end" }}>
+          <label>&nbsp;</label>
+          <button className="btn" type="button" onClick={() => void loadReviews()}>
+            Refresh
+          </button>
+        </div>
+        <div className="series-pagination-controls" aria-label="V2 리뷰 페이지 이동">
+          <button className="btn btn-small" type="button" disabled={skip === 0} onClick={() => setSkip(0)}>«</button>
+          <button
+            className="btn btn-small"
+            type="button"
+            disabled={skip === 0}
+            onClick={() => setSkip((s) => Math.max(0, s - PAGE_SIZE))}
+          >
+            ‹
+          </button>
+          <span className="series-pagination-page-total">{currentPage} / {pageCount}</span>
+          <button
+            className="btn btn-small"
+            type="button"
+            disabled={currentPage >= pageCount}
+            onClick={() => setSkip((s) => s + PAGE_SIZE)}
+          >
+            ›
+          </button>
+        </div>
+        <div className="catalog-review-progress">
+          {statsSummary} · {items.length.toLocaleString()} / {total.toLocaleString()} 표시
+          {focusedItem ? ` · focus: ${focusedItem.character_tag}` : ""}
+        </div>
+      </div>
+
+      <details className="review-rating-guide">
+        <summary className="review-rating-guide-summary">
+          <span className="review-rating-guide-title">상세 필터</span>
+          <span className="review-rating-guide-hint">레이팅 · 품질 · 재현 · 성별 · 시리즈 · multicolor · 프롬프트</span>
+        </summary>
+        <div className="toolbar review-toolbar">
+          <div className="field">
           <label htmlFor="v2-review-rating">레이팅</label>
           <select id="v2-review-rating" value={ratingFilter} onChange={(event) => setRatingFilter(event.target.value)}>
             <option value="">전체</option>
@@ -802,15 +861,6 @@ export function V2ReviewPanel() {
           />
         </div>
         <div className="field">
-          <label htmlFor="v2-review-search">Search</label>
-          <input
-            id="v2-review-search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="character tag"
-          />
-        </div>
-        <div className="field">
           <label htmlFor="v2-review-prompt-modified">&nbsp;</label>
           <label className="review-checkbox-field">
             <input
@@ -822,28 +872,11 @@ export function V2ReviewPanel() {
             프롬프트 수정됨만
           </label>
         </div>
-        <div className="field" style={{ justifyContent: "flex-end" }}>
-          <label>&nbsp;</label>
-          <button className="btn" type="button" onClick={() => void loadReviews()}>
-            Refresh
-          </button>
+          <ReviewShortcutGuide includeMerge includeMulticolor v2Layout />
         </div>
-        <ReviewShortcutGuide includeMerge includeMulticolor v2Layout />
-      </div>
+      </details>
 
       <V2RatingGuide />
-
-      {stats ? (
-        <div className="catalog-review-progress">
-          전체 {stats.total.toLocaleString()} · pending {stats.pending.toLocaleString()} · in_progress{" "}
-          {stats.in_progress.toLocaleString()} · completed {stats.completed.toLocaleString()}
-        </div>
-      ) : null}
-
-      <div className="catalog-review-progress">
-        {items.length.toLocaleString()} / {total.toLocaleString()} 표시 · 페이지 {currentPage}/{pageCount}
-        {focusedItem ? ` · focus: ${focusedItem.character_tag}` : ""}
-      </div>
 
       {error ? <div className="error-banner">{error}</div> : null}
       {actionMessage ? <div className="catalog-card-subtitle" style={{ marginBottom: 8 }}>{actionMessage}</div> : null}

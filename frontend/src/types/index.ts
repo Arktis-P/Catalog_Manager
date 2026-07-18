@@ -613,8 +613,10 @@ export interface V2ReviewCharacterListResponse {
   total: number;
 }
 
+export type V2ReviewStatus = "pending" | "in_progress" | "completed" | "completed_recent";
+
 export interface V2ReviewFilters {
-  review_status?: string;
+  review_status?: V2ReviewStatus;
   rating?: string;
   quality_status?: string;
   identity_status?: string;
