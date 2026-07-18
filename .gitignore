@@ -16,6 +16,9 @@ input/danbooru_api_key.txt
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# Pytest basetemp / local test run artifacts (images, fixtures)
+backend/.pytest_tmp*/
+backend/.pytest-*/
 
 # Node
 node_modules/
