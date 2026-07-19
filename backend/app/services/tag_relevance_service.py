@@ -20,6 +20,7 @@ from app.integrations.danbooru.client import DanbooruClient
 from app.models.appearance_tag_relevance import CharacterAppearanceTagRelevance
 from app.models.global_character import GlobalCharacter
 from app.services.db_write_queue import commit_db_session
+from app.services.prompt_service import refresh_global_character_base_prompt
 from app.services.settings_service import SettingsService
 
 
@@ -99,6 +100,47 @@ class TagRelevanceService:
         if not value:
             return []
         return [tag.strip() for tag in value.split(",") if tag.strip()]
+
+    @staticmethod
+    def _join_prompt_candidates(selected: list[CollectedRelevance], category: str) -> str | None:
+        tags = [item.tag for item in selected if item.tag_category == category and item.is_prompt_candidate]
+        if not tags:
+            return None
+        return ", ".join(dict.fromkeys(tags))
+
+    @staticmethod
+    def _recalculate_collect_status(character: GlobalCharacter) -> None:
+        statuses = (
+            character.appearance_status,
+            character.gender_status,
+            character.series_status,
+        )
+        if all(status == "completed" for status in statuses):
+            character.collect_status = "completed"
+        elif any(status == "completed" for status in statuses):
+            character.collect_status = "partial"
+        else:
+            character.collect_status = "uncollected"
+
+    def _sync_character_collection_fields(
+        self,
+        character: GlobalCharacter,
+        selected: list[CollectedRelevance],
+        *,
+        primary_hair_color: str | None,
+        primary_hair_needs_review: bool,
+        first_post_at: datetime | None,
+    ) -> None:
+        character.hair_color = self._join_prompt_candidates(selected, "hair_color")
+        character.hair_shape = self._join_prompt_candidates(selected, "hair_shape")
+        character.multi_color_hair = self._join_prompt_candidates(selected, "multicolor")
+        character.eye_color = self._join_prompt_candidates(selected, "eye_color")
+        character.feature_tags = self._join_prompt_candidates(selected, "feature")
+        character.primary_hair_color = primary_hair_color
+        character.primary_hair_needs_review = primary_hair_needs_review
+        character.first_post_at = first_post_at
+        character.appearance_status = "completed"
+        self._recalculate_collect_status(character)
 
     def candidate_tags(self, character: GlobalCharacter) -> dict[str, str]:
         candidates: dict[str, str] = {}
@@ -259,9 +301,14 @@ class TagRelevanceService:
             row.is_confirmed = item.is_confirmed
             row.collected_at = now
 
-        character.primary_hair_color = primary_hair_color
-        character.primary_hair_needs_review = hair_needs_review
-        character.first_post_at = first_post_at
+        self._sync_character_collection_fields(
+            character,
+            selected,
+            primary_hair_color=primary_hair_color,
+            primary_hair_needs_review=hair_needs_review,
+            first_post_at=first_post_at,
+        )
+        refresh_global_character_base_prompt(self.db, character)
         commit_db_session(self.db)
 
         return CharacterRelevanceResult(

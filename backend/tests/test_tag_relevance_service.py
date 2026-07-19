@@ -124,11 +124,45 @@ def test_collect_calculates_thresholds_small_sample_and_primary_hair(db, config)
     assert rows["tail"].is_prompt_candidate is False
     assert result.primary_hair_color == "black_hair"
     assert result.primary_hair_needs_review is True
+    assert character.appearance_status == "completed"
+    assert character.collect_status == "partial"
+    assert character.hair_color == "black_hair"
+    assert character.hair_shape == "long_hair"
+    assert character.multi_color_hair is None
+    assert character.eye_color == "blue_eyes"
+    assert character.feature_tags == "glasses"
+    assert character.base_prompt == "1.2::sample character::, black hair"
     assert character.primary_hair_color == "black_hair"
     assert character.primary_hair_needs_review is True
     assert character.first_post_at == datetime(2020, 1, 2, 3, 4, 5)
     assert client.related_calls == [("sample_character", 0)]
     assert client.post_calls == [("sample_character order:id_asc", 1)]
+
+
+def test_collect_marks_status_completed_when_all_sub_statuses_are_completed(db, config):
+    character = make_character(
+        db,
+        gender_status="completed",
+        series_status="completed",
+        hair_color="black_hair",
+        hair_shape=None,
+        multi_color_hair=None,
+        eye_color=None,
+        feature_tags=None,
+    )
+    client = FakeDanbooruClient(
+        {
+            "sample_character": 100,
+            "sample_character black_hair": 60,
+            "sample_character glasses": 0,
+            "sample_character tail": 0,
+        }
+    )
+
+    TagRelevanceService(db, client=client, config=config).collect_for_character(character)
+
+    assert character.appearance_status == "completed"
+    assert character.collect_status == "completed"
 
 
 def test_under_minimum_posts_marks_candidate_without_confirmation(db, config):
