@@ -31,6 +31,8 @@ interface GenerationJobContextValue {
   v2Jobs: V2GenerationJobState[];
   startV2Generation: (payload: V2GenerationStartPayload) => Promise<V2GenerationJobState>;
   cancelV2Job: (jobId: string) => Promise<void>;
+  pauseV2Job: (jobId: string) => Promise<void>;
+  resumeV2Job: (jobId: string) => Promise<void>;
   dismissV2Job: (jobId: string) => void;
   isV2GenerationActive: () => boolean;
 }
@@ -94,7 +96,7 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
   const runningV2JobIds = useMemo(
     () =>
       visibleV2Jobs
-        .filter((job) => job.status === "queued" || job.status === "running")
+        .filter((job) => job.status === "queued" || job.status === "running" || job.status === "paused")
         .map((job) => job.job_id),
     [visibleV2Jobs],
   );
@@ -334,6 +336,26 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const pauseV2Job = useCallback(async (jobId: string) => {
+    try {
+      setLastError(null);
+      const job = await api.pauseV2GenerationJob(jobId);
+      setV2Jobs((current) => upsertJob(current, job));
+    } catch (err) {
+      setLastError(err instanceof Error ? err.message : "Failed to pause job");
+    }
+  }, []);
+
+  const resumeV2Job = useCallback(async (jobId: string) => {
+    try {
+      setLastError(null);
+      const job = await api.resumeV2GenerationJob(jobId);
+      setV2Jobs((current) => upsertJob(current, job));
+    } catch (err) {
+      setLastError(err instanceof Error ? err.message : "Failed to resume job");
+    }
+  }, []);
+
   const dismissV2Job = useCallback((jobId: string) => {
     setDismissedV2JobIds((current) => new Set(current).add(jobId));
   }, []);
@@ -359,6 +381,8 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
       v2Jobs: visibleV2Jobs,
       startV2Generation,
       cancelV2Job,
+      pauseV2Job,
+      resumeV2Job,
       dismissV2Job,
       isV2GenerationActive,
     }),
@@ -376,6 +400,8 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
       visibleV2Jobs,
       startV2Generation,
       cancelV2Job,
+      pauseV2Job,
+      resumeV2Job,
       dismissV2Job,
       isV2GenerationActive,
     ],

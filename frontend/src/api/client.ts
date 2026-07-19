@@ -353,6 +353,12 @@ export const api = {
   cancelRelevanceCollectJob: (jobId: string) =>
     request<RelevanceCollectJob>(`/character-catalog/relevance/jobs/${jobId}/cancel`, { method: "POST" }),
 
+  pauseRelevanceCollectJob: (jobId: string) =>
+    request<RelevanceCollectJob>(`/character-catalog/relevance/jobs/${jobId}/pause`, { method: "POST" }),
+
+  resumeRelevanceCollectJob: (jobId: string) =>
+    request<RelevanceCollectJob>(`/character-catalog/relevance/jobs/${jobId}/resume`, { method: "POST" }),
+
   getSettings: () => request<AppSettings>("/settings"),
 
   updateSettings: (
@@ -663,4 +669,10 @@ export const api = {
 
   cancelV2GenerationJob: (jobId: string) =>
     request<V2GenerationJobState>(`/generation/v2/jobs/${jobId}/cancel`, { method: "POST" }),
+
+  pauseV2GenerationJob: (jobId: string) =>
+    request<V2GenerationJobState>(`/generation/v2/jobs/${jobId}/pause`, { method: "POST" }),
+
+  resumeV2GenerationJob: (jobId: string) =>
+    request<V2GenerationJobState>(`/generation/v2/jobs/${jobId}/resume`, { method: "POST" }),
 };

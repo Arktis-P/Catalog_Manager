@@ -63,6 +63,8 @@ export function GlobalTaskBar() {
     clearLastError: clearGenerationError,
     v2Jobs,
     cancelV2Job,
+    pauseV2Job,
+    resumeV2Job,
     dismissV2Job,
   } = useGenerationJobs();
   const {
@@ -75,6 +77,8 @@ export function GlobalTaskBar() {
     clearLastError: clearCatalogError,
     relevanceJobs,
     cancelRelevanceJob,
+    pauseRelevanceJob,
+    resumeRelevanceJob,
     dismissRelevanceJob,
   } = useCharacterCatalogJobs();
   const { jobs: regenerateJobs, dismissJob: dismissRegenerateJob } = useReviewRegenerateJobs();
@@ -234,6 +238,8 @@ export function GlobalTaskBar() {
                         ? () => void cancelRelevanceJob(entry.job.job_id)
                         : undefined
                     }
+                    onPause={entry.job.status === "running" ? () => void pauseRelevanceJob(entry.job.job_id) : undefined}
+                    onResume={entry.job.status === "paused" ? () => void resumeRelevanceJob(entry.job.job_id) : undefined}
                     onDismiss={
                       entry.job.status === "completed" || entry.job.status === "failed" || entry.job.status === "cancelled"
                         ? () => dismissRelevanceJob(entry.job.job_id)
@@ -251,6 +257,8 @@ export function GlobalTaskBar() {
                         ? () => void cancelV2Job(entry.job.job_id)
                         : undefined
                     }
+                    onPause={entry.job.status === "running" ? () => void pauseV2Job(entry.job.job_id) : undefined}
+                    onResume={entry.job.status === "paused" ? () => void resumeV2Job(entry.job.job_id) : undefined}
                     onDismiss={
                       entry.job.status === "completed" || entry.job.status === "failed" || entry.job.status === "cancelled"
                         ? () => dismissV2Job(entry.job.job_id)

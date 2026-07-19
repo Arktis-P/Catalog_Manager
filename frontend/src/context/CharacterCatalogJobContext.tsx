@@ -29,6 +29,8 @@ interface CharacterCatalogJobContextValue {
   relevanceJobs: RelevanceCollectJob[];
   startRelevanceCollect: (payload: RelevanceCollectStartPayload) => Promise<RelevanceCollectJob>;
   cancelRelevanceJob: (jobId: string) => Promise<void>;
+  pauseRelevanceJob: (jobId: string) => Promise<void>;
+  resumeRelevanceJob: (jobId: string) => Promise<void>;
   dismissRelevanceJob: (jobId: string) => void;
   isRelevanceJobActive: () => boolean;
 }
@@ -88,7 +90,7 @@ export function CharacterCatalogJobProvider({ children }: { children: ReactNode 
   const runningRelevanceJobIds = useMemo(
     () =>
       visibleRelevanceJobs
-        .filter((job) => job.status === "queued" || job.status === "running")
+        .filter((job) => job.status === "queued" || job.status === "running" || job.status === "paused")
         .map((job) => job.job_id),
     [visibleRelevanceJobs],
   );
@@ -294,6 +296,26 @@ export function CharacterCatalogJobProvider({ children }: { children: ReactNode 
     }
   }, []);
 
+  const pauseRelevanceJob = useCallback(async (jobId: string) => {
+    try {
+      setLastError(null);
+      const job = await api.pauseRelevanceCollectJob(jobId);
+      setRelevanceJobs((current) => upsertJob(current, job));
+    } catch (err) {
+      setLastError(err instanceof Error ? err.message : "Failed to pause job");
+    }
+  }, []);
+
+  const resumeRelevanceJob = useCallback(async (jobId: string) => {
+    try {
+      setLastError(null);
+      const job = await api.resumeRelevanceCollectJob(jobId);
+      setRelevanceJobs((current) => upsertJob(current, job));
+    } catch (err) {
+      setLastError(err instanceof Error ? err.message : "Failed to resume job");
+    }
+  }, []);
+
   const dismissRelevanceJob = useCallback((jobId: string) => {
     setDismissedRelevanceJobIds((current) => new Set(current).add(jobId));
   }, []);
@@ -320,6 +342,8 @@ export function CharacterCatalogJobProvider({ children }: { children: ReactNode 
       relevanceJobs: visibleRelevanceJobs,
       startRelevanceCollect,
       cancelRelevanceJob,
+      pauseRelevanceJob,
+      resumeRelevanceJob,
       dismissRelevanceJob,
       isRelevanceJobActive,
     }),
@@ -338,6 +362,8 @@ export function CharacterCatalogJobProvider({ children }: { children: ReactNode 
       visibleRelevanceJobs,
       startRelevanceCollect,
       cancelRelevanceJob,
+      pauseRelevanceJob,
+      resumeRelevanceJob,
       dismissRelevanceJob,
       isRelevanceJobActive,
     ],

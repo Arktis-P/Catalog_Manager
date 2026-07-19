@@ -4,6 +4,8 @@ interface V2GenerationProgressPanelProps {
   job: V2GenerationJobState;
   onDismiss?: () => void;
   onCancel?: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
 }
 
 function getProgressPercent(job: V2GenerationJobState): number | null {
@@ -19,13 +21,14 @@ function statusShortLabel(status: string): string {
     case "completed": return "완료";
     case "failed": return "실패";
     case "cancelled": return "취소";
+    case "paused": return "정지";
     default: return status;
   }
 }
 
-export function V2GenerationProgressPanel({ job, onDismiss, onCancel }: V2GenerationProgressPanelProps) {
+export function V2GenerationProgressPanel({ job, onDismiss, onCancel, onPause, onResume }: V2GenerationProgressPanelProps) {
   const percent = getProgressPercent(job);
-  const isActive = job.status === "running";
+  const isActive = job.status === "running" || job.status === "paused";
   const isDone = job.status === "completed" || job.status === "failed" || job.status === "cancelled";
 
   const metaParts: string[] = [];
@@ -36,17 +39,25 @@ export function V2GenerationProgressPanel({ job, onDismiss, onCancel }: V2Genera
 
   return (
     <div
-      className={`task-card${job.status === "failed" ? " task-card-error" : ""}${isDone ? " task-card-done" : ""}`}
+      className={`task-card${job.status === "failed" ? " task-card-error" : ""}${isDone ? " task-card-done" : ""}${job.status === "paused" ? " task-card-paused" : ""}`}
     >
       <div className="task-row1">
         {job.status === "running" ? (
           <span className="job-running-indicator task-dot" aria-hidden="true" />
+        ) : job.status === "paused" ? (
+          <span className="task-dot task-dot-paused" aria-hidden="true">⏸</span>
         ) : null}
         <strong className="task-name" title={displayName}>{displayName}</strong>
         <span className="badge badge-compact badge-muted task-badge">V2 생성</span>
         <span className="badge badge-compact">{statusShortLabel(job.status)}</span>
         {metaParts.length > 0 ? <span className="task-meta">{metaParts.join(" · ")}</span> : null}
         <div className="task-row1-spacer" />
+        {job.status === "running" && onPause ? (
+          <button className="btn btn-small btn-ghost task-btn" type="button" aria-label="일시정지" title="일시정지" onClick={onPause}>⏸</button>
+        ) : null}
+        {job.status === "paused" && onResume ? (
+          <button className="btn btn-small btn-ghost task-btn" type="button" aria-label="재개" title="재개" onClick={onResume}>▶</button>
+        ) : null}
         {isDone && onDismiss ? (
           <button className="btn btn-small btn-ghost task-btn" type="button" aria-label="닫기" onClick={onDismiss}>×</button>
         ) : null}
