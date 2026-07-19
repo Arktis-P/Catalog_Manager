@@ -107,6 +107,7 @@ export function V2ReviewPanel() {
   const [focusIndex, setFocusIndex] = useState(0);
   const [drafts, setDrafts] = useState<Record<number, V2CharacterDraft>>({});
   const [submittingId, setSubmittingId] = useState<number | null>(null);
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [thumbSize, setThumbSize] = useState(384);
   const [cardSize, setCardSize] = useState<V2ReviewCardSize>("medium");
   const [cardWidthPx, setCardWidthPx] = useState(0);
@@ -326,6 +327,66 @@ export function V2ReviewPanel() {
     }
   };
 
+  const bulkSaveRatedItems = useCallback(async () => {
+    if (bulkSaving) {
+      return;
+    }
+    const eligible = items.filter((item) => {
+      if (isCharacterRegenerating(item.id)) return false;
+      const draft = drafts[item.id];
+      const rating = draft?.rating ?? item.rating;
+      return rating !== null && rating !== undefined;
+    });
+    if (eligible.length === 0) {
+      setActionMessage("일괄 저장할 레이팅된 항목이 없습니다.");
+      return;
+    }
+
+    setBulkSaving(true);
+    setError(null);
+    try {
+      const payloadItems = eligible.map((item) => {
+        const draft = drafts[item.id] ?? createV2DraftForItem(item);
+        const rating = draft.rating ?? item.rating;
+        const chips = v2AppearanceTagChips(item);
+        const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
+        const finalPrompt = resolveV2FinalPrompt(item, { ...draft, enabledTags });
+        const defaultCoverIndex = item.images.findIndex(
+          (image) => image.is_cover || image.id === item.cover_image_id,
+        );
+        const defaultImageIndex = defaultCoverIndex >= 0 ? defaultCoverIndex : 0;
+        const selectedImage = item.images[draft.imageIndex];
+        const coverImageId =
+          draft.imageIndex !== defaultImageIndex && selectedImage ? selectedImage.id : undefined;
+        return {
+          character_id: item.id,
+          rating,
+          gender: draft.gender,
+          base_prompt: finalPrompt,
+          selected_tags: v2SelectedTagsPayload(item, enabledTags),
+          cover_image_id: coverImageId,
+        };
+      });
+      const response = await api.bulkCompleteV2ReviewCharacters({ items: payloadItems });
+      const failedTags = response.results
+        .filter((result) => result.status === "failed")
+        .map((result) => {
+          const failedItem = items.find((entry) => entry.id === result.character_id);
+          return failedItem ? failedItem.character_tag : `#${result.character_id}`;
+        });
+      setActionMessage(`완료 ${response.completed} · 건너뜀 ${response.skipped} · 실패 ${response.failed}`);
+      if (failedTags.length > 0) {
+        setError(`일괄 저장 실패: ${failedTags.join(", ")}`);
+      }
+      await loadReviews();
+      await loadStats();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "일괄 저장에 실패했습니다.");
+    } finally {
+      setBulkSaving(false);
+    }
+  }, [bulkSaving, items, drafts, isCharacterRegenerating, loadReviews, loadStats]);
+
   // V2 응답(quality/identity 상태, image_id 등)으로 해당 카드 하나만 다시 조회해 직접 갱신한다.
   // V1 job의 CatalogReviewItem 변환을 거치지 않는다.
   const refreshSingleCharacter = useCallback(
@@ -523,6 +584,12 @@ export function V2ReviewPanel() {
         return;
       }
 
+      if (event.ctrlKey && event.key === "Enter") {
+        event.preventDefault();
+        void bulkSaveRatedItems();
+        return;
+      }
+
       if (popupOpen) {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -670,6 +737,7 @@ export function V2ReviewPanel() {
     window.addEventListener("keydown", onKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
   }, [
+    bulkSaveRatedItems,
     focusedDraft,
     focusedItem,
     focusedLocked,
@@ -718,6 +786,18 @@ export function V2ReviewPanel() {
           <label>&nbsp;</label>
           <button className="btn" type="button" onClick={() => void loadReviews()}>
             Refresh
+          </button>
+        </div>
+        <div className="field" style={{ justifyContent: "flex-end" }}>
+          <label>&nbsp;</label>
+          <button
+            className="btn btn-primary"
+            type="button"
+            disabled={bulkSaving}
+            title="Ctrl+Enter"
+            onClick={() => void bulkSaveRatedItems()}
+          >
+            {bulkSaving ? "저장 중..." : "레이팅된 항목 일괄 저장 (Ctrl+Enter)"}
           </button>
         </div>
         <div className="series-pagination-controls" aria-label="V2 리뷰 페이지 이동">

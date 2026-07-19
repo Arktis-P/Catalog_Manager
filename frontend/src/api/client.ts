@@ -37,6 +37,8 @@ import type {
   ReviewRegenerateJob,
   ReviewRegenerateJobListResponse,
   Series,
+  V2BulkCompleteRequest,
+  V2BulkCompleteResponse,
   V2GenerationJobState,
   V2GenerationStartPayload,
   V2ReviewCharacterListResponse,
@@ -528,6 +530,12 @@ export const api = {
 
   saveV2ReviewCharacter: (characterId: number, payload: V2ReviewSavePayload) =>
     request<V2ReviewCompleteResponse>(`/review/v2/characters/${characterId}/save`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  bulkCompleteV2ReviewCharacters: (payload: V2BulkCompleteRequest) =>
+    request<V2BulkCompleteResponse>("/review/v2/bulk-complete", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

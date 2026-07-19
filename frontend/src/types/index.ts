@@ -656,6 +656,32 @@ export interface V2ReviewStats {
   completed: number;
 }
 
+export interface V2BulkCompleteItemPayload {
+  character_id: number;
+  rating: number | null;
+  gender?: string | null;
+  base_prompt?: string | null;
+  selected_tags?: string | null;
+  cover_image_id?: number | null;
+}
+
+export interface V2BulkCompleteRequest {
+  items: V2BulkCompleteItemPayload[];
+}
+
+export interface V2BulkCompleteItemResult {
+  character_id: number;
+  status: string;
+  error: string | null;
+}
+
+export interface V2BulkCompleteResponse {
+  completed: number;
+  skipped: number;
+  failed: number;
+  results: V2BulkCompleteItemResult[];
+}
+
 export interface V2GenerationJobState {
   job_id: string;
   kind: "generate" | "regenerate";
