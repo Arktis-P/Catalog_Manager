@@ -105,6 +105,30 @@ def cancel_relevance_collect_job(job_id: str):
     return RelevanceCollectJobResponse.from_state(job)
 
 
+@router.post("/relevance/jobs/{job_id}/pause", response_model=RelevanceCollectJobResponse)
+def pause_relevance_collect_job(job_id: str):
+    job = relevance_collect_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Relevance collect job not found")
+    if job.status != "running":
+        raise HTTPException(status_code=400, detail="Only running jobs can be paused")
+    relevance_collect_job_manager.pause(job_id)
+    job = relevance_collect_job_manager.get_job(job_id)
+    return RelevanceCollectJobResponse.from_state(job)
+
+
+@router.post("/relevance/jobs/{job_id}/resume", response_model=RelevanceCollectJobResponse)
+def resume_relevance_collect_job(job_id: str):
+    job = relevance_collect_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Relevance collect job not found")
+    if job.status not in {"paused", "running"}:
+        raise HTTPException(status_code=400, detail="Only paused jobs can be resumed")
+    relevance_collect_job_manager.resume(job_id)
+    job = relevance_collect_job_manager.get_job(job_id)
+    return RelevanceCollectJobResponse.from_state(job)
+
+
 @router.get(
     "/characters/{character_id}/relevance",
     response_model=AppearanceTagRelevanceListResponse,

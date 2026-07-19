@@ -153,8 +153,36 @@ def cancel_v2_generation_job(job_id: str):
     job = v2_generation_job_manager.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    if not cancelled and job.status in {"queued", "running"}:
+    if not cancelled and job.status in {"queued", "running", "paused"}:
         raise HTTPException(status_code=409, detail="Job could not be cancelled")
+    return _v2_job_to_schema(job)
+
+
+@router.post("/v2/jobs/{job_id}/pause", response_model=V2GenerationJobState)
+def pause_v2_generation_job(job_id: str):
+    job = v2_generation_job_manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "running":
+        raise HTTPException(status_code=400, detail="Only running jobs can be paused")
+    v2_generation_job_manager.pause(job_id)
+    job = v2_generation_job_manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _v2_job_to_schema(job)
+
+
+@router.post("/v2/jobs/{job_id}/resume", response_model=V2GenerationJobState)
+def resume_v2_generation_job(job_id: str):
+    job = v2_generation_job_manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status not in {"paused", "running"}:
+        raise HTTPException(status_code=400, detail="Only paused jobs can be resumed")
+    v2_generation_job_manager.resume(job_id)
+    job = v2_generation_job_manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
     return _v2_job_to_schema(job)
 
 

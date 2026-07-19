@@ -19,6 +19,10 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class _PauseCancelledError(BaseException):
+    """Raised when a paused V2 job is cancelled before it resumes."""
+
+
 @dataclass
 class V2GenerationJobState:
     job_id: str
@@ -58,6 +62,8 @@ class V2GenerationJobManager:
         self._regenerating_character_ids: set[int] = set()
         self._active_job_id: str | None = None
         self._lock = threading.Lock()
+        self._pause_cond = threading.Condition(threading.Lock())
+        self._paused_jobs: set[str] = set()
 
     def start(
         self,
@@ -110,10 +116,53 @@ class V2GenerationJobManager:
         jobs.sort(key=lambda item: item.started_at, reverse=True)
         return jobs[:limit]
 
+    def pause(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status != "running":
+                return False
+        with self._pause_cond:
+            self._paused_jobs.add(job_id)
+        return True
+
+    def resume(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status not in {"paused", "running"}:
+                return False
+            if job_id not in self._paused_jobs:
+                return False
+        with self._pause_cond:
+            self._paused_jobs.discard(job_id)
+            self._pause_cond.notify_all()
+        return True
+
+    def _check_pause(self, job_id: str) -> bool:
+        if job_id not in self._paused_jobs:
+            return True
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is not None:
+                job.status = "paused"
+                job.phase = "paused"
+                job.message = "일시정지됨 · 재개 시 이어서 진행"
+                job.current_character_tag = ""
+        with self._pause_cond:
+            while job_id in self._paused_jobs:
+                self._pause_cond.wait(timeout=2.0)
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status == "cancelled":
+                raise _PauseCancelledError()
+            job.status = "running"
+            job.phase = "generating"
+            job.message = "작업 재개됨"
+        return True
+
     def cancel(self, job_id: str) -> bool:
         with self._lock:
             job = self._jobs.get(job_id)
-            if job is None or job.status not in {"queued", "running"}:
+            if job is None or job.status not in {"queued", "running", "paused"}:
                 return False
             was_queued = job.status == "queued"
             self._cancelled.add(job_id)
@@ -125,7 +174,10 @@ class V2GenerationJobManager:
                 arguments = self._arguments.pop(job_id, None)
                 if arguments is not None and arguments[3] is not None:
                     self._regenerating_character_ids.discard(arguments[3])
-            return True
+        with self._pause_cond:
+            self._paused_jobs.discard(job_id)
+            self._pause_cond.notify_all()
+        return True
 
     def _is_cancelled(self, job_id: str) -> bool:
         with self._lock:
@@ -244,6 +296,7 @@ class V2GenerationJobManager:
                 for index, character in enumerate(characters, start=1):
                     if self._is_cancelled(job_id):
                         break
+                    self._check_pause(job_id)
                     self._update(
                         job_id,
                         current=index - 1,
@@ -296,6 +349,7 @@ class V2GenerationJobManager:
                             message=f"{character.character_tag} 오류 후 계속: {exc}",
                         )
 
+                self._check_pause(job_id)
                 snapshot = self.get_job(job_id)
                 if self._is_cancelled(job_id):
                     final_status = "cancelled"
@@ -312,6 +366,8 @@ class V2GenerationJobManager:
                     message=f"완료 {completed}명 · 오류 {failed}명",
                     finished_at=_utc_now(),
                 )
+        except _PauseCancelledError:
+            return
         except Exception as exc:
             self._update(
                 job_id,
@@ -328,6 +384,8 @@ class V2GenerationJobManager:
                     self._regenerating_character_ids.discard(regeneration_character_id)
                 if self._active_job_id == job_id:
                     self._active_job_id = None
+            with self._pause_cond:
+                self._paused_jobs.discard(job_id)
             self._dispatch_next()
 
 
