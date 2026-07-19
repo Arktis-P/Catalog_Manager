@@ -253,7 +253,7 @@ export function GlobalTaskBar() {
                     key={entry.job.job_id}
                     job={entry.job}
                     onCancel={
-                      entry.job.status === "queued" || entry.job.status === "running"
+                      entry.job.status === "queued" || entry.job.status === "running" || entry.job.status === "paused"
                         ? () => void cancelV2Job(entry.job.job_id)
                         : undefined
                     }

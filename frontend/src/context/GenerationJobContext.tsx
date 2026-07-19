@@ -30,6 +30,7 @@ interface GenerationJobContextValue {
   clearLastError: () => void;
   v2Jobs: V2GenerationJobState[];
   startV2Generation: (payload: V2GenerationStartPayload) => Promise<V2GenerationJobState>;
+  startV2Regeneration: (characterId: number, payload: { base_prompt?: string | null }) => Promise<V2GenerationJobState>;
   cancelV2Job: (jobId: string) => Promise<void>;
   pauseV2Job: (jobId: string) => Promise<void>;
   resumeV2Job: (jobId: string) => Promise<void>;
@@ -120,9 +121,25 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refreshV2Jobs = useCallback(async () => {
+    try {
+      const response = await api.listV2GenerationJobs();
+      setV2Jobs((current) => {
+        let merged = current;
+        for (const job of response.items) {
+          merged = upsertJob(merged, job);
+        }
+        return merged;
+      });
+    } catch {
+      // ignore polling bootstrap errors
+    }
+  }, []);
+
   useEffect(() => {
     void refreshJobs();
-  }, [refreshJobs]);
+    void refreshV2Jobs();
+  }, [refreshJobs, refreshV2Jobs]);
 
   // "모든 작업 완료 시 알림" 모드: running → idle 전환 감지
   useEffect(() => {
@@ -326,6 +343,19 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
     return job;
   }, []);
 
+  const startV2Regeneration = useCallback(async (characterId: number, payload: { base_prompt?: string | null }) => {
+    setLastError(null);
+    const job = await api.regenerateV2Character(characterId, payload);
+    setDismissedV2JobIds((current) => {
+      if (!current.has(job.job_id)) return current;
+      const next = new Set(current);
+      next.delete(job.job_id);
+      return next;
+    });
+    setV2Jobs((current) => upsertJob(current, job));
+    return job;
+  }, []);
+
   const cancelV2Job = useCallback(async (jobId: string) => {
     try {
       setLastError(null);
@@ -361,7 +391,7 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const isV2GenerationActive = useCallback(
-    () => visibleV2Jobs.some((job) => job.status === "queued" || job.status === "running"),
+    () => visibleV2Jobs.some((job) => job.status === "queued" || job.status === "running" || job.status === "paused"),
     [visibleV2Jobs],
   );
 
@@ -380,6 +410,7 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
       clearLastError: () => setLastError(null),
       v2Jobs: visibleV2Jobs,
       startV2Generation,
+      startV2Regeneration,
       cancelV2Job,
       pauseV2Job,
       resumeV2Job,
@@ -399,6 +430,7 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
       lastError,
       visibleV2Jobs,
       startV2Generation,
+      startV2Regeneration,
       cancelV2Job,
       pauseV2Job,
       resumeV2Job,

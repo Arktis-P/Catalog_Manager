@@ -59,6 +59,7 @@ def _job_to_schema(job) -> GenerationJobState:
 def _v2_job_to_schema(job) -> V2GenerationJobState:
     return V2GenerationJobState(
         job_id=job.job_id,
+        kind=job.kind,
         status=job.status,
         phase=job.phase,
         message=job.message,
@@ -66,6 +67,7 @@ def _v2_job_to_schema(job) -> V2GenerationJobState:
         total=job.total,
         completed=job.completed,
         failed=job.failed,
+        character_tag=job.character_tag,
         current_character_tag=job.current_character_tag,
         character_id=job.character_id,
         generation_status=job.generation_status,
@@ -129,6 +131,10 @@ def regenerate_v2_character(
     )
     if job is None:
         raise HTTPException(status_code=409, detail="Character generation already in progress")
+    if not job.character_tag:
+        job.character_tag = character.character_tag
+    if not job.current_character_tag:
+        job.current_character_tag = character.character_tag
     return _v2_job_to_schema(job)
 
 

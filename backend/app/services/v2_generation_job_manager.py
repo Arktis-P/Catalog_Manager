@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
@@ -26,6 +27,7 @@ class _PauseCancelledError(BaseException):
 @dataclass
 class V2GenerationJobState:
     job_id: str
+    kind: str = "generate"
     status: str = "queued"
     phase: str = "queued"
     message: str = "V2 자동 생성 대기 중..."
@@ -33,6 +35,7 @@ class V2GenerationJobState:
     total: int = 0
     completed: int = 0
     failed: int = 0
+    character_tag: str = ""
     current_character_tag: str = ""
     character_id: int | None = None
     generation_status: str | None = None
@@ -64,6 +67,7 @@ class V2GenerationJobManager:
         self._lock = threading.Lock()
         self._pause_cond = threading.Condition(threading.Lock())
         self._paused_jobs: set[str] = set()
+        self._auto_paused_jobs: set[str] = set()
 
     def start(
         self,
@@ -89,20 +93,32 @@ class V2GenerationJobManager:
         character_id: int,
         *,
         base_prompt: str | None = None,
+        character_tag: str | None = None,
     ) -> V2GenerationJobState | None:
         job = V2GenerationJobState(
             job_id=str(uuid.uuid4()),
+            kind="regenerate",
             message="V2 수동 재생성 대기 중...",
             total=1,
             character_id=character_id,
+            character_tag=character_tag or "",
+            current_character_tag=character_tag or "",
         )
+        active_job_id_to_pause: str | None = None
         with self._lock:
             if character_id in self._regenerating_character_ids:
                 return None
             self._regenerating_character_ids.add(character_id)
             self._jobs[job.job_id] = job
-            self._queue.append(job.job_id)
+            self._queue.appendleft(job.job_id)
             self._arguments[job.job_id] = ([character_id], True, base_prompt, character_id)
+            active_job = self._jobs.get(self._active_job_id or "")
+            if active_job and active_job.kind == "generate" and active_job.status == "running":
+                active_job_id_to_pause = active_job.job_id
+                self._auto_paused_jobs.add(active_job.job_id)
+                active_job.message = "일시정지 요청됨(자동) · 현재 캐릭터 완료 후 V2 재생성 우선 실행"
+        if active_job_id_to_pause is not None:
+            self.pause(active_job_id_to_pause)
         self._dispatch_next()
         return job
 
@@ -140,16 +156,34 @@ class V2GenerationJobManager:
     def _check_pause(self, job_id: str) -> bool:
         if job_id not in self._paused_jobs:
             return True
+        should_dispatch_next = False
         with self._lock:
             job = self._jobs.get(job_id)
             if job is not None:
                 job.status = "paused"
                 job.phase = "paused"
-                job.message = "일시정지됨 · 재개 시 이어서 진행"
+                if job_id in self._auto_paused_jobs:
+                    job.message = "일시정지됨(자동) · V2 재생성 완료 후 이어서 진행"
+                    if self._active_job_id == job_id:
+                        self._active_job_id = None
+                        should_dispatch_next = True
+                else:
+                    job.message = "일시정지됨 · 재개 시 이어서 진행"
                 job.current_character_tag = ""
+        if should_dispatch_next:
+            self._dispatch_next()
         with self._pause_cond:
             while job_id in self._paused_jobs:
                 self._pause_cond.wait(timeout=2.0)
+        while True:
+            with self._lock:
+                active_job = self._jobs.get(self._active_job_id or "")
+                if self._active_job_id in {None, job_id} or (
+                    active_job is not None and active_job.status in {"completed", "failed", "cancelled"}
+                ):
+                    self._active_job_id = job_id
+                    break
+            time.sleep(0.05)
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None or job.status == "cancelled":
@@ -157,9 +191,11 @@ class V2GenerationJobManager:
             job.status = "running"
             job.phase = "generating"
             job.message = "작업 재개됨"
+            self._auto_paused_jobs.discard(job_id)
         return True
 
     def cancel(self, job_id: str) -> bool:
+        resume_auto_paused = False
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None or job.status not in {"queued", "running", "paused"}:
@@ -174,10 +210,31 @@ class V2GenerationJobManager:
                 arguments = self._arguments.pop(job_id, None)
                 if arguments is not None and arguments[3] is not None:
                     self._regenerating_character_ids.discard(arguments[3])
+                    resume_auto_paused = not self._has_pending_regeneration_locked()
         with self._pause_cond:
             self._paused_jobs.discard(job_id)
             self._pause_cond.notify_all()
+        if resume_auto_paused:
+            self._resume_auto_paused_jobs()
         return True
+
+    def _has_pending_regeneration_locked(self) -> bool:
+        active = self._jobs.get(self._active_job_id or "")
+        if active is not None and active.kind == "regenerate" and active.status in {"queued", "running", "paused"}:
+            return True
+        for queued_job_id in self._queue:
+            queued_job = self._jobs.get(queued_job_id)
+            if queued_job is not None and queued_job.kind == "regenerate" and queued_job.status == "queued":
+                return True
+        return False
+
+    def _resume_auto_paused_jobs(self) -> None:
+        with self._lock:
+            job_ids = list(self._auto_paused_jobs)
+        for paused_job_id in job_ids:
+            self.resume(paused_job_id)
+            with self._lock:
+                self._auto_paused_jobs.discard(paused_job_id)
 
     def _is_cancelled(self, job_id: str) -> bool:
         with self._lock:
@@ -289,7 +346,11 @@ class V2GenerationJobManager:
                     job_id,
                     status="running",
                     phase="generating",
-                    message=f"V2 자동 생성 시작 · {len(characters)}명",
+                    message=(
+                        f"V2 재생성 시작 · {characters[0].character_tag}"
+                        if regeneration_character_id is not None and characters
+                        else f"V2 자동 생성 시작 · {len(characters)}명"
+                    ),
                     total=len(characters),
                 )
                 pipeline = V2GenerationPipeline(db)
@@ -384,8 +445,14 @@ class V2GenerationJobManager:
                     self._regenerating_character_ids.discard(regeneration_character_id)
                 if self._active_job_id == job_id:
                     self._active_job_id = None
+                should_resume_auto_paused = (
+                    regeneration_character_id is not None and not self._has_pending_regeneration_locked()
+                )
             with self._pause_cond:
                 self._paused_jobs.discard(job_id)
+                self._pause_cond.notify_all()
+            if should_resume_auto_paused:
+                self._resume_auto_paused_jobs()
             self._dispatch_next()
 
 

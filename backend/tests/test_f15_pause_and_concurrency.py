@@ -182,3 +182,34 @@ def test_v2_generation_cancel_while_paused(monkeypatch):
     assert manager.cancel(job.job_id) is True
     wait_until(lambda: manager.get_job(job.job_id).status == "cancelled")
     assert FakePipeline.started == [1]
+
+
+def test_v2_regeneration_preempts_running_generation_and_auto_resumes(monkeypatch):
+    patch_v2_dependencies(monkeypatch)
+    manager = V2GenerationJobManager()
+    characters_by_id = {
+        1: make_v2_character(1),
+        2: make_v2_character(2),
+        9: make_v2_character(9),
+    }
+    monkeypatch.setattr(
+        manager,
+        "_target_characters",
+        lambda _db, ids, _rerun: [characters_by_id[item_id] for item_id in (ids or [])],
+    )
+
+    generation = manager.start(character_ids=[1, 2], rerun=True)
+    FakePipeline.first_started.wait(timeout=1.0)
+    wait_until(lambda: manager.get_job(generation.job_id).status == "running")
+
+    regeneration = manager.start_regeneration(9, base_prompt="edited", character_tag="character_9")
+
+    assert regeneration is not None
+    wait_until(lambda: manager.get_job(generation.job_id).status == "paused")
+    assert "자동" in manager.get_job(generation.job_id).message
+    wait_until(lambda: manager.get_job(regeneration.job_id).status == "completed")
+    wait_until(lambda: manager.get_job(generation.job_id).status == "completed")
+
+    assert FakePipeline.started == [1, 9, 2]
+    assert manager.get_job(regeneration.job_id).kind == "regenerate"
+    assert manager.get_job(regeneration.job_id).character_tag == "character_9"

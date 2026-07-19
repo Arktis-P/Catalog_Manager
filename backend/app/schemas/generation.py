@@ -136,6 +136,7 @@ class V2RegenerateRequest(BaseModel):
 
 class V2GenerationJobState(BaseModel):
     job_id: str
+    kind: Literal["generate", "regenerate"] = "generate"
     status: str
     phase: str
     message: str
@@ -143,6 +144,7 @@ class V2GenerationJobState(BaseModel):
     total: int
     completed: int
     failed: int
+    character_tag: str = ""
     current_character_tag: str
     character_id: int | None = None
     generation_status: str | None = None

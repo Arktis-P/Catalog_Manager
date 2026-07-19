@@ -35,7 +35,11 @@ export function V2GenerationProgressPanel({ job, onDismiss, onCancel, onPause, o
   if (job.total > 0) metaParts.push(`${job.current}/${job.total}`);
   metaParts.push(`완료 ${job.completed} · 실패 ${job.failed}`);
 
-  const displayName = job.current_character_tag || "V2 이미지 생성";
+  const isRegeneration = job.kind === "regenerate";
+  const displayName = isRegeneration
+    ? `V2 재생성 · ${job.character_tag || job.current_character_tag || "캐릭터"}`
+    : job.current_character_tag || "V2 이미지 생성";
+  const kindLabel = isRegeneration ? "V2 재생성" : "V2 생성";
 
   return (
     <div
@@ -48,7 +52,7 @@ export function V2GenerationProgressPanel({ job, onDismiss, onCancel, onPause, o
           <span className="task-dot task-dot-paused" aria-hidden="true">⏸</span>
         ) : null}
         <strong className="task-name" title={displayName}>{displayName}</strong>
-        <span className="badge badge-compact badge-muted task-badge">V2 생성</span>
+        <span className="badge badge-compact badge-muted task-badge">{kindLabel}</span>
         <span className="badge badge-compact">{statusShortLabel(job.status)}</span>
         {metaParts.length > 0 ? <span className="task-meta">{metaParts.join(" · ")}</span> : null}
         <div className="task-row1-spacer" />

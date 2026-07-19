@@ -658,6 +658,7 @@ export interface V2ReviewStats {
 
 export interface V2GenerationJobState {
   job_id: string;
+  kind: "generate" | "regenerate";
   status: string;
   phase: string;
   message: string;
@@ -665,6 +666,7 @@ export interface V2GenerationJobState {
   total: number;
   completed: number;
   failed: number;
+  character_tag: string;
   current_character_tag: string;
   character_id: number | null;
   generation_status: string | null;
