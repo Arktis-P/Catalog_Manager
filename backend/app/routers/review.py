@@ -21,6 +21,9 @@ from app.schemas.review import (
     GlobalCatalogReviewItemResponse,
     GlobalCatalogReviewListResponse,
     GlobalCatalogReviewPurgeUnselectedResponse,
+    V2BulkCompleteItemResult,
+    V2BulkCompleteRequest,
+    V2BulkCompleteResponse,
     V2ReviewCharacterListResponse,
     V2ReviewCharacterResponse,
     V2ReviewCompleteResponse,
@@ -262,6 +265,20 @@ def save_v2_review_character(
         base_prompt=character.base_prompt,
         previous_base_prompt=character.previous_base_prompt,
         selected_tags=review.selected_tags,
+    )
+
+
+@router.post("/v2/bulk-complete", response_model=V2BulkCompleteResponse)
+def bulk_complete_v2_review_characters(
+    payload: V2BulkCompleteRequest,
+    service: ReviewService = Depends(get_review_service),
+):
+    completed, skipped, failed, results = service.bulk_complete_v2_review_characters(payload.items)
+    return V2BulkCompleteResponse(
+        completed=completed,
+        skipped=skipped,
+        failed=failed,
+        results=[V2BulkCompleteItemResult(**result) for result in results],
     )
 
 

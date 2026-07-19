@@ -300,3 +300,29 @@ class V2ReviewStatsResponse(BaseModel):
     pending: int = 0
     in_progress: int = 0
     completed: int = 0
+
+
+class V2BulkCompleteItemRequest(BaseModel):
+    character_id: int
+    rating: int | None = Field(default=None, ge=-1, le=6)
+    gender: str | None = None
+    base_prompt: str | None = None
+    selected_tags: str | None = None
+    cover_image_id: int | None = None
+
+
+class V2BulkCompleteRequest(BaseModel):
+    items: list[V2BulkCompleteItemRequest] = Field(min_length=1, max_length=100)
+
+
+class V2BulkCompleteItemResult(BaseModel):
+    character_id: int
+    status: str
+    error: str | None = None
+
+
+class V2BulkCompleteResponse(BaseModel):
+    completed: int
+    skipped: int
+    failed: int
+    results: list[V2BulkCompleteItemResult]

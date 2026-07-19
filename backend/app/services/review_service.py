@@ -15,6 +15,7 @@ from app.models.global_character_review import GlobalCharacterReview
 from app.models.image import Image
 from app.models.review import Review
 from app.models.series import Series
+from app.schemas.review import V2BulkCompleteItemRequest
 from app.services.character_image_service import (
     move_image_to_catalog_folder,
     purge_character_images,
@@ -688,6 +689,56 @@ class ReviewService:
         commit_db_session(self.db)
         self.db.refresh(character)
         return character
+
+    def bulk_complete_v2_review_characters(
+        self, items: list[V2BulkCompleteItemRequest]
+    ) -> tuple[int, int, int, list[dict]]:
+        completed = 0
+        skipped = 0
+        failed = 0
+        results: list[dict] = []
+
+        for item in items:
+            if item.rating is None:
+                skipped += 1
+                results.append({"character_id": item.character_id, "status": "skipped"})
+                continue
+
+            try:
+                cover_image_id = item.cover_image_id
+                if cover_image_id is None:
+                    character = (
+                        self.db.query(GlobalCharacter)
+                        .options(joinedload(GlobalCharacter.images))
+                        .filter(GlobalCharacter.id == item.character_id)
+                        .first()
+                    )
+                    if not character:
+                        raise ValueError("Character not found")
+                    visible_images = sorted(
+                        (image for image in character.images if not image.is_rejected),
+                        key=lambda image: (not image.is_cover, -(image.cover_score or 0), image.id),
+                    )
+                    if visible_images:
+                        cover_image_id = visible_images[0].id
+
+                self.save_v2_review_character(
+                    item.character_id,
+                    review_status="completed",
+                    cover_image_id=cover_image_id,
+                    gender=item.gender,
+                    rating=item.rating,
+                    base_prompt=item.base_prompt,
+                    selected_tags=item.selected_tags,
+                )
+                completed += 1
+                results.append({"character_id": item.character_id, "status": "completed"})
+            except ValueError as exc:
+                self.db.rollback()
+                failed += 1
+                results.append({"character_id": item.character_id, "status": "failed", "error": str(exc)})
+
+        return completed, skipped, failed, results
 
     def get_v2_review_stats(self) -> dict[str, int]:
         rows = (
