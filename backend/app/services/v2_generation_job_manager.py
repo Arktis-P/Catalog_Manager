@@ -5,6 +5,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -13,7 +14,12 @@ from app.models.global_character import GlobalCharacter
 from app.models.global_character_image import GlobalCharacterImage
 from app.services.db_write_queue import job_write_context
 from app.services.generation_service import GenerationService
-from app.services.v2_generation_pipeline import V2GenerationPipeline, V2PipelineCancelled
+from app.services.v2_generation_pipeline import (
+    V2AsyncCharacterState,
+    V2AsyncCheckResult,
+    V2GenerationPipeline,
+    V2PipelineCancelled,
+)
 
 
 def _utc_now() -> str:
@@ -34,6 +40,8 @@ class V2GenerationJobState:
     current: int = 0
     total: int = 0
     completed: int = 0
+    generated: int = 0
+    checks_completed: int = 0
     failed: int = 0
     character_tag: str = ""
     current_character_tag: str = ""
@@ -262,6 +270,188 @@ class V2GenerationJobManager:
             if job is not None:
                 job.errors.append(payload)
 
+    def _check_async_attempt(
+        self,
+        job_id: str,
+        state: V2AsyncCharacterState,
+        image_id: int,
+    ) -> V2AsyncCheckResult:
+        db = SessionLocal()
+        try:
+            with job_write_context(job_id):
+                return V2GenerationPipeline(db).check_async_attempt(state, image_id)
+        finally:
+            db.close()
+
+    def _record_async_result(self, job_id: str, result: V2AsyncCheckResult) -> None:
+        if result.result is None:
+            return
+        db = SessionLocal()
+        try:
+            character = db.get(GlobalCharacter, result.result.character_id)
+            image = (
+                db.get(GlobalCharacterImage, result.result.image_id)
+                if result.result.image_id
+                else None
+            )
+            self._increment(job_id, completed=1)
+            snapshot = self.get_job(job_id)
+            self._update(
+                job_id,
+                current=snapshot.completed if snapshot else 0,
+                current_character_tag=character.character_tag if character else "",
+                generation_status=result.result.generation_status,
+                generation_attempts=result.result.generation_attempts,
+                total_generation_attempts=character.total_generation_attempts if character else 0,
+                prompt_variant_attempts=(
+                    json.loads(character.prompt_variant_attempts or "{}") if character else {}
+                ),
+                image_id=result.result.image_id,
+                quality_status=image.quality_status if image else None,
+                quality_reasons=self._json_list(image.quality_reasons) if image else [],
+                identity_status=image.identity_status if image else None,
+                identity_reasons=self._json_list(image.identity_reasons) if image else [],
+                is_provisional=image.is_provisional if image else None,
+                last_failure_reason=character.last_failure_reason if character else None,
+            )
+        finally:
+            db.close()
+
+    def _run_async_pipeline(
+        self,
+        job_id: str,
+        pipeline: V2GenerationPipeline,
+        characters: list[GlobalCharacter],
+        *,
+        base_prompt: str | None,
+        regeneration_character_id: int | None,
+    ) -> None:
+        normal = deque(
+            (
+                character.id,
+                character.character_tag,
+                base_prompt if character.id == regeneration_character_id else None,
+            )
+            for character in characters
+        )
+        priority: deque[tuple[V2AsyncCharacterState, str]] = deque()
+        pending: dict[Future[V2AsyncCheckResult], tuple[V2AsyncCharacterState, str]] = {}
+
+        with ThreadPoolExecutor(
+            max_workers=3, thread_name_prefix=f"v2-check-{job_id[:8]}"
+        ) as checks:
+            while normal or priority or pending:
+                self._check_pause(job_id)
+                done = [future for future in pending if future.done()]
+                for future in done:
+                    state, character_tag = pending.pop(future)
+                    try:
+                        check_result = future.result()
+                        self._increment(job_id, checks_completed=1)
+                        if check_result.needs_generation:
+                            if self._is_cancelled(job_id):
+                                pipeline.cancel_async_character(check_result.state)
+                            else:
+                                priority.appendleft((check_result.state, character_tag))
+                                snapshot = self.get_job(job_id)
+                                self._update(
+                                    job_id,
+                                    message=(
+                                        f"검사 reject · {character_tag} 재생성을 우선 삽입 "
+                                        f"(생성 {snapshot.generated if snapshot else 0} · "
+                                        f"검사 {snapshot.checks_completed if snapshot else 0})"
+                                    ),
+                                )
+                        else:
+                            self._record_async_result(job_id, check_result)
+                    except Exception as exc:
+                        pipeline.fail_async_character(state, f"check_error:{exc}")
+                        self._increment(job_id, failed=1, checks_completed=1)
+                        self._append_error(
+                            job_id,
+                            {
+                                "character_id": state.character_id,
+                                "character_tag": character_tag,
+                                "error": str(exc),
+                            },
+                        )
+
+                if self._is_cancelled(job_id):
+                    normal.clear()
+                    for queued_state, _ in priority:
+                        pipeline.cancel_async_character(queued_state)
+                    priority.clear()
+                    if pending:
+                        wait(tuple(pending), timeout=0.05, return_when=FIRST_COMPLETED)
+                        continue
+                    break
+
+                task_state: V2AsyncCharacterState | None = None
+                if priority:
+                    task_state, character_tag = priority.popleft()
+                elif normal:
+                    character_id, character_tag, edited_prompt = normal.popleft()
+                    task_state = pipeline.prepare_async_character(
+                        character_id, base_prompt=edited_prompt
+                    )
+                elif pending:
+                    snapshot = self.get_job(job_id)
+                    self._update(
+                        job_id,
+                        phase="checking",
+                        message=(
+                            f"검사 완료 대기 · 생성 {snapshot.generated if snapshot else 0} · "
+                            f"검사 {snapshot.checks_completed if snapshot else 0}"
+                        ),
+                    )
+                    wait(tuple(pending), timeout=0.05, return_when=FIRST_COMPLETED)
+                    continue
+                else:
+                    break
+
+                if not pipeline.wait_before_async_generation(
+                    should_interrupt=lambda: (
+                        self._is_cancelled(job_id) or job_id in self._paused_jobs
+                    )
+                ):
+                    priority.appendleft((task_state, character_tag))
+                    continue
+                self._check_pause(job_id)
+                try:
+                    image_id = pipeline.generate_async_attempt(
+                        task_state,
+                        should_cancel=lambda: self._is_cancelled(job_id),
+                    )
+                except V2PipelineCancelled:
+                    pipeline.cancel_async_character(task_state)
+                    break
+                except Exception as exc:
+                    pipeline.fail_async_character(task_state, f"generation_error:{exc}")
+                    self._increment(job_id, failed=1)
+                    self._append_error(
+                        job_id,
+                        {
+                            "character_id": task_state.character_id,
+                            "character_tag": character_tag,
+                            "error": str(exc),
+                        },
+                    )
+                    continue
+                self._increment(job_id, generated=1)
+                snapshot = self.get_job(job_id)
+                self._update(
+                    job_id,
+                    phase="generating",
+                    current_character_tag=character_tag,
+                    message=(
+                        f"{character_tag} 생성 완료 · 검사 제출 "
+                        f"(생성 {snapshot.generated if snapshot else 0} · "
+                        f"검사 {snapshot.checks_completed if snapshot else 0})"
+                    ),
+                )
+                future = checks.submit(self._check_async_attempt, job_id, task_state, image_id)
+                pending[future] = (task_state, character_tag)
+
     def _dispatch_next(self) -> None:
         selected: tuple[str, list[int] | None, bool, str | None, int | None] | None = None
         with self._lock:
@@ -354,6 +544,15 @@ class V2GenerationJobManager:
                     total=len(characters),
                 )
                 pipeline = V2GenerationPipeline(db)
+                if hasattr(pipeline, "prepare_async_character"):
+                    self._run_async_pipeline(
+                        job_id,
+                        pipeline,
+                        characters,
+                        base_prompt=base_prompt,
+                        regeneration_character_id=regeneration_character_id,
+                    )
+                    characters = []
                 for index, character in enumerate(characters, start=1):
                     if self._is_cancelled(job_id):
                         break
@@ -424,7 +623,11 @@ class V2GenerationJobManager:
                     job_id,
                     status=final_status,
                     phase=final_status,
-                    message=f"완료 {completed}명 · 오류 {failed}명",
+                    message=(
+                        f"완료 {completed}명 · 오류 {failed}명 · "
+                        f"생성 {snapshot.generated if snapshot else 0} · "
+                        f"검사 {snapshot.checks_completed if snapshot else 0}"
+                    ),
                     finished_at=_utc_now(),
                 )
         except _PauseCancelledError:

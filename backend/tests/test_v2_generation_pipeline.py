@@ -419,3 +419,32 @@ def test_pipeline_provisional_registration_condition(
 
     image = db.get(GlobalCharacterImage, result.image_id)
     assert image.is_provisional is expected
+
+
+def test_async_steps_check_every_image_and_finish_after_quality_retry(
+    db, generated_bytes
+) -> None:
+    character = make_character(db)
+    pipeline, calls = make_pipeline(
+        db,
+        generated_bytes,
+        [REJECT_QUALITY, PASS_QUALITY],
+        [identity("pass")],
+    )
+    state = pipeline.prepare_async_character(character.id)
+
+    first_image_id = pipeline.generate_async_attempt(state, should_cancel=lambda: False)
+    first_check = pipeline.check_async_attempt(state, first_image_id)
+    assert first_check.needs_generation is True
+    assert db.get(GlobalCharacterImage, first_image_id).quality_status == "reject"
+
+    second_image_id = pipeline.generate_async_attempt(state, should_cancel=lambda: False)
+    second_check = pipeline.check_async_attempt(state, second_image_id)
+
+    assert second_check.needs_generation is False
+    assert second_check.result.generation_status == "generated"
+    assert calls == {"generate": 2, "identity": 1}
+    images = db.query(GlobalCharacterImage).order_by(GlobalCharacterImage.id).all()
+    assert [image.quality_status for image in images] == ["reject", "pass"]
+    assert images[-1].identity_status == "pass"
+    assert images[-1].is_provisional is True

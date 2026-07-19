@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import random
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -54,6 +56,25 @@ class V2PipelineResult:
     generation_status: str
     generation_attempts: int
     image_id: int | None
+
+
+@dataclass
+class V2AsyncCharacterState:
+    character_id: int
+    previous_status: str
+    initial_variant: PromptVariant
+    current_variant: PromptVariant
+    retry_max: int
+    attempt_in_variant: int = 0
+    revision_variants: tuple[PromptVariant, ...] = ()
+    revision_index: int = -1
+
+
+@dataclass(frozen=True)
+class V2AsyncCheckResult:
+    state: V2AsyncCharacterState
+    result: V2PipelineResult | None
+    needs_generation: bool
 
 
 def _tag_key(value: str) -> str:
@@ -133,10 +154,11 @@ class V2GenerationPipeline:
         variant: PromptVariant,
         *,
         should_cancel: CancelCheck,
+        wait_before_generation: bool = True,
     ) -> GlobalCharacterImage:
         if should_cancel():
             raise V2PipelineCancelled()
-        if self._generated_count:
+        if wait_before_generation and self._generated_count:
             self._wait_between_generations()
 
         prompt_character = type(
@@ -185,6 +207,160 @@ class V2GenerationPipeline:
             character.last_failure_reason = f"generation_error:{exc}"
             commit_db_session(self.db)
             raise
+
+    def wait_before_async_generation(self, *, should_interrupt: CancelCheck) -> bool:
+        """Wait between generation-only tasks while remaining pause/cancel responsive."""
+        if not self._generated_count:
+            return True
+        deadline = time.monotonic() + random.uniform(0.5, 2.0)
+        while True:
+            if should_interrupt():
+                return False
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return True
+            time.sleep(min(0.05, remaining))
+
+    def prepare_async_character(
+        self,
+        character_id: int,
+        *,
+        base_prompt: str | None = None,
+    ) -> V2AsyncCharacterState:
+        """Initialize one character without generating or checking an image."""
+        character = self.db.get(GlobalCharacter, character_id)
+        if character is None:
+            raise ValueError("Character not found")
+        previous_status = character.generation_status
+        character.generation_status = "generating"
+        character.prompt_variant_attempts = "{}"
+        character.last_failure_reason = None
+        if base_prompt is not None:
+            character.base_prompt = base_prompt
+        if not character.base_prompt:
+            refresh_global_character_base_prompt(self.db, character)
+        commit_db_session(self.db)
+        initial = PromptVariant(
+            base_prompt=character.base_prompt or "",
+            primary_hair_color=character.primary_hair_color,
+            multicolor_tags=tuple(v2_multicolor_prompt_candidates(self.db, character.id)),
+        )
+        return V2AsyncCharacterState(
+            character_id=character.id,
+            previous_status=previous_status,
+            initial_variant=initial,
+            current_variant=initial,
+            retry_max=max(1, int(self._public_settings()["v2_quality_retry_max"])),
+        )
+
+    def generate_async_attempt(
+        self,
+        state: V2AsyncCharacterState,
+        *,
+        should_cancel: CancelCheck,
+    ) -> int:
+        """Generate and persist exactly one unchecked image for a checker worker."""
+        character = self.db.get(GlobalCharacter, state.character_id)
+        if character is None:
+            raise ValueError("Character not found")
+        image = self._generate_and_store(
+            character,
+            state.current_variant,
+            should_cancel=should_cancel,
+            wait_before_generation=False,
+        )
+        state.attempt_in_variant += 1
+        return image.id
+
+    def cancel_async_character(self, state: V2AsyncCharacterState) -> None:
+        character = self.db.get(GlobalCharacter, state.character_id)
+        if character is not None and character.generation_status == "generating":
+            character.generation_status = state.previous_status
+            commit_db_session(self.db)
+
+    def fail_async_character(self, state: V2AsyncCharacterState, reason: str) -> None:
+        character = self.db.get(GlobalCharacter, state.character_id)
+        if character is not None:
+            character.generation_status = "generation_failed"
+            character.last_failure_reason = reason
+            commit_db_session(self.db)
+
+    def _async_final_result(
+        self,
+        character: GlobalCharacter,
+        image: GlobalCharacterImage,
+        status: str,
+    ) -> V2PipelineResult:
+        character.generation_status = status
+        commit_db_session(self.db)
+        return V2PipelineResult(character.id, status, character.generation_attempts, image.id)
+
+    def check_async_attempt(
+        self,
+        state: V2AsyncCharacterState,
+        image_id: int,
+    ) -> V2AsyncCheckResult:
+        """Check one image and decide whether its state needs another generation task."""
+        character = self.db.get(GlobalCharacter, state.character_id)
+        image = self.db.get(GlobalCharacterImage, image_id)
+        if character is None or image is None:
+            raise ValueError("Character or generated image not found")
+        image, identity = self._check_image(image, character, state.current_variant)
+
+        def advance_revision() -> V2AsyncCheckResult:
+            if state.revision_index < 0:
+                result = self._async_final_result(character, image, "generation_failed")
+                return V2AsyncCheckResult(state, result, False)
+            next_index = state.revision_index + 1
+            if next_index < len(state.revision_variants):
+                state.revision_index = next_index
+                state.current_variant = state.revision_variants[next_index]
+                state.attempt_in_variant = 0
+                return V2AsyncCheckResult(state, None, True)
+            result = self._async_final_result(character, image, "generation_failed")
+            return V2AsyncCheckResult(state, result, False)
+
+        def retry_quality_or_advance() -> V2AsyncCheckResult:
+            if state.attempt_in_variant < state.retry_max:
+                return V2AsyncCheckResult(state, None, True)
+            return advance_revision()
+
+        if image.quality_status == "reject":
+            character.last_failure_reason = self._failure_reason(image, identity)
+            commit_db_session(self.db)
+            return retry_quality_or_advance()
+
+        if identity is not None and identity.status != "reject":
+            if state.revision_index >= 0:
+                variant = state.current_variant
+                character.previous_base_prompt = character.base_prompt
+                character.base_prompt = variant.base_prompt
+                character.primary_hair_color = variant.primary_hair_color
+                character.prompt_revision_reason = variant.revision_reason
+                character.prompt_revision_level = variant.revision_level
+            result = self._async_final_result(character, image, "generated")
+            return V2AsyncCheckResult(state, result, False)
+
+        character.last_failure_reason = self._failure_reason(image, identity)
+        commit_db_session(self.db)
+        cutoff = str(self._public_settings()["v2_recent_character_cutoff"])
+        if state.revision_index < 0 and self._is_recent(character, cutoff):
+            result = self._async_final_result(character, image, "likely_untrained")
+            return V2AsyncCheckResult(state, result, False)
+        if identity is None:
+            raise RuntimeError("quality 통과 이미지에 identity 검사 결과가 없습니다.")
+        if state.revision_index < 0:
+            state.revision_variants = tuple(
+                self._revision_variants(character, state.initial_variant, identity)
+            )
+            if not state.revision_variants:
+                result = self._async_final_result(character, image, "generation_failed")
+                return V2AsyncCheckResult(state, result, False)
+            state.revision_index = 0
+            state.current_variant = state.revision_variants[0]
+            state.attempt_in_variant = 0
+            return V2AsyncCheckResult(state, None, True)
+        return advance_revision()
 
     def _check_image(
         self,
