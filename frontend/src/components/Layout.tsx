@@ -37,6 +37,7 @@ function BackendStatusDot() {
 
 const navItems = [
   { to: "/", label: "Catalog", end: true },
+  { to: "/series-catalog", label: "Series Catalog" },
   { to: "/review", label: "Review" },
   { to: "/series", label: "Series" },
   { to: "/characters", label: "Characters" },

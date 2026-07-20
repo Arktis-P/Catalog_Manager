@@ -4,6 +4,7 @@ import { CatalogPage } from "./pages/CatalogPage";
 import { CharactersPage } from "./pages/CharactersPage";
 import { GenerationPage } from "./pages/GenerationPage";
 import { ReviewPage } from "./pages/ReviewPage";
+import { SeriesCatalogPage } from "./pages/SeriesCatalogPage";
 import { SeriesPage } from "./pages/SeriesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
@@ -12,6 +13,7 @@ export default function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<CatalogPage />} />
+        <Route path="series-catalog" element={<SeriesCatalogPage />} />
         <Route path="review" element={<ReviewPage />} />
         <Route path="series" element={<SeriesPage />} />
         <Route path="characters" element={<CharactersPage />} />
