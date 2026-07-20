@@ -115,9 +115,7 @@ export function V2ReviewPanel() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewFit, setPreviewFit] = useState(true);
   const [linkingItem, setLinkingItem] = useState<V2ReviewCharacter | null>(null);
-  const [popupOpen, setPopupOpen] = useState(false);
-  const [popupIndex, setPopupIndex] = useState(0);
-  const [popupPosition, setPopupPosition] = useState<{ top: number; left: number } | null>(null);
+  const [pageInput, setPageInput] = useState("1");
 
   const { v2Jobs: contextV2Jobs, startV2Regeneration } = useGenerationJobs();
   const processedV2JobIdsRef = useRef<Set<string>>(new Set());
@@ -378,14 +376,20 @@ export function V2ReviewPanel() {
       if (failedTags.length > 0) {
         setError(`일괄 저장 실패: ${failedTags.join(", ")}`);
       }
-      await loadReviews();
+      setFocusIndex(0);
+      scrollRef.current?.scrollTo({ top: 0 });
+      if (skip !== 0) {
+        setSkip(0);
+      } else {
+        await loadReviews();
+      }
       await loadStats();
     } catch (err) {
       setError(err instanceof Error ? err.message : "일괄 저장에 실패했습니다.");
     } finally {
       setBulkSaving(false);
     }
-  }, [bulkSaving, items, drafts, isCharacterRegenerating, loadReviews, loadStats]);
+  }, [bulkSaving, items, drafts, isCharacterRegenerating, skip, loadReviews, loadStats]);
 
   // V2 응답(quality/identity 상태, image_id 등)으로 해당 카드 하나만 다시 조회해 직접 갱신한다.
   // V1 job의 CatalogReviewItem 변환을 거치지 않는다.
@@ -467,7 +471,6 @@ export function V2ReviewPanel() {
   useEffect(() => {
     if (focusedLocked) {
       setPreviewOpen(false);
-      setPopupOpen(false);
     }
   }, [focusedLocked]);
 
@@ -475,7 +478,6 @@ export function V2ReviewPanel() {
     if (focusedLocked) {
       return;
     }
-    setPopupOpen(false);
     setPreviewOpen((open) => {
       if (open) {
         return false;
@@ -488,42 +490,24 @@ export function V2ReviewPanel() {
     });
   }, [focusedLocked, previewSrc]);
 
-  const updatePopupPosition = useCallback(() => {
-    const scrollNode = scrollRef.current;
-    if (!scrollNode || !focusedItem) {
-      setPopupPosition(null);
+  const cycleFocusedMulticolor = useCallback(() => {
+    if (!focusedItem || !focusedDraft || focusedLocked || multicolorChips.length === 0) {
       return;
     }
-    const row = scrollNode.querySelector(`[data-character-id="${focusedItem.id}"]`) as HTMLElement | null;
-    if (!row) {
-      setPopupPosition(null);
-      return;
+    const allChips = v2AppearanceTagChips(focusedItem);
+    const enabled = new Set(
+      focusedDraft.enabledTags.size > 0 ? focusedDraft.enabledTags : defaultEnabledTagKeys(allChips),
+    );
+    const enabledMultiIndexes = multicolorChips
+      .map((chip, index) => (enabled.has(chip.key) ? index : -1))
+      .filter((index) => index >= 0);
+    const nextIndex = enabledMultiIndexes.length === 1 ? (enabledMultiIndexes[0] + 1) % multicolorChips.length : 0;
+    for (const chip of multicolorChips) {
+      enabled.delete(chip.key);
     }
-    const rect = row.getBoundingClientRect();
-    const width = 260;
-    let top = rect.top + 32;
-    let left = rect.right - width;
-    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
-    top = Math.max(8, Math.min(top, window.innerHeight - 320 - 8));
-    setPopupPosition({ top, left });
-  }, [focusedItem]);
-
-  useEffect(() => {
-    if (!popupOpen) {
-      setPopupPosition(null);
-      return;
-    }
-    const frame = window.requestAnimationFrame(() => updatePopupPosition());
-    const scrollNode = scrollRef.current;
-    const onReposition = () => updatePopupPosition();
-    window.addEventListener("resize", onReposition);
-    scrollNode?.addEventListener("scroll", onReposition, { passive: true });
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener("resize", onReposition);
-      scrollNode?.removeEventListener("scroll", onReposition);
-    };
-  }, [popupOpen, focusIndex, updatePopupPosition]);
+    enabled.add(multicolorChips[nextIndex].key);
+    updateDraft(focusedItem.id, { ...focusedDraft, enabledTags: enabled });
+  }, [focusedDraft, focusedItem, focusedLocked, multicolorChips]);
 
   const selectFocusedImage = useCallback(
     (index: number) => {
@@ -587,34 +571,6 @@ export function V2ReviewPanel() {
       if (event.ctrlKey && event.key === "Enter") {
         event.preventDefault();
         void bulkSaveRatedItems();
-        return;
-      }
-
-      if (popupOpen) {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          setPopupOpen(false);
-          return;
-        }
-        if (event.key === "ArrowUp") {
-          event.preventDefault();
-          setPopupIndex((index) => Math.max(0, index - 1));
-          return;
-        }
-        if (event.key === "ArrowDown") {
-          event.preventDefault();
-          setPopupIndex((index) => Math.min(multicolorChips.length - 1, index + 1));
-          return;
-        }
-        if (event.key === "Enter") {
-          event.preventDefault();
-          const chip = multicolorChips[popupIndex];
-          if (chip) {
-            toggleTag(focusedItem.id, chip.key);
-          }
-          return;
-        }
-        event.preventDefault();
         return;
       }
 
@@ -698,8 +654,7 @@ export function V2ReviewPanel() {
       if (key === "c") {
         event.preventDefault();
         setPreviewOpen(false);
-        setPopupIndex(0);
-        setPopupOpen(true);
+        cycleFocusedMulticolor();
         return;
       }
       if (key === "r") {
@@ -738,15 +693,13 @@ export function V2ReviewPanel() {
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
   }, [
     bulkSaveRatedItems,
+    cycleFocusedMulticolor,
     focusedDraft,
     focusedItem,
     focusedLocked,
     gridCols,
     items.length,
     linkingItem,
-    multicolorChips,
-    popupIndex,
-    popupOpen,
     regenerateFocused,
     selectFocusedImage,
     togglePreview,
@@ -754,6 +707,67 @@ export function V2ReviewPanel() {
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.floor(skip / PAGE_SIZE) + 1;
+
+  useEffect(() => {
+    setPageInput(String(currentPage));
+  }, [currentPage]);
+
+  const goToPage = useCallback(
+    (value: string) => {
+      const parsed = Number.parseInt(value, 10);
+      const page = Number.isFinite(parsed) ? Math.min(pageCount, Math.max(1, parsed)) : currentPage;
+      setPageInput(String(page));
+      setSkip((page - 1) * PAGE_SIZE);
+    },
+    [currentPage, pageCount],
+  );
+
+  const renderPaginationControls = () => (
+    <div className="series-pagination-controls" aria-label="V2 review pagination">
+      <button className="btn btn-small" type="button" disabled={skip === 0} onClick={() => setSkip(0)}>&laquo;</button>
+      <button
+        className="btn btn-small"
+        type="button"
+        disabled={skip === 0}
+        onClick={() => setSkip((s) => Math.max(0, s - PAGE_SIZE))}
+      >
+        &lsaquo;
+      </button>
+      <input
+        className="series-pagination-page-input"
+        type="number"
+        min="1"
+        max={pageCount}
+        value={pageInput}
+        aria-label="V2 review page number"
+        onChange={(event) => setPageInput(event.target.value)}
+        onBlur={(event) => goToPage(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      <span className="series-pagination-page-total">/ {pageCount}</span>
+      <button
+        className="btn btn-small"
+        type="button"
+        disabled={currentPage >= pageCount}
+        onClick={() => setSkip((s) => Math.min((pageCount - 1) * PAGE_SIZE, s + PAGE_SIZE))}
+      >
+        &rsaquo;
+      </button>
+      <button
+        className="btn btn-small"
+        type="button"
+        disabled={currentPage >= pageCount}
+        onClick={() => setSkip((pageCount - 1) * PAGE_SIZE)}
+      >
+        &raquo;
+      </button>
+    </div>
+  );
+
   const gridStyle = { "--v2-card-width": `${effectiveCardWidthPx}px` } as CSSProperties;
   const statsSummary = stats
     ? `전체 ${stats.total.toLocaleString()} · 대기 ${stats.pending.toLocaleString()} · 진행 ${stats.in_progress.toLocaleString()} · 완료 ${stats.completed.toLocaleString()}`
@@ -800,26 +814,7 @@ export function V2ReviewPanel() {
             {bulkSaving ? "저장 중..." : "레이팅된 항목 일괄 저장 (Ctrl+Enter)"}
           </button>
         </div>
-        <div className="series-pagination-controls" aria-label="V2 리뷰 페이지 이동">
-          <button className="btn btn-small" type="button" disabled={skip === 0} onClick={() => setSkip(0)}>«</button>
-          <button
-            className="btn btn-small"
-            type="button"
-            disabled={skip === 0}
-            onClick={() => setSkip((s) => Math.max(0, s - PAGE_SIZE))}
-          >
-            ‹
-          </button>
-          <span className="series-pagination-page-total">{currentPage} / {pageCount}</span>
-          <button
-            className="btn btn-small"
-            type="button"
-            disabled={currentPage >= pageCount}
-            onClick={() => setSkip((s) => s + PAGE_SIZE)}
-          >
-            ›
-          </button>
-        </div>
+        {renderPaginationControls()}
         <div className="catalog-review-progress">
           {statsSummary} · {items.length.toLocaleString()} / {total.toLocaleString()} 표시
           {focusedItem ? ` · focus: ${focusedItem.character_tag}` : ""}
@@ -985,42 +980,6 @@ export function V2ReviewPanel() {
         />
       ) : null}
 
-      {popupOpen && focusedItem ? (
-        <div
-          className="v2-multicolor-popup"
-          style={{ top: popupPosition?.top ?? 8, left: popupPosition?.left ?? 8 }}
-          role="listbox"
-          aria-label="multicolor 옵션"
-        >
-          <div className="v2-multicolor-popup-title">Multicolor 옵션 (↑↓ 이동 · Enter 토글 · Esc 닫기)</div>
-          {multicolorChips.map((chip, index) => {
-            const enabled =
-              (drafts[focusedItem.id]?.enabledTags.size ?? 0) > 0
-                ? drafts[focusedItem.id]!.enabledTags.has(chip.key)
-                : defaultEnabledTagKeys(v2AppearanceTagChips(focusedItem)).has(chip.key);
-            return (
-              <button
-                key={chip.key}
-                type="button"
-                role="option"
-                aria-selected={index === popupIndex}
-                className={`v2-multicolor-popup-option${index === popupIndex ? " v2-multicolor-popup-option--active" : ""}${
-                  enabled ? " v2-multicolor-popup-option--enabled" : ""
-                }`}
-                onClick={() => {
-                  setPopupIndex(index);
-                  toggleTag(focusedItem.id, chip.key);
-                }}
-              >
-                {chip.suggested ? "추천: " : ""}
-                {chip.label}
-                {enabled ? " ✓" : ""}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-
       {linkingItem ? (
         <CharacterLinkModal
           character={toLinkableSummary(linkingItem)}
@@ -1031,26 +990,7 @@ export function V2ReviewPanel() {
 
       {total > PAGE_SIZE ? (
         <div className="series-pagination">
-          <div className="series-pagination-controls">
-            <button className="btn btn-small" type="button" disabled={skip === 0} onClick={() => setSkip(0)}>«</button>
-            <button
-              className="btn btn-small"
-              type="button"
-              disabled={skip === 0}
-              onClick={() => setSkip((s) => Math.max(0, s - PAGE_SIZE))}
-            >
-              ‹
-            </button>
-            <span className="series-pagination-page-total">{currentPage} / {pageCount}</span>
-            <button
-              className="btn btn-small"
-              type="button"
-              disabled={currentPage >= pageCount}
-              onClick={() => setSkip((s) => s + PAGE_SIZE)}
-            >
-              ›
-            </button>
-          </div>
+          {renderPaginationControls()}
         </div>
       ) : null}
     </>

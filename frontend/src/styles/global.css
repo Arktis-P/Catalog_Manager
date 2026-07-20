@@ -3464,50 +3464,6 @@ button,
   line-height: 1.6;
 }
 
-.v2-multicolor-popup {
-  position: fixed;
-  z-index: 1002;
-  width: 260px;
-  max-height: 320px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px;
-  border: 2px solid var(--accent);
-  border-radius: 12px;
-  background: var(--bg-elevated);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
-}
-
-.v2-multicolor-popup-title {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-}
-
-.v2-multicolor-popup-option {
-  display: block;
-  width: 100%;
-  text-align: left;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.v2-multicolor-popup-option--enabled {
-  border-color: var(--accent);
-  background: rgba(88, 166, 255, 0.12);
-}
-
-.v2-multicolor-popup-option--active {
-  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.45);
-}
-
 .catalog-review-complete-row {
   display: flex;
   justify-content: flex-end;

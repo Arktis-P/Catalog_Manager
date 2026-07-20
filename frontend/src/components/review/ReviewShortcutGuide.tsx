@@ -28,7 +28,7 @@ export function ReviewShortcutGuide({
     ...BASE_SHORTCUTS,
     ...(includeUndo ? ["Ctrl+Z 취소"] : []),
     ...(includeMerge ? ["a Merge (부모/자식 연결)"] : []),
-    ...(includeMulticolor ? ["c Multicolor 옵션 팝업"] : []),
+    ...(includeMulticolor ? ["C: multicolor 전환"] : []),
     ...TAIL_SHORTCUTS,
   ];
 
