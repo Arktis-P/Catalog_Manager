@@ -15,6 +15,54 @@ const MULTI_COLOR_PROMPT_TAGS = new Set([
   "two-tone_hair",
 ]);
 
+export const EXTRA_HAIR_COLORS = [
+  "aqua_hair",
+  "black_hair",
+  "blonde_hair",
+  "blue_hair",
+  "brown_hair",
+  "green_hair",
+  "grey_hair",
+  "light_brown_hair",
+  "orange_hair",
+  "pink_hair",
+  "platinum_blonde_hair",
+  "purple_hair",
+  "red_hair",
+  "silver_hair",
+  "white_hair",
+];
+
+export const EXTRA_EYE_COLORS = [
+  "aqua_eyes",
+  "amber_eyes",
+  "black_eyes",
+  "blue_eyes",
+  "brown_eyes",
+  "green_eyes",
+  "grey_eyes",
+  "heterochromia",
+  "orange_eyes",
+  "pink_eyes",
+  "purple_eyes",
+  "red_eyes",
+  "white_eyes",
+  "yellow_eyes",
+];
+
+export const STREAK_COLORS = [
+  "red_streaks",
+  "orange_streaks",
+  "blonde_streaks",
+  "green_streaks",
+  "aqua_streaks",
+  "blue_streaks",
+  "black_streaks",
+  "grey_streaks",
+  "white_streaks",
+  "brown_streaks",
+];
+
 // 자주 쓰는 멀티컬러 머리 옵션. 캐릭터에 태그가 없어도 항상 선택 버튼으로 노출한다.
 // key는 appearanceTagChips의 multi 그룹과 동일한 형식이라 두 버튼이 자동 동기화된다.
 export const MULTI_HAIR_OPTIONS = [
@@ -34,7 +82,7 @@ export function stripHairSuffix(label: string): string {
   return stripped || label;
 }
 
-function tagToPromptText(tag: string): string {
+export function tagToPromptText(tag: string): string {
   return tag.trim().replace(/_/g, " ");
 }
 
@@ -127,6 +175,31 @@ export function appearanceTagChips(item: {
   for (const option of MULTI_HAIR_OPTIONS) {
     if (!existingKeys.has(option.key)) {
       chips.push({ key: option.key, label: tagToPromptText(option.tag), group: "multi", optional: true });
+      existingKeys.add(option.key);
+    }
+  }
+
+  for (const tag of EXTRA_HAIR_COLORS) {
+    const key = `hair:${tag}`;
+    if (!existingKeys.has(key)) {
+      chips.push({ key, label: tagToPromptText(tag), group: "hair", optional: true });
+      existingKeys.add(key);
+    }
+  }
+
+  for (const tag of EXTRA_EYE_COLORS) {
+    const key = `eyes:${tag}`;
+    if (!existingKeys.has(key)) {
+      chips.push({ key, label: tagToPromptText(tag), group: "eyes", optional: true });
+      existingKeys.add(key);
+    }
+  }
+
+  for (const tag of STREAK_COLORS) {
+    const key = `multi:${tag}`;
+    if (!existingKeys.has(key)) {
+      chips.push({ key, label: tagToPromptText(tag), group: "multi", optional: true });
+      existingKeys.add(key);
     }
   }
 

@@ -5,6 +5,7 @@ interface LazyReviewImageProps {
   imagePath: string;
   alt: string;
   active?: boolean;
+  eager?: boolean;
   selected?: boolean;
   previewAnchor?: boolean;
   thumbSize?: number;
@@ -15,16 +16,22 @@ export function LazyReviewImage({
   imagePath,
   alt,
   active = false,
+  eager = false,
   selected = false,
   previewAnchor = false,
   thumbSize,
   onClick,
 }: LazyReviewImageProps) {
   const rootRef = useRef<HTMLButtonElement>(null);
-  const [visible, setVisible] = useState(false);
+  const [visible, setVisible] = useState(eager);
   const src = pendingReviewImageUrl(imagePath, thumbSize ? { thumbnail: true, thumbSize } : undefined);
 
   useEffect(() => {
+    if (eager) {
+      setVisible(true);
+      return;
+    }
+
     const node = rootRef.current;
     if (!node) {
       return;
@@ -41,7 +48,7 @@ export function LazyReviewImage({
 
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [eager]);
 
   const className = [
     "review-image-slot",
@@ -66,7 +73,7 @@ export function LazyReviewImage({
       title={`${alt} (Space로 확대)`}
     >
       {visible && src ? (
-        <img src={src} alt={alt} loading="lazy" decoding="async" />
+        <img src={src} alt={alt} loading={eager ? "eager" : "lazy"} decoding="async" />
       ) : (
         <span className="review-image-placeholder" />
       )}

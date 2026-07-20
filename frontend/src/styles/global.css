@@ -3449,6 +3449,26 @@ button,
   color: #f3d27a;
 }
 
+.review-tag--extra {
+  border-color: rgba(45, 212, 191, 0.5);
+  background: rgba(45, 212, 191, 0.1);
+}
+
+.review-tag-select {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  min-height: 27px;
+}
+
+.review-tag-select:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
 .review-checkbox-field {
   display: flex;
   align-items: center;

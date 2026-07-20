@@ -27,7 +27,7 @@ export type V2AppearanceChip = ReturnType<typeof appearanceTagChips>[number] & {
 function suggestedMulticolorTags(character: V2ReviewCharacter): string[] {
   const tags = new Set<string>();
   for (const image of character.images) {
-    for (const tag of (image.suggested_multicolor_tags ?? "").split(",")) {
+    for (const tag of image.suggested_multicolor_tags ?? []) {
       const trimmed = tag.trim();
       if (trimmed) {
         tags.add(trimmed);
@@ -221,7 +221,13 @@ export function V2ReviewRow({
       (chip.group === "hair" || chip.group === "multi" || chip.group === "shape") && !chip.optional && !chip.suggested,
   );
   const suggestedChips = chips.filter((chip) => chip.suggested);
-  const featureRowChips = chips.filter((chip) => chip.group === "eyes" || chip.group === "features");
+  const extraChips = chips.filter((chip) => chip.optional && !chip.suggested && enabledTags.has(chip.key));
+  const extraHairOptions = chips.filter((chip) => chip.optional && !enabledTags.has(chip.key) && chip.group === "hair");
+  const extraEyeOptions = chips.filter((chip) => chip.optional && !enabledTags.has(chip.key) && chip.group === "eyes");
+  const extraStreakOptions = chips.filter(
+    (chip) => chip.optional && !enabledTags.has(chip.key) && chip.group === "multi" && !chip.suggested,
+  );
+  const featureRowChips = chips.filter((chip) => (chip.group === "eyes" || chip.group === "features") && !chip.optional);
   const genStatusBadge = generationStatusBadge(item.generation_status);
   const currentImage = item.images[draft.imageIndex] ?? null;
   const hasMultipleImages = item.images.length > 1;
@@ -258,6 +264,7 @@ export function V2ReviewRow({
               imagePath={currentImage.image_path}
               alt={`${item.character_tag} ${draft.imageIndex + 1}`}
               active={focused}
+              eager
               thumbSize={thumbSize}
             />
             <div className="v2-review-card-overlay">
@@ -356,6 +363,58 @@ export function V2ReviewRow({
               {chip.label}
             </button>
           ))}
+          {extraChips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              className={`review-tag review-tag--extra${enabledTags.has(chip.key) ? " review-tag--enabled" : ""}`}
+              onClick={() => onToggleTag(chip.key)}
+              disabled={locked}
+            >
+              {chip.group === "multi" ? stripHairSuffix(chip.label) : chip.label}
+            </button>
+          ))}
+          <select
+            className="review-tag-select"
+            value=""
+            disabled={locked}
+            aria-label="색상 추가"
+            onChange={(event) => {
+              const key = event.target.value;
+              if (key) {
+                onToggleTag(key);
+              }
+            }}
+          >
+            <option value="">+ 색상 추가</option>
+            {extraHairOptions.length > 0 ? (
+              <optgroup label="머리색">
+                {extraHairOptions.map((chip) => (
+                  <option key={chip.key} value={chip.key}>
+                    {chip.label}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+            {extraEyeOptions.length > 0 ? (
+              <optgroup label="눈색">
+                {extraEyeOptions.map((chip) => (
+                  <option key={chip.key} value={chip.key}>
+                    {chip.label}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+            {extraStreakOptions.length > 0 ? (
+              <optgroup label="스트릭">
+                {extraStreakOptions.map((chip) => (
+                  <option key={chip.key} value={chip.key}>
+                    {stripHairSuffix(chip.label)}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+          </select>
           {suggestedChips.map((chip) => (
             <button
               key={chip.key}
