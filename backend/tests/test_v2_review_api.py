@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import pytest
@@ -70,7 +71,9 @@ def make_character(
             quality_reasons="ok",
             identity_status=identity_status,
             identity_reasons="ok",
-            suggested_multicolor_tags=suggested_multicolor_tags,
+            suggested_multicolor_tags=(
+                json.dumps([suggested_multicolor_tags]) if suggested_multicolor_tags else None
+            ),
         )
     )
     if review_status:
@@ -139,7 +142,7 @@ def test_v2_review_list_filters_and_returns_preview_metadata(db: Session) -> Non
     assert item["review_status"] == "completed"
     assert item["preview_image"]["quality_status"] == "fail"
     assert item["preview_image"]["identity_status"] == "mismatch"
-    assert item["preview_image"]["suggested_multicolor_tags"] == "gradient_hair"
+    assert item["preview_image"]["suggested_multicolor_tags"] == ["gradient_hair"]
     assert item["first_post_at"] == "2020-01-02T03:04:05"
 
 

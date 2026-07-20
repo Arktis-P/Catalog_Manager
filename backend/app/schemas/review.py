@@ -237,7 +237,7 @@ class V2ReviewImageResponse(BaseModel):
     conflicting_character_tag: str | None = None
     conflicting_character_confidence: float | None = None
     identity_reasons: str | None = None
-    suggested_multicolor_tags: str | None = None
+    suggested_multicolor_tags: list[str] = Field(default_factory=list)
     is_provisional: bool = False
     is_rejected: bool = False
     is_cover: bool = False

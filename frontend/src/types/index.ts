@@ -566,7 +566,7 @@ export interface V2ReviewImage {
   conflicting_character_tag: string | null;
   conflicting_character_confidence: number | null;
   identity_reasons: string | null;
-  suggested_multicolor_tags: string | null;
+  suggested_multicolor_tags: string[];
   is_provisional: boolean;
   is_rejected: boolean;
   is_cover: boolean;

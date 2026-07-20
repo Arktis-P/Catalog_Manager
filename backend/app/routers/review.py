@@ -33,7 +33,11 @@ from app.schemas.review import (
     ReviewRegenerateJobListResponse,
     ReviewRegenerateJobResponse,
 )
-from app.services.review_catalog_serializer import to_catalog_item, to_catalog_item_global
+from app.services.review_catalog_serializer import (
+    parse_json_reason_list,
+    to_catalog_item,
+    to_catalog_item_global,
+)
 from app.services.review_regenerate_job_manager import (
     ReviewRegenerateJobState,
     review_regenerate_job_manager,
@@ -90,7 +94,7 @@ def _to_v2_review_image(image) -> V2ReviewImageResponse:
         conflicting_character_tag=image.conflicting_character_tag,
         conflicting_character_confidence=image.conflicting_character_confidence,
         identity_reasons=image.identity_reasons,
-        suggested_multicolor_tags=image.suggested_multicolor_tags,
+        suggested_multicolor_tags=parse_json_reason_list(image.suggested_multicolor_tags),
         is_provisional=image.is_provisional,
         is_rejected=image.is_rejected,
         is_cover=image.is_cover,

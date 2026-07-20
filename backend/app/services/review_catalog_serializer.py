@@ -13,7 +13,7 @@ from app.schemas.review import (
 from app.services.review_service import ReviewService
 
 
-def _parse_json_reason_list(value: str | None) -> list[str]:
+def parse_json_reason_list(value: str | None) -> list[str]:
     """quality_reasons/identity_reasons/suggested_multicolor_tags에 저장된
     JSON 배열 문자열을 리스트로 파싱한다. 값이 없거나 형식이 어긋나면 빈 리스트."""
     if not value:
@@ -83,14 +83,14 @@ def to_catalog_item_global(character: GlobalCharacter) -> GlobalCatalogReviewIte
                 is_provisional=image.is_provisional,
                 quality_status=image.quality_status,
                 quality_score=image.quality_score,
-                quality_reasons=_parse_json_reason_list(image.quality_reasons),
+                quality_reasons=parse_json_reason_list(image.quality_reasons),
                 identity_status=image.identity_status,
                 character_confidence=image.character_confidence,
                 hair_color_confidence=image.hair_color_confidence,
                 conflicting_character_tag=image.conflicting_character_tag,
                 conflicting_character_confidence=image.conflicting_character_confidence,
-                identity_reasons=_parse_json_reason_list(image.identity_reasons),
-                suggested_multicolor_tags=_parse_json_reason_list(image.suggested_multicolor_tags),
+                identity_reasons=parse_json_reason_list(image.identity_reasons),
+                suggested_multicolor_tags=parse_json_reason_list(image.suggested_multicolor_tags),
             )
             for image in images
         ],
