@@ -8,6 +8,7 @@ The launcher owns the backend process lifecycle. Closing the window stops the se
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -74,14 +75,25 @@ def ensure_frontend_build() -> None:
 def wait_for_server(url: str, timeout_seconds: int = 90) -> bool:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
-        if _backend_process is not None and _backend_process.poll() is not None:
+        process = _backend_process
+        if process is None or process.poll() is not None:
             return False
+        payload = None
         try:
             with urllib.request.urlopen(url, timeout=2) as response:
-                if response.status == 200:
-                    return True
-        except (urllib.error.URLError, TimeoutError):
-            time.sleep(0.5)
+                payload = json.load(response) if response.status == 200 else None
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError):
+            pass
+        if process.poll() is not None:
+            return False
+        if (
+            isinstance(payload, dict)
+            and payload.get("status") == "ok"
+            and payload.get("serve_gui") is True
+            and payload.get("gui_ready") is True
+        ):
+            return True
+        time.sleep(0.5)
     return False
 
 
@@ -118,10 +130,7 @@ def _open_log_file() -> tuple[Path | None, object]:
         return None, subprocess.DEVNULL
 
 
-def release_listening_port(port: int) -> None:
-    """Stop stray listeners left by a crashed desktop session."""
-    if sys.platform != "win32":
-        return
+def _listening_pids(port: int) -> set[int]:
     try:
         result = subprocess.run(
             ["netstat", "-ano"],
@@ -130,22 +139,81 @@ def release_listening_port(port: int) -> None:
             check=False,
         )
     except OSError:
-        return
-    needle = f":{port}"
+        return set()
+
+    pids: set[int] = set()
     for line in result.stdout.splitlines():
-        if "LISTENING" not in line or needle not in line:
-            continue
         parts = line.split()
-        if not parts:
+        if len(parts) < 5 or parts[3].upper() != "LISTENING":
+            continue
+        local_address = parts[1]
+        if local_address.rsplit(":", 1)[-1] != str(port):
             continue
         pid = parts[-1]
         if pid.isdigit() and int(pid) != os.getpid():
-            subprocess.run(
-                ["taskkill", "/F", "/PID", pid],
-                capture_output=True,
-                text=True,
-                **_hidden_subprocess_kwargs(),
-            )
+            pids.add(int(pid))
+    return pids
+
+
+def _child_process_pids(parent_pid: int) -> set[int]:
+    """Return direct Windows children for an owner PID that has already exited."""
+    command = (
+        "Get-CimInstance Win32_Process "
+        f'-Filter "ParentProcessId = {parent_pid}" '
+        "| Select-Object -ExpandProperty ProcessId"
+    )
+    try:
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                command,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            **_hidden_subprocess_kwargs(),
+        )
+    except OSError:
+        return set()
+    if result.returncode != 0:
+        return set()
+    return {
+        int(line.strip())
+        for line in result.stdout.splitlines()
+        if line.strip().isdigit() and int(line.strip()) != os.getpid()
+    }
+
+
+def _kill_process_tree(pid: int) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["taskkill", "/F", "/T", "/PID", str(pid)],
+        capture_output=True,
+        text=True,
+        **_hidden_subprocess_kwargs(),
+    )
+
+
+def release_listening_port(port: int, timeout_seconds: float = 5) -> None:
+    """Stop stray listeners left by a crashed desktop session."""
+    if sys.platform != "win32":
+        return
+
+    deadline = time.time() + timeout_seconds
+    while True:
+        pids = _listening_pids(port)
+        if not pids:
+            return
+        for pid in pids:
+            result = _kill_process_tree(pid)
+            if result.returncode != 0:
+                for child_pid in _child_process_pids(pid):
+                    _kill_process_tree(child_pid)
+        if time.time() >= deadline:
+            return
+        time.sleep(0.1)
 
 
 def start_backend() -> Path | None:
