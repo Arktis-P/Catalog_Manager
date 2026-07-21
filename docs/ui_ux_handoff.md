@@ -5,6 +5,8 @@
 - 기준 브랜치: `master`
 - 기준 커밋: `8fb4c96`
 - 구현 브랜치: `feat/ui-ux-workflow-improvement`
+- 주요 구현 커밋: `ea1f615` (`feat(ui): streamline review workflow and task panel`)
+- Draft PR: `#2`
 - 오케스트레이션 문서: `origin/docs/ui-ux-improvement-orchestration`의 `docs/09_ui_ux_improvement_orchestration_prompt.md`
 
 ## 완료 항목
