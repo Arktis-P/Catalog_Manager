@@ -43,7 +43,12 @@ type ActiveJobEntry =
 
 const VISIBLE_STATUSES = new Set(["queued", "running", "paused", "completed", "failed", "cancelled"]);
 
-export function GlobalTaskBar() {
+interface GlobalTaskBarProps {
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}
+
+export function GlobalTaskBar({ collapsed, onToggleCollapsed }: GlobalTaskBarProps) {
   const {
     jobs: collectJobs,
     cancelJob: cancelCollectJob,
@@ -138,27 +143,49 @@ export function GlobalTaskBar() {
     () => activeJobs.filter((entry) => entry.job.status === "queued").length,
     [activeJobs],
   );
-
-  if (activeJobs.length === 0 && !lastError) {
-    return null;
-  }
+  const runningCount = useMemo(
+    () => activeJobs.filter((entry) => entry.job.status === "running").length,
+    [activeJobs],
+  );
+  const pausedCount = useMemo(
+    () => activeJobs.filter((entry) => entry.job.status === "paused").length,
+    [activeJobs],
+  );
+  const failedCount = useMemo(
+    () => activeJobs.filter((entry) => entry.job.status === "failed").length,
+    [activeJobs],
+  );
+  const completedCount = useMemo(
+    () => activeJobs.filter((entry) => entry.job.status === "completed").length,
+    [activeJobs],
+  );
 
   return (
-    <section className="global-task-bar" aria-label="Background tasks">
-      {/* 고정 헤더: 항상 보임 */}
+    <section className={`global-task-bar${collapsed ? " global-task-bar--collapsed" : ""}`} aria-label="백그라운드 작업">
       <div className="task-summary-bar">
-        <span className="task-summary-count">
-          대기 {queuedCount} / 전체 {activeJobs.length}
+        <button
+          className="task-sidebar-toggle"
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "작업 패널 펼치기" : "작업 패널 접기"}
+          title={collapsed ? "작업 패널 펼치기" : "작업 패널 접기"}
+        >
+          <span aria-hidden="true">{collapsed ? "›" : "‹"}</span>
+        </button>
+        <span className="task-summary-count" aria-live="polite">
+          {activeJobs.length === 0 && !lastError
+            ? "작업 없음"
+            : `실행 ${runningCount} · 일시정지 ${pausedCount} · 대기 ${queuedCount} · 실패 ${failedCount} · 완료 ${completedCount}`}
         </span>
-        {dismissibleJobs.length > 0 ? (
+        {!collapsed && dismissibleJobs.length > 0 ? (
           <button className="btn btn-small" type="button" onClick={dismissAllCompleted}>
             완료 지우기 ({dismissibleJobs.length})
           </button>
         ) : null}
       </div>
 
-      {/* 스크롤 영역: 작업 목록 */}
-      <div className="global-task-bar-inner">
+      {!collapsed ? <div className="global-task-bar-inner">
         {lastError ? (
           <div className="error-banner global-task-error">
             <span>{lastError}</span>
@@ -288,7 +315,16 @@ export function GlobalTaskBar() {
             }
           })}
         </div>
-      </div>
+      </div> : (
+        <div className="task-summary-rail" aria-label="작업 상태 요약">
+          <span title={`실행 ${runningCount}`}>▶ {runningCount}</span>
+          <span title={`일시정지 ${pausedCount}`}>Ⅱ {pausedCount}</span>
+          <span title={`대기 ${queuedCount}`}>… {queuedCount}</span>
+          <span className={failedCount > 0 ? "task-summary-rail--danger" : ""} title={`실패 ${failedCount}`}>! {failedCount}</span>
+          {lastError ? <span className="task-summary-rail--danger" title="작업 오류">오류</span> : null}
+          <span title={`완료 ${completedCount}`}>✓ {completedCount}</span>
+        </div>
+      )}
     </section>
   );
 }

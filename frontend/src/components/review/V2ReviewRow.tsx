@@ -23,6 +23,13 @@ export interface V2CharacterDraft {
 }
 
 export type V2AppearanceChip = ReturnType<typeof appearanceTagChips>[number] & { suggested?: boolean };
+export type V2ReviewCardSaveStatusKind = "clean" | "dirty" | "saving" | "failed" | "regenerating";
+
+export interface V2ReviewCardSaveStatus {
+  kind: V2ReviewCardSaveStatusKind;
+  label: string;
+  detail?: string;
+}
 
 function suggestedMulticolorTags(character: V2ReviewCharacter): string[] {
   const tags = new Set<string>();
@@ -181,6 +188,7 @@ interface V2ReviewRowProps {
   draft: V2CharacterDraft;
   thumbSize: number;
   locked?: boolean;
+  saveStatus: V2ReviewCardSaveStatus;
   regenerateMessage?: string;
   regenerateProgress?: { current: number; total: number } | null;
   onSelect?: () => void;
@@ -200,6 +208,7 @@ export function V2ReviewRow({
   draft,
   thumbSize,
   locked = false,
+  saveStatus,
   regenerateMessage,
   regenerateProgress,
   onSelect,
@@ -233,6 +242,8 @@ export function V2ReviewRow({
   const hasMultipleImages = item.images.length > 1;
   const displayName = humanizeTag(item.display_name || item.character_tag);
   const primarySeriesTag = item.series_tags[0] ?? null;
+  const statusId = `v2-review-card-status-${item.id}`;
+  const cardLabel = `${displayName}, ${saveStatus.label}`;
 
   const selectImage = (index: number) => {
     if (locked || index === draft.imageIndex) return;
@@ -244,7 +255,13 @@ export function V2ReviewRow({
       className={`v2-review-card${focused ? " v2-review-card--focused" : ""}${locked ? " v2-review-card--locked" : ""}`}
       data-row-index={rowIndex}
       data-character-id={item.id}
+      tabIndex={focused ? 0 : -1}
+      aria-current={focused ? "true" : undefined}
+      aria-busy={locked || saveStatus.kind === "saving" || saveStatus.kind === "regenerating"}
+      aria-describedby={statusId}
+      aria-label={cardLabel}
       onMouseDown={onSelect}
+      onFocus={onSelect}
     >
       {locked && regenerateMessage ? (
         <div className="v2-review-card-regenerate-banner">
@@ -301,6 +318,14 @@ export function V2ReviewRow({
       <div className="v2-review-card-body">
         <div className="v2-review-card-name-row">
           <h3 className="v2-review-card-name">{displayName}</h3>
+          <span
+            id={statusId}
+            className={`v2-review-card-save-status v2-review-card-save-status--${saveStatus.kind}`}
+            title={saveStatus.detail ?? saveStatus.label}
+          >
+            {saveStatus.label}
+            {saveStatus.detail ? ` · ${saveStatus.detail}` : ""}
+          </span>
           {item.is_alternative ? (
             <button
               type="button"

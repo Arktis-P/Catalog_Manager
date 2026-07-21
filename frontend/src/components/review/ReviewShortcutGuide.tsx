@@ -26,6 +26,7 @@ export function ReviewShortcutGuide({
   const shortcuts = [
     ...(v2Layout ? V2_MOVEMENT_SHORTCUTS : MOVEMENT_SHORTCUTS),
     ...BASE_SHORTCUTS,
+    ...(v2Layout ? ["4는 V2 1차 검수에서 비권장 안내만 표시"] : []),
     ...(includeUndo ? ["Ctrl+Z 취소"] : []),
     ...(includeMerge ? ["a Merge (부모/자식 연결)"] : []),
     ...(includeMulticolor ? ["C: multicolor 전환"] : []),

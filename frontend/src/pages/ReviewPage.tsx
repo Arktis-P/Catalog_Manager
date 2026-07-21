@@ -31,26 +31,33 @@ export function ReviewPage() {
     const parsed = Number(raw);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }, [searchParams]);
+  const modeDescription =
+    initialMode === "catalog"
+      ? "카탈로그 검수는 시리즈 또는 전체 캐릭터 범위에서 기존 카탈로그 데이터와 대표 이미지를 집중 확인합니다."
+      : initialMode === "appearance"
+        ? "외형 검수는 캐릭터의 성별, 머리색, 눈색, 특징 태그 같은 외형 메타데이터를 정리합니다."
+        : "V2 검수는 새 생성 후보를 빠르게 판정하고, 대표 이미지와 프롬프트 태그를 함께 저장하는 기본 워크플로우입니다.";
 
   return (
     <section className="review-page">
       <header className="page-header review-page-header">
         <div>
-          <h1 className="page-title">Review</h1>
+          <h1 className="page-title">리뷰</h1>
           <p className="page-description">
-            V2 Review가 기본 검수 화면입니다. Catalog Review(시리즈 단위 집중 검수)와 Appearance는 탭에서 따로 엽니다.
+            V2 검수는 기본 화면입니다. 카탈로그 검수와 외형 검수는 기존 URL을 유지한 탭에서 따로 엽니다.
           </p>
+          <p className="page-description">{modeDescription}</p>
         </div>
 
         <div className="review-header-tabs">
-          <div className="review-mode-tabs" role="tablist" aria-label="Review mode">
+          <div className="review-mode-tabs" role="tablist" aria-label="리뷰 모드">
             <Link
               className={`review-mode-tab${initialMode === "v2" ? " review-mode-tab--active" : ""}`}
               to="/review?mode=v2"
               role="tab"
               aria-selected={initialMode === "v2"}
             >
-              V2
+              V2 검수
             </Link>
             <Link
               className={`review-mode-tab${initialMode === "catalog" ? " review-mode-tab--active" : ""}`}
@@ -58,7 +65,7 @@ export function ReviewPage() {
               role="tab"
               aria-selected={initialMode === "catalog"}
             >
-              Catalog Review
+              카탈로그 검수
             </Link>
             <Link
               className={`review-mode-tab${initialMode === "appearance" ? " review-mode-tab--active" : ""}`}
@@ -66,14 +73,14 @@ export function ReviewPage() {
               role="tab"
               aria-selected={initialMode === "appearance"}
             >
-              Appearance
+              외형 검수
             </Link>
           </div>
 
           {initialMode === "catalog" ? (
             <>
               <div className="review-header-tabs-divider" aria-hidden="true" />
-              <div className="review-mode-tabs" role="tablist" aria-label="Catalog review scope">
+              <div className="review-mode-tabs" role="tablist" aria-label="카탈로그 검수 범위">
                 <button
                   type="button"
                   role="tab"

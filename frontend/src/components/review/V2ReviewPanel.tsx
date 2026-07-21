@@ -27,6 +27,7 @@ import {
   v2SelectedTagsPayload,
   V2ReviewRow,
   type V2CharacterDraft,
+  type V2ReviewCardSaveStatus,
 } from "./V2ReviewRow";
 import { ReviewImagePreview } from "./ReviewImagePreview";
 import { toggleRating } from "./ReviewRatingStars";
@@ -83,8 +84,25 @@ function toLinkableSummary(item: V2ReviewCharacter): LinkableCharacterSummary {
   };
 }
 
+function sameStringSet(left: Set<string>, right: Set<string>): boolean {
+  return left.size === right.size && Array.from(left).every((value) => right.has(value));
+}
+
+function isDraftChanged(item: V2ReviewCharacter, draft: V2CharacterDraft): boolean {
+  const initial = createV2DraftForItem(item);
+  return (
+    draft.imageIndex !== initial.imageIndex ||
+    draft.gender !== initial.gender ||
+    draft.rating !== initial.rating ||
+    draft.customPrompt !== initial.customPrompt ||
+    draft.promptEdited !== initial.promptEdited ||
+    !sameStringSet(draft.enabledTags, initial.enabledTags)
+  );
+}
+
 export function V2ReviewPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const focusCardFromKeyboardRef = useRef(false);
   const [items, setItems] = useState<V2ReviewCharacter[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<V2ReviewStats | null>(null);
@@ -106,6 +124,9 @@ export function V2ReviewPanel() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [focusIndex, setFocusIndex] = useState(0);
   const [drafts, setDrafts] = useState<Record<number, V2CharacterDraft>>({});
+  const [dirtyIds, setDirtyIds] = useState<Set<number>>(() => new Set());
+  const [savingIds, setSavingIds] = useState<Set<number>>(() => new Set());
+  const [failedMessages, setFailedMessages] = useState<Record<number, string>>({});
   const [submittingId, setSubmittingId] = useState<number | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [thumbSize, setThumbSize] = useState(384);
@@ -268,8 +289,55 @@ export function V2ReviewPanel() {
     search,
   ]);
 
+  const addToSet = (values: Set<number>, id: number) => {
+    const next = new Set(values);
+    next.add(id);
+    return next;
+  };
+
+  const removeFromSet = (values: Set<number>, id: number) => {
+    const next = new Set(values);
+    next.delete(id);
+    return next;
+  };
+
+  const removeManyFromSet = (values: Set<number>, ids: Set<number>) => {
+    const next = new Set(values);
+    for (const id of ids) {
+      next.delete(id);
+    }
+    return next;
+  };
+
+  const clearFailedMessage = (characterId: number) => {
+    setFailedMessages((current) => {
+      if (!(characterId in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[characterId];
+      return next;
+    });
+  };
+
+  const forgetDraft = (characterId: number) => {
+    setDrafts((current) => {
+      if (!(characterId in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[characterId];
+      return next;
+    });
+  };
+
   const updateDraft = (characterId: number, draft: V2CharacterDraft) => {
     setDrafts((current) => ({ ...current, [characterId]: draft }));
+    const item = itemsRef.current.find((entry) => entry.id === characterId);
+    setDirtyIds((current) =>
+      item && !isDraftChanged(item, draft) ? removeFromSet(current, characterId) : addToSet(current, characterId),
+    );
+    clearFailedMessage(characterId);
   };
 
   const toggleTag = (characterId: number, tagKey: string) => {
@@ -291,6 +359,9 @@ export function V2ReviewPanel() {
     if (!item) return;
     const current = drafts[characterId] ?? createV2DraftForItem(item);
     updateDraft(characterId, { ...current, rating: toggleRating(current.rating, value) });
+    if (value === 4) {
+      setActionMessage("레이팅 4는 V2 1차 검수에서 비권장입니다. 다시 4를 눌러 해제하거나 1/2/3/5/6으로 수정할 수 있습니다.");
+    }
   };
 
   const completeItem = async (item: V2ReviewCharacter) => {
@@ -304,8 +375,11 @@ export function V2ReviewPanel() {
     const chips = v2AppearanceTagChips(item);
     const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
     const finalPrompt = resolveV2FinalPrompt(item, { ...draft, enabledTags });
+    const completedIndex = itemsRef.current.findIndex((entry) => entry.id === item.id);
 
     setSubmittingId(item.id);
+    setSavingIds((current) => addToSet(current, item.id));
+    clearFailedMessage(item.id);
     setError(null);
     try {
       await api.completeV2ReviewCharacter(item.id, {
@@ -316,12 +390,24 @@ export function V2ReviewPanel() {
         selected_tags: isRatingZero ? null : v2SelectedTagsPayload(item, enabledTags),
       });
       setActionMessage(`${item.character_tag} 리뷰 완료`);
+      setDirtyIds((current) => removeFromSet(current, item.id));
+      clearFailedMessage(item.id);
+      forgetDraft(item.id);
+      const nextItems = itemsRef.current.filter((entry) => entry.id !== item.id);
+      setItems(nextItems);
+      setTotal((current) => Math.max(0, current - 1));
+      focusCardFromKeyboardRef.current = true;
+      setFocusIndex(Math.min(completedIndex >= 0 ? completedIndex : focusIndex, Math.max(0, nextItems.length - 1)));
       await loadReviews();
       await loadStats();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "리뷰 완료에 실패했습니다.");
+      const message = err instanceof Error ? err.message : "리뷰 완료에 실패했습니다.";
+      setError(message);
+      setFailedMessages((current) => ({ ...current, [item.id]: message }));
+      setDirtyIds((current) => addToSet(current, item.id));
     } finally {
       setSubmittingId(null);
+      setSavingIds((current) => removeFromSet(current, item.id));
     }
   };
 
@@ -332,7 +418,7 @@ export function V2ReviewPanel() {
     const eligible = items.filter((item) => {
       if (isCharacterRegenerating(item.id)) return false;
       const draft = drafts[item.id];
-      const rating = draft?.rating ?? item.rating;
+      const rating = draft ? draft.rating : item.rating;
       return rating !== null && rating !== undefined;
     });
     if (eligible.length === 0) {
@@ -341,11 +427,26 @@ export function V2ReviewPanel() {
     }
 
     setBulkSaving(true);
+    const eligibleIds = new Set(eligible.map((item) => item.id));
+    setSavingIds((current) => {
+      const next = new Set(current);
+      for (const id of eligibleIds) {
+        next.add(id);
+      }
+      return next;
+    });
+    setFailedMessages((current) => {
+      const next = { ...current };
+      for (const id of eligibleIds) {
+        delete next[id];
+      }
+      return next;
+    });
     setError(null);
     try {
       const payloadItems = eligible.map((item) => {
         const draft = drafts[item.id] ?? createV2DraftForItem(item);
-        const rating = draft.rating ?? item.rating;
+        const rating = draft.rating;
         const chips = v2AppearanceTagChips(item);
         const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
         const finalPrompt = resolveV2FinalPrompt(item, { ...draft, enabledTags });
@@ -372,12 +473,37 @@ export function V2ReviewPanel() {
           const failedItem = items.find((entry) => entry.id === result.character_id);
           return failedItem ? failedItem.character_tag : `#${result.character_id}`;
         });
+      const failedResults = response.results.filter((result) => result.status === "failed");
+      const failedIds = new Set(failedResults.map((result) => result.character_id));
+      const succeededIds = new Set(
+        response.results.filter((result) => result.status === "completed").map((result) => result.character_id),
+      );
       setActionMessage(`완료 ${response.completed} · 건너뜀 ${response.skipped} · 실패 ${response.failed}`);
       if (failedTags.length > 0) {
         setError(`일괄 저장 실패: ${failedTags.join(", ")}`);
+        setFailedMessages((current) => {
+          const next = { ...current };
+          for (const result of failedResults) {
+            const failedItem = items.find((entry) => entry.id === result.character_id);
+            next[result.character_id] = result.error || `${failedItem?.character_tag ?? result.character_id} 저장 실패`;
+          }
+          return next;
+        });
+        const firstFailedIndex = items.findIndex((entry) => failedIds.has(entry.id));
+        if (firstFailedIndex >= 0) {
+          focusCardFromKeyboardRef.current = true;
+          setFocusIndex(firstFailedIndex);
+        }
       }
-      setFocusIndex(0);
-      scrollRef.current?.scrollTo({ top: 0 });
+      setDirtyIds((current) => removeManyFromSet(current, succeededIds));
+      for (const id of succeededIds) {
+        clearFailedMessage(id);
+        forgetDraft(id);
+      }
+      if (failedTags.length === 0) {
+        setFocusIndex(0);
+        scrollRef.current?.scrollTo({ top: 0 });
+      }
       if (skip !== 0) {
         setSkip(0);
       } else {
@@ -385,9 +511,18 @@ export function V2ReviewPanel() {
       }
       await loadStats();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "일괄 저장에 실패했습니다.");
+      const message = err instanceof Error ? err.message : "일괄 저장에 실패했습니다.";
+      setError(message);
+      setFailedMessages((current) => {
+        const next = { ...current };
+        for (const item of eligible) {
+          next[item.id] = message;
+        }
+        return next;
+      });
     } finally {
       setBulkSaving(false);
+      setSavingIds((current) => removeManyFromSet(current, eligibleIds));
     }
   }, [bulkSaving, items, drafts, isCharacterRegenerating, skip, loadReviews, loadStats]);
 
@@ -560,6 +695,10 @@ export function V2ReviewPanel() {
     }
     const row = node.querySelector(`[data-character-id="${focusedItem.id}"]`);
     row?.scrollIntoView({ block: "nearest" });
+    if (row instanceof HTMLElement && focusCardFromKeyboardRef.current && !isEditableTarget(document.activeElement)) {
+      focusCardFromKeyboardRef.current = false;
+      row.focus({ preventScroll: true });
+    }
   }, [focusIndex, focusedItem]);
 
   useEffect(() => {
@@ -599,25 +738,41 @@ export function V2ReviewPanel() {
 
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        setFocusIndex((index) => Math.max(0, index - 1));
+        setFocusIndex((index) => {
+          const next = Math.max(0, index - 1);
+          focusCardFromKeyboardRef.current = next !== index;
+          return next;
+        });
         return;
       }
 
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        setFocusIndex((index) => Math.min(items.length - 1, index + 1));
+        setFocusIndex((index) => {
+          const next = Math.min(items.length - 1, index + 1);
+          focusCardFromKeyboardRef.current = next !== index;
+          return next;
+        });
         return;
       }
 
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setFocusIndex((index) => Math.max(0, index - gridCols));
+        setFocusIndex((index) => {
+          const next = Math.max(0, index - gridCols);
+          focusCardFromKeyboardRef.current = next !== index;
+          return next;
+        });
         return;
       }
 
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setFocusIndex((index) => Math.min(items.length - 1, index + gridCols));
+        setFocusIndex((index) => {
+          const next = Math.min(items.length - 1, index + gridCols);
+          focusCardFromKeyboardRef.current = next !== index;
+          return next;
+        });
         return;
       }
 
@@ -769,9 +924,46 @@ export function V2ReviewPanel() {
   );
 
   const gridStyle = { "--v2-card-width": `${effectiveCardWidthPx}px` } as CSSProperties;
+  const visibleDirtyCount = items.filter((item) => dirtyIds.has(item.id)).length;
+  const visibleFailedCount = items.filter((item) => item.id in failedMessages).length;
+  const visibleSavingCount = items.filter((item) => savingIds.has(item.id)).length;
+  const remainingLabel = reviewStatus === "pending" && stats ? `${stats.pending.toLocaleString()}개 대기` : `${total.toLocaleString()}개 결과`;
+  const activeFilters = [
+    `상태 ${reviewStatus === "pending" ? "대기" : reviewStatus === "completed_recent" ? "최근 완료" : reviewStatus}`,
+    ratingFilter ? `레이팅 ${ratingFilter}` : null,
+    qualityStatus ? `품질 ${qualityStatus}` : null,
+    identityStatus ? `재현 ${identityStatus}` : null,
+    generationStatus ? `생성 ${generationStatus}` : null,
+    genderFilter ? `성별 ${genderFilter}` : null,
+    seriesId ? `시리즈 #${seriesId}` : null,
+    multicolorFilter ? `multicolor ${multicolorFilter}` : null,
+    promptModifiedOnly ? "프롬프트 수정됨" : null,
+    search ? `검색 ${search}` : null,
+  ].filter(Boolean);
   const statsSummary = stats
     ? `전체 ${stats.total.toLocaleString()} · 대기 ${stats.pending.toLocaleString()} · 진행 ${stats.in_progress.toLocaleString()} · 완료 ${stats.completed.toLocaleString()}`
     : "통계 로딩 중";
+  const workSummary = `남은 항목: ${remainingLabel} · 현재 페이지 ${currentPage}/${pageCount} · 표시 ${items.length.toLocaleString()}개 · 미저장 ${visibleDirtyCount} · 저장 중 ${visibleSavingCount} · 실패 ${visibleFailedCount}`;
+
+  const getSaveStatus = (item: V2ReviewCharacter, regenerateJob?: V2GenerationJobState): V2ReviewCardSaveStatus => {
+    if (regenerateJob && (regenerateJob.status === "queued" || regenerateJob.status === "running" || regenerateJob.status === "paused")) {
+      const detail =
+        regenerateJob.total > 0 ? `${regenerateJob.current}/${regenerateJob.total}` : regenerateJob.message || undefined;
+      return { kind: "regenerating", label: "재생성 중", detail };
+    }
+    if (savingIds.has(item.id) || submittingId === item.id) {
+      return { kind: "saving", label: "저장 중" };
+    }
+    if (failedMessages[item.id]) {
+      return { kind: "failed", label: "저장 실패", detail: failedMessages[item.id] };
+    }
+    if (dirtyIds.has(item.id)) {
+      return { kind: "dirty", label: "미저장 변경" };
+    }
+    return item.review_status === "completed"
+      ? { kind: "clean", label: "저장됨" }
+      : { kind: "clean", label: "변경 없음" };
+  };
 
   return (
     <>
@@ -788,7 +980,7 @@ export function V2ReviewPanel() {
           </select>
         </div>
         <div className="field">
-          <label htmlFor="v2-review-search">Search</label>
+          <label htmlFor="v2-review-search">검색</label>
           <input
             id="v2-review-search"
             value={search}
@@ -799,7 +991,7 @@ export function V2ReviewPanel() {
         <div className="field" style={{ justifyContent: "flex-end" }}>
           <label>&nbsp;</label>
           <button className="btn" type="button" onClick={() => void loadReviews()}>
-            Refresh
+            새로고침
           </button>
         </div>
         <div className="field" style={{ justifyContent: "flex-end" }}>
@@ -816,8 +1008,12 @@ export function V2ReviewPanel() {
         </div>
         {renderPaginationControls()}
         <div className="catalog-review-progress">
-          {statsSummary} · {items.length.toLocaleString()} / {total.toLocaleString()} 표시
-          {focusedItem ? ` · focus: ${focusedItem.character_tag}` : ""}
+          <div>{statsSummary}</div>
+          <div>
+            {workSummary}
+            {focusedItem ? ` · 현재 ${focusedItem.character_tag}` : ""}
+          </div>
+          <div>필터: {activeFilters.length > 0 ? activeFilters.join(" · ") : "없음"}</div>
         </div>
       </div>
 
@@ -938,8 +1134,9 @@ export function V2ReviewPanel() {
           {items.map((item, rowIndex) => {
             const draft = drafts[item.id] ?? createV2DraftForItem(item);
             const focused = rowIndex === focusIndex;
-            const locked = submittingId === item.id || isCharacterRegenerating(item.id);
+            const locked = submittingId === item.id || savingIds.has(item.id) || isCharacterRegenerating(item.id);
             const regenerateJob = v2JobsByCharacter[item.id];
+            const saveStatus = getSaveStatus(item, regenerateJob);
             return (
               <V2ReviewRow
                 key={item.id}
@@ -949,6 +1146,7 @@ export function V2ReviewPanel() {
                 draft={draft}
                 thumbSize={thumbSize}
                 locked={locked}
+                saveStatus={saveStatus}
                 regenerateMessage={regenerateJob?.message}
                 regenerateProgress={
                   regenerateJob && regenerateJob.total > 0
