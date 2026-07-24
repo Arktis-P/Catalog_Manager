@@ -10,6 +10,17 @@ for %%P in (%BACKEND_PORT% %FRONTEND_PORT%) do (
   )
 )
 
+echo Cleaning Catalogue Manager browser profile processes...
+if exist "%VENV_PYTHON%" (
+  "%VENV_PYTHON%" "%~dp0cleanup_browser_profile.py"
+) else (
+  powershell -NoProfile -Command ^
+    "$needle = Join-Path $env:LOCALAPPDATA 'CatalogueManager\browser-profile';" ^
+    "Get-CimInstance Win32_Process -Filter \"Name = 'chrome.exe' OR Name = 'msedge.exe'\" |" ^
+    "Where-Object { $_.CommandLine -and $_.CommandLine.Contains($needle) } |" ^
+    "ForEach-Object { taskkill /F /T /PID $_.ProcessId >$null 2>&1 }"
+)
+
 echo Done. Ports %BACKEND_PORT% and %FRONTEND_PORT% should be free.
-echo Logs remain in: %PROJECT_ROOT%\logs
+echo Logs remain in: %LOCALAPPDATA%\CatalogueManager\logs
 exit /b 0

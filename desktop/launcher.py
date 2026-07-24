@@ -1,9 +1,13 @@
 """Catalogue Manager desktop shell.
 
 Architecture:
-  pywebview (WebView2 on Windows) + React GUI + FastAPI backend
+  Chrome/Edge app window + React GUI + FastAPI backend
 
 The launcher owns the backend process lifecycle. Closing the window stops the server.
+
+Important (Windows): Chrome/Edge reuse a fixed --user-data-dir. A second launch often
+exits immediately after handing off to the existing profile process. Waiting only on
+that short-lived Popen would stop the backend while the window is still open (blank UI).
 """
 
 from __future__ import annotations
@@ -30,15 +34,27 @@ _backend_process: subprocess.Popen | None = None
 _log_handle = None
 
 
-def runtime_log_dir() -> Path:
+def runtime_data_dir() -> Path:
     """Use LOCALAPPDATA to avoid OneDrive file locks in the project folder."""
     if sys.platform == "win32":
         base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     else:
         base = Path.home() / ".local" / "share"
-    log_dir = base / "CatalogueManager" / "logs"
+    data_dir = base / "CatalogueManager"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
+def runtime_log_dir() -> Path:
+    log_dir = runtime_data_dir() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir
+
+
+def browser_profile_dir() -> Path:
+    profile_dir = runtime_data_dir() / "browser-profile"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    return profile_dir
 
 
 def _hidden_subprocess_kwargs() -> dict:
@@ -296,21 +312,100 @@ def find_browser() -> Path | None:
     return None
 
 
-def open_app_browser(url: str) -> "subprocess.Popen[bytes] | None":
+def pids_using_browser_profile(profile_dir: Path) -> set[int]:
+    """Return chrome/msedge PIDs whose command line references our app profile."""
+    if sys.platform != "win32":
+        return set()
+
+    needle = str(profile_dir.resolve()).replace("'", "''")
+    command = (
+        f"$needle = '{needle}'; "
+        "Get-CimInstance Win32_Process "
+        "-Filter \"Name = 'chrome.exe' OR Name = 'msedge.exe'\" | "
+        "Where-Object { $_.CommandLine -and $_.CommandLine.Contains($needle) } | "
+        "Select-Object -ExpandProperty ProcessId"
+    )
+    try:
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                command,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            **_hidden_subprocess_kwargs(),
+        )
+    except OSError:
+        return set()
+    if result.returncode != 0:
+        return set()
+    return {
+        int(line.strip())
+        for line in result.stdout.splitlines()
+        if line.strip().isdigit() and int(line.strip()) != os.getpid()
+    }
+
+
+def kill_browser_profile_processes(profile_dir: Path, timeout_seconds: float = 5) -> None:
+    """Stop leftover app windows so the next launch owns the backend lifecycle."""
+    if sys.platform != "win32":
+        return
+
+    deadline = time.time() + timeout_seconds
+    while True:
+        pids = pids_using_browser_profile(profile_dir)
+        if not pids:
+            return
+        # Prefer killing process trees from each PID; duplicates are fine.
+        for pid in sorted(pids):
+            _kill_process_tree(pid)
+        if time.time() >= deadline:
+            return
+        time.sleep(0.15)
+
+
+def wait_for_app_window_close(
+    profile_dir: Path,
+    browser_proc: "subprocess.Popen[bytes] | None",
+    appear_timeout_seconds: float = 20,
+) -> None:
+    """Keep the backend alive until the app profile browser processes exit.
+
+    Chrome may exit the initial Popen immediately when handing off to an existing
+    profile instance. Track processes by --user-data-dir instead.
+    """
+    deadline = time.time() + appear_timeout_seconds
+    seen_profile = False
+
+    while time.time() < deadline:
+        pids = pids_using_browser_profile(profile_dir)
+        if pids:
+            seen_profile = True
+            break
+        if browser_proc is not None and browser_proc.poll() is None:
+            time.sleep(0.25)
+            continue
+        # Popen already exited and profile PIDs are not visible yet — brief grace.
+        time.sleep(0.25)
+
+    if not seen_profile:
+        if browser_proc is not None and browser_proc.poll() is None:
+            browser_proc.wait()
+        return
+
+    while pids_using_browser_profile(profile_dir):
+        time.sleep(0.5)
+
+
+def open_app_browser(url: str, profile_dir: Path) -> "subprocess.Popen[bytes] | None":
     browser = find_browser()
     if browser is None:
         print(f"[desktop] Chrome/Edge not found. Open manually: {url}", flush=True)
         return None
-
-    if sys.platform == "win32":
-        profile_dir = (
-            Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-            / "CatalogueManager"
-            / "browser-profile"
-        )
-    else:
-        profile_dir = Path.home() / ".local" / "share" / "CatalogueManager" / "browser-profile"
-    profile_dir.mkdir(parents=True, exist_ok=True)
 
     return subprocess.Popen(
         [
@@ -328,8 +423,12 @@ def open_app_browser(url: str) -> "subprocess.Popen[bytes] | None":
 
 def run_desktop() -> int:
     log_path: Path | None = None
+    profile_dir = browser_profile_dir()
     try:
         ensure_frontend_build()
+        # Orphan profile windows make the next Popen exit instantly and would
+        # otherwise tear down a freshly started backend (blank app window).
+        kill_browser_profile_processes(profile_dir)
         release_listening_port(BACKEND_PORT)
         log_path = start_backend()
 
@@ -346,14 +445,14 @@ def run_desktop() -> int:
 
         # Bust SPA cache and avoid reusing a stale app tab from the shared profile.
         boot_url = f"{APP_URL}/?_boot={int(time.time())}"
-        browser_proc = open_app_browser(boot_url)
+        browser_proc = open_app_browser(boot_url, profile_dir)
         if browser_proc is None:
             # 브라우저를 찾지 못한 경우 URL 출력 후 Ctrl+C 대기
             print(f"[desktop] App running at {APP_URL}  (Ctrl+C to stop)", flush=True)
             if _backend_process is not None:
                 _backend_process.wait()
         else:
-            browser_proc.wait()
+            wait_for_app_window_close(profile_dir, browser_proc)
 
         stop_backend()
         return 0

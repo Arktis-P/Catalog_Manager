@@ -47,8 +47,17 @@ scripts\launch_desktop.bat
 ```
 
 - `.venv` Python으로 `desktop\launcher.py` 실행
-- 백엔드(FastAPI) + WebView2 GUI 창을 함께 띄움
+- 백엔드(FastAPI) + Chrome/Edge 앱 창을 함께 띄움
 - 창을 닫으면 백엔드도 함께 종료
+
+### 빈 화면 / 백엔드만 죽은 경우 (원클릭 복구)
+
+```bat
+scripts\fix_blank_screen.bat
+```
+
+- 포트 `8000`/`5173` 프로세스와 Catalogue Manager 전용 브라우저 프로필을 정리한 뒤 데스크톱 앱을 다시 실행합니다.
+- 창은 열리는데 내용이 비어 있거나, 백엔드는 떠 있는 것 같은데 UI가 안 나올 때 사용하세요.
 
 ### 개발 모드 (백엔드 + 프론트엔드 분리, 핫 리로드)
 
@@ -76,7 +85,7 @@ scripts\launch_app_prod.bat
 scripts\stop_app.bat
 ```
 
-포트 `8000`, `5173`을 사용 중인 프로세스를 종료합니다.
+포트 `8000`, `5173`을 사용 중인 프로세스와 Catalogue Manager 전용 Chrome/Edge 프로필 프로세스를 종료합니다.
 
 ---
 
