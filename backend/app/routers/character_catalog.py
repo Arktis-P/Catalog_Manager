@@ -256,7 +256,14 @@ def list_character_link_candidates(
 
     role = "parent" if mode == "parent" else "child"
     candidates = [item.character for item in ranked]
-    reason_map = {item.character.id: item.match_reason for item in ranked}
+    # same_series는 이름/구조 신호 없이 단독 추천 근거로 노출하지 않는다.
+    # 서비스 계층이 과도기적으로 같은 값을 내려보내더라도 API 응답에서 걸러낸다.
+    reason_map = {
+        item.character.id: item.match_reason
+        for item in ranked
+        if item.match_reason and item.match_reason != "same_series"
+    }
+    score_map = {item.character.id: item.similarity_score for item in ranked}
 
     # 후보들의 리뷰 상태/이미지 수/커버 경로를 한 번에 조회해 병합 판단에 필요한
     # 정보(이미 생성·선택된 캐릭터인지)를 배지로 보여줄 수 있게 한다.
@@ -299,7 +306,7 @@ def list_character_link_candidates(
                 character_tag=item.character_tag,
                 display_name=item.display_name,
                 post_count=item.post_count,
-                similarity_score=similarity_score(character, item),
+                similarity_score=score_map.get(item.id, similarity_score(character, item)),
                 match_reason=reason_map.get(item.id) or None,
                 linkable=link_service.candidate_is_linkable(item, role=role),
                 review_status=review_map[item.id].review_status if item.id in review_map else None,

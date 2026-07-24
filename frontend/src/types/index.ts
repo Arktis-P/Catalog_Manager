@@ -239,13 +239,22 @@ export interface GlobalCharacterImagesResponse {
   images: GlobalCharacterImage[];
 }
 
+// 구조적 괄호 관계(structural_parent/structural_child)가 최우선이며,
+// same_base/name_similarity가 그 다음이다. same_series는 단독 추천 근거로
+// 사용하지 않으므로 이 목록에 포함하지 않는다.
+export type CharacterLinkMatchReason =
+  | "structural_parent"
+  | "structural_child"
+  | "same_base"
+  | "name_similarity";
+
 export interface CharacterLinkCandidate {
   id: number;
   character_tag: string;
   display_name: string;
   post_count: number;
   similarity_score: number;
-  match_reason: string | null;
+  match_reason: CharacterLinkMatchReason | null;
   linkable: boolean;
   review_status: string | null;
   rating: number | null;

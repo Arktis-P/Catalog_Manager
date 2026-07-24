@@ -179,6 +179,8 @@ class CharacterLinkCandidate(BaseModel):
     display_name: str
     post_count: int = 0
     similarity_score: float = 0.0
+    # 인식되는 값: structural_parent, structural_child, same_base, name_similarity.
+    # same_series는 이름/구조 신호가 없는 한 단독 추천 근거로 사용하지 않는다.
     match_reason: str | None = None
     linkable: bool = True
     review_status: str | None = None

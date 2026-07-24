@@ -6,16 +6,23 @@ import { pendingReviewImageUrl } from "../utils/reviewImages";
 const CANDIDATE_PREVIEW_SIZE = 600;
 
 const MATCH_REASON_LABELS: Record<string, string> = {
-  base_tag_match: "기본 태그 일치",
-  same_series: "동일 시리즈",
+  structural_parent: "괄호 단계 축약 일치",
+  structural_child: "괄호 단계 확장 일치",
+  same_base: "기본 캐릭터명 일치",
   name_similarity: "이름 유사",
 };
 
+// 동일 시리즈는 단독 추천 근거로 표시하지 않는다. 백엔드가 과도기적으로
+// same_series를 내려보내더라도 프론트에서 라벨을 만들지 않는다.
 function matchReasonLabel(reason: string | null): string | null {
-  if (!reason) {
+  if (!reason || reason === "same_series") {
     return null;
   }
-  return MATCH_REASON_LABELS[reason] ?? reason;
+  return MATCH_REASON_LABELS[reason] ?? null;
+}
+
+function isStructuralReason(reason: string | null): boolean {
+  return reason === "structural_parent" || reason === "structural_child";
 }
 
 type LinkMode = "as_child" | "as_parent";
@@ -46,6 +53,16 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
     [candidates, selectedId],
   );
 
+  const hasStructuralCandidate = useMemo(
+    () => candidates.some((item) => isStructuralReason(item.match_reason)),
+    [candidates],
+  );
+
+  const firstStructuralCandidateId = useMemo(
+    () => candidates.find((item) => isStructuralReason(item.match_reason))?.id ?? null,
+    [candidates],
+  );
+
   useEffect(() => {
     if (alreadyLinked) return;
     let cancelled = false;
@@ -61,10 +78,13 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
         if (cancelled) return;
         setCandidates(response.items);
         setSelectedId((current) => {
-          if (current && response.items.some((item) => item.id === current)) {
+          // 연결 불가능한 후보가 자동 선택되어 제출 버튼이 막히지 않도록,
+          // 연결 가능한 후보를 우선한다.
+          if (current && response.items.some((item) => item.id === current && item.linkable)) {
             return current;
           }
-          return response.items[0]?.id ?? null;
+          const firstLinkable = response.items.find((item) => item.linkable);
+          return firstLinkable?.id ?? response.items[0]?.id ?? null;
         });
       } catch (err) {
         if (cancelled) return;
@@ -242,6 +262,14 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
 
               {error ? <div className="error-banner">{error}</div> : null}
 
+              {!loading && !search && candidates.length > 0 && !hasStructuralCandidate ? (
+                <div className="catalog-card-subtitle">
+                  {effectiveMode === "as_child"
+                    ? "정확한 상위 캐릭터 후보를 찾지 못했습니다. 직접 검색해 주세요."
+                    : "정확한 하위(Alternative) 후보를 찾지 못했습니다. 직접 검색해 주세요."}
+                </div>
+              ) : null}
+
               <div className="field full-width">
                 <label>{effectiveMode === "as_child" ? "연결될 상위 캐릭터" : "연결될 하위 캐릭터"}</label>
                 {loading ? <div className="empty-state">후보 불러오는 중...</div> : null}
@@ -252,6 +280,7 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
                     ) : (
                       candidates.map((candidate) => {
                         const isSelected = candidate.id === selectedId;
+                        const isRecommended = candidate.id === firstStructuralCandidateId;
                         return (
                           <button
                             key={candidate.id}
@@ -265,6 +294,11 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
                             onClick={() => setSelectedId(candidate.id)}
                           >
                             <span className="merge-candidate-tag">{candidate.character_tag}</span>
+                            {isRecommended ? (
+                              <span className="merge-candidate-badge" title="괄호 구조상 가장 가능성이 높은 부모/자식 후보">
+                                추천
+                              </span>
+                            ) : null}
                             {candidate.display_name ? (
                               <span className="merge-candidate-meta">{candidate.display_name}</span>
                             ) : null}
