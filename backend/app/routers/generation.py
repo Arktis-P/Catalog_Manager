@@ -17,6 +17,9 @@ from app.schemas.generation import (
     GlobalGenerationCandidateListResponse,
     GlobalGenerationStartRequest,
     NaiaStatusResponse,
+    PendingImageRecheckJobState,
+    PendingImageRecheckPreviewResponse,
+    PendingImageRecheckStartRequest,
     SuggestLevelResponse,
     V2GenerationJobListResponse,
     V2GenerationJobState,
@@ -25,6 +28,7 @@ from app.schemas.generation import (
 )
 from app.services.generation_job_manager import generation_job_manager
 from app.services.generation_service import GenerationService
+from app.services.pending_image_recheck_job_manager import pending_image_recheck_job_manager
 from app.services.v2_generation_job_manager import v2_generation_job_manager
 
 router = APIRouter(prefix="/generation", tags=["generation"])
@@ -87,9 +91,87 @@ def _v2_job_to_schema(job) -> V2GenerationJobState:
     )
 
 
+def _pending_recheck_job_to_schema(job) -> PendingImageRecheckJobState:
+    return PendingImageRecheckJobState(
+        job_id=job.job_id,
+        status=job.status,
+        phase=job.phase,
+        message=job.message,
+        current=job.current,
+        total=job.total,
+        completed=job.completed,
+        succeeded=job.succeeded,
+        warnings=job.warnings,
+        rejected=job.rejected,
+        failed=job.failed,
+        skipped=job.skipped,
+        batch_size=job.batch_size,
+        last_image_id=job.last_image_id,
+        current_image_id=job.current_image_id,
+        current_character_id=job.current_character_id,
+        current_character_tag=job.current_character_tag,
+        identity_status=job.identity_status,
+        identity_reasons=job.identity_reasons,
+        errors=job.errors,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+    )
+
+
 @router.get("/naia/status", response_model=NaiaStatusResponse)
 def get_naia_status(db: Session = Depends(get_db)):
     return GenerationService(db).naia_status()
+
+
+@router.get("/v2/pending-image-recheck/preview", response_model=PendingImageRecheckPreviewResponse)
+def preview_pending_image_recheck(
+    batch_size: int = Query(default=200, ge=100, le=500),
+    db: Session = Depends(get_db),
+):
+    preview = pending_image_recheck_job_manager.preview(db, batch_size=batch_size)
+    return PendingImageRecheckPreviewResponse(
+        eligible_images=preview.eligible_images,
+        excluded_completed=preview.excluded_completed,
+        missing_files=preview.missing_files,
+        batch_size=preview.batch_size,
+        first_image_id=preview.first_image_id,
+        last_image_id=preview.last_image_id,
+    )
+
+
+@router.post("/v2/pending-image-recheck/start", response_model=PendingImageRecheckJobState)
+def start_pending_image_recheck(payload: PendingImageRecheckStartRequest):
+    job = pending_image_recheck_job_manager.start(batch_size=payload.batch_size)
+    if job is None:
+        raise HTTPException(status_code=409, detail="Pending image recheck already in progress")
+    return _pending_recheck_job_to_schema(job)
+
+
+@router.get("/v2/pending-image-recheck/status", response_model=PendingImageRecheckJobState)
+def get_pending_image_recheck_status():
+    job = pending_image_recheck_job_manager.get_current_or_latest()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _pending_recheck_job_to_schema(job)
+
+
+@router.get("/v2/pending-image-recheck/jobs/{job_id}", response_model=PendingImageRecheckJobState)
+def get_pending_image_recheck_job(job_id: str):
+    job = pending_image_recheck_job_manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _pending_recheck_job_to_schema(job)
+
+
+@router.post("/v2/pending-image-recheck/jobs/{job_id}/cancel", response_model=PendingImageRecheckJobState)
+def cancel_pending_image_recheck_job(job_id: str):
+    cancelled = pending_image_recheck_job_manager.cancel(job_id)
+    job = pending_image_recheck_job_manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not cancelled and job.status in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="Job could not be cancelled")
+    return _pending_recheck_job_to_schema(job)
 
 
 @router.post("/v2/start", response_model=V2GenerationJobState)

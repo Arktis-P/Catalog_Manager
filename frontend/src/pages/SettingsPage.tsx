@@ -1,6 +1,12 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { AppSettings, NotificationDisplay, NotificationMode } from "../types";
+import type {
+  AppSettings,
+  NotificationDisplay,
+  NotificationMode,
+  PendingImageRecheckJob,
+  PendingImageRecheckPreview,
+} from "../types";
 import { useNotificationMode } from "../context/NotificationModeContext";
 import {
   ensureNotificationPermission,
@@ -47,6 +53,14 @@ export function SettingsPage() {
   const [notifPermission, setNotifPermission] = useState<NotificationPermissionStatus>(() =>
     getNotificationPermissionStatus(),
   );
+
+  const [recheckBatchSize, setRecheckBatchSize] = useState(200);
+  const [recheckPreview, setRecheckPreview] = useState<PendingImageRecheckPreview | null>(null);
+  const [recheckPreviewLoading, setRecheckPreviewLoading] = useState(false);
+  const [recheckPreviewError, setRecheckPreviewError] = useState<string | null>(null);
+  const [recheckJob, setRecheckJob] = useState<PendingImageRecheckJob | null>(null);
+  const [recheckStarting, setRecheckStarting] = useState(false);
+  const [recheckActionError, setRecheckActionError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -99,6 +113,110 @@ export function SettingsPage() {
   const handleCardWidthChange = (px: number) => {
     setV2CardWidthPx(px);
     setV2ReviewCardWidthPx(px);
+  };
+
+  const isRecheckActive = recheckJob?.status === "queued" || recheckJob?.status === "running";
+
+  const loadRecheckPreview = async (batchSize: number) => {
+    setRecheckPreviewLoading(true);
+    setRecheckPreviewError(null);
+    try {
+      const preview = await api.previewPendingImageRecheck(batchSize);
+      setRecheckPreview(preview);
+    } catch (err) {
+      setRecheckPreviewError(err instanceof Error ? err.message : "미리보기를 불러오지 못했습니다");
+    } finally {
+      setRecheckPreviewLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadRecheckPreview(recheckBatchSize);
+    void (async () => {
+      try {
+        const job = await api.getPendingImageRecheckStatus();
+        setRecheckJob(job);
+      } catch {
+        // 이전에 실행한 재검사 작업이 없으면 404가 발생합니다 — 무시합니다.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!recheckJob || (recheckJob.status !== "queued" && recheckJob.status !== "running")) {
+      return;
+    }
+    const jobId = recheckJob.job_id;
+    const poll = async () => {
+      try {
+        const updated = await api.getPendingImageRecheckJob(jobId);
+        setRecheckJob(updated);
+        if (updated.status !== "queued" && updated.status !== "running") {
+          void loadRecheckPreview(recheckBatchSize);
+        }
+      } catch (err) {
+        setRecheckActionError(err instanceof Error ? err.message : "작업 상태를 가져오지 못했습니다");
+      }
+    };
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 1000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recheckJob?.job_id, recheckJob?.status]);
+
+  const handleStartRecheck = async () => {
+    const target = recheckPreview?.eligible_images ?? 0;
+    if (
+      !window.confirm(
+        `리뷰 미완료 이미지 ${target.toLocaleString()}장의 정체성을 재검사합니다. ` +
+          "리뷰가 완료된 항목은 이미 제외된 수치이며, 태그·외형 정보는 변경하지 않고 정체성 판정만 다시 계산합니다. 계속할까요?",
+      )
+    ) {
+      return;
+    }
+    setRecheckStarting(true);
+    setRecheckActionError(null);
+    try {
+      const job = await api.startPendingImageRecheck(recheckBatchSize);
+      setRecheckJob(job);
+    } catch (err) {
+      setRecheckActionError(err instanceof Error ? err.message : "재검사를 시작하지 못했습니다");
+    } finally {
+      setRecheckStarting(false);
+    }
+  };
+
+  const handleCancelRecheck = async () => {
+    if (!recheckJob) return;
+    if (!window.confirm("실행 중인 재검사를 취소할까요?")) return;
+    setRecheckActionError(null);
+    try {
+      const job = await api.cancelPendingImageRecheckJob(recheckJob.job_id);
+      setRecheckJob(job);
+    } catch (err) {
+      setRecheckActionError(err instanceof Error ? err.message : "재검사를 취소하지 못했습니다");
+    }
+  };
+
+  const recheckPercent =
+    recheckJob && recheckJob.total > 0
+      ? Math.min(100, Math.round((recheckJob.current / recheckJob.total) * 100))
+      : null;
+
+  const recheckStatusLabels: Record<string, string> = {
+    queued: "대기 중",
+    running: "진행 중",
+    completed: "완료",
+    cancelled: "취소됨",
+    failed: "실패",
+  };
+
+  const identityStatusLabels: Record<string, string> = {
+    pass: "성공",
+    warning: "경고",
+    reject: "거부",
   };
 
   const handleSubmit = async (event: FormEvent) => {
@@ -397,7 +515,13 @@ export function SettingsPage() {
                 onChange={(event) => setHfWdModel(event.target.value)}
               />
               <p className="field-help">
-                비워두면 기본값 <code>SmilingWolf/wd-eva02-large-tagger-v3</code>를 사용합니다.
+                비워두면 기본값 <code>SmilingWolf/wd-eva02-large-tagger-v3</code>를 사용합니다. 단, 이
+                기본 모델은 현재 HF Inference Provider(서버리스 라우터)에 배포되어 있지 않아 호출이
+                실패할 수 있습니다. 안정적으로 사용하려면 직접 배포한 HF Inference Endpoint의{" "}
+                <strong>전용 HTTPS URL</strong>을 이 필드에 입력하세요 (예:{" "}
+                <code>https://xxxx.endpoints.huggingface.cloud</code>). 토큰 보호를 위해 이 Hugging
+                Face 전용 도메인만 허용됩니다. Pending 이미지 재검사는 태그·외형 정보를 바꾸지 않고
+                정체성(identity) 판정만 다시 계산합니다.
               </p>
             </div>
 
@@ -518,6 +642,182 @@ export function SettingsPage() {
             </button>
           </div>
         </form>
+      ) : null}
+
+      {!loading ? (
+        <div className="panel" style={{ marginTop: 20 }}>
+          <h2 className="section-title">Pending 이미지 재검사</h2>
+          <p className="field-help">
+            리뷰가 완료된(review_status = completed) 캐릭터의 이미지는 이 재검사에서 자동으로
+            제외됩니다. 태그·외형 정보는 변경하지 않고 정체성(identity) 판정만 다시 계산합니다.
+          </p>
+
+          {recheckActionError ? <div className="error-banner">{recheckActionError}</div> : null}
+
+          <div className="field full-width">
+            <label htmlFor="recheck-batch-size">배치 크기 (100~500)</label>
+            <div className="settings-range-row">
+              <input
+                id="recheck-batch-size"
+                type="range"
+                min={100}
+                max={500}
+                step={50}
+                value={recheckBatchSize}
+                disabled={isRecheckActive}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  setRecheckBatchSize(value);
+                  void loadRecheckPreview(value);
+                }}
+              />
+              <strong>{recheckBatchSize}</strong>
+            </div>
+          </div>
+
+          <div className="settings-range-row" style={{ marginTop: 4, marginBottom: 4 }}>
+            {recheckPreviewLoading ? (
+              <span className="field-help">미리보기를 불러오는 중...</span>
+            ) : recheckPreviewError ? (
+              <span style={{ color: "var(--danger)", fontSize: 13 }}>{recheckPreviewError}</span>
+            ) : recheckPreview ? (
+              <span>
+                재검사 대상(리뷰 미완료) 이미지: <strong>{recheckPreview.eligible_images.toLocaleString()}</strong>장
+                {recheckPreview.excluded_completed !== undefined ? (
+                  <>
+                    {" · 리뷰 완료 제외 "}
+                    <strong>{recheckPreview.excluded_completed.toLocaleString()}</strong>장
+                  </>
+                ) : null}
+                {recheckPreview.missing_files !== undefined ? (
+                  <>
+                    {" · 파일 누락 추정 "}
+                    <strong>{recheckPreview.missing_files.toLocaleString()}</strong>장
+                  </>
+                ) : null}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-small"
+              disabled={recheckPreviewLoading}
+              onClick={() => void loadRecheckPreview(recheckBatchSize)}
+            >
+              미리보기 새로고침
+            </button>
+          </div>
+          {recheckPreview &&
+          recheckPreview.excluded_completed === undefined &&
+          recheckPreview.missing_files === undefined ? (
+            <p className="field-help" style={{ marginTop: 0, marginBottom: 12 }}>
+              이 미리보기는 재검사 대상(리뷰 미완료) 이미지 수만 제공합니다. 리뷰 완료 제외 수·파일
+              누락 수는 이 백엔드 버전에서 제공되지 않습니다.
+            </p>
+          ) : (
+            <div style={{ marginBottom: 12 }} />
+          )}
+
+          {recheckJob ? (
+            <div className="job-running-card" style={{ marginBottom: 12 }}>
+              <div className="job-running-meta-row">
+                <span className="job-phase-badge job-phase-default">
+                  {recheckStatusLabels[recheckJob.status] ?? recheckJob.status}
+                </span>
+                <div className="job-running-meta-spacer" />
+                <span className="job-running-count">
+                  {recheckJob.total > 0
+                    ? `${recheckJob.current.toLocaleString()} / ${recheckJob.total.toLocaleString()}`
+                    : ""}
+                  {" · 완료 "}
+                  {recheckJob.completed.toLocaleString()}
+                  {recheckJob.succeeded !== undefined ? (
+                    <>
+                      {" (성공 "}
+                      {recheckJob.succeeded.toLocaleString()}
+                      {recheckJob.warnings !== undefined ? (
+                        <>
+                          {" · 경고 "}
+                          {recheckJob.warnings.toLocaleString()}
+                        </>
+                      ) : null}
+                      {recheckJob.rejected !== undefined ? (
+                        <>
+                          {" · 거부 "}
+                          {recheckJob.rejected.toLocaleString()}
+                        </>
+                      ) : null}
+                      {")"}
+                    </>
+                  ) : null}
+                  {" · 실패 "}
+                  {recheckJob.failed.toLocaleString()}
+                  {" · 파일 누락(건너뜀) "}
+                  {recheckJob.skipped.toLocaleString()}
+                </span>
+                {recheckPercent !== null ? (
+                  <span className="job-running-pct-badge">{recheckPercent}%</span>
+                ) : null}
+              </div>
+              <div
+                className={`progress-bar job-running-bar${recheckPercent === null ? " progress-bar-indeterminate" : ""}`}
+              >
+                <div
+                  className="progress-bar-fill"
+                  style={recheckPercent !== null ? { width: `${recheckPercent}%` } : undefined}
+                />
+              </div>
+              {recheckJob.current_character_tag ? (
+                <div className="job-running-message">
+                  현재: {recheckJob.current_character_tag}
+                  {recheckJob.identity_status
+                    ? ` — 판정: ${identityStatusLabels[recheckJob.identity_status] ?? recheckJob.identity_status}`
+                    : ""}
+                </div>
+              ) : null}
+              {!isRecheckActive ? (
+                <div className="job-running-message">
+                  {recheckJob.status === "completed"
+                    ? `재검사가 끝났습니다 — 성공 ${recheckJob.succeeded ?? recheckJob.completed}건` +
+                      (recheckJob.warnings !== undefined ? `, 경고 ${recheckJob.warnings}건` : "") +
+                      (recheckJob.rejected !== undefined ? `, 거부 ${recheckJob.rejected}건` : "") +
+                      `, 실패 ${recheckJob.failed}건, 파일 누락(건너뜀) ${recheckJob.skipped}건.`
+                    : recheckJob.status === "cancelled"
+                      ? "재검사가 취소되었습니다."
+                      : recheckJob.status === "failed"
+                        ? "재검사가 실패했습니다."
+                        : ""}
+                </div>
+              ) : null}
+              {recheckJob.message ? (
+                <div className="job-running-message" title={recheckJob.message}>
+                  {recheckJob.message}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="modal-actions" style={{ justifyContent: "flex-start" }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={
+                isRecheckActive ||
+                recheckStarting ||
+                recheckPreviewLoading ||
+                !recheckPreview ||
+                recheckPreview.eligible_images === 0
+              }
+              onClick={() => void handleStartRecheck()}
+            >
+              {recheckStarting ? "시작하는 중..." : "재검사 시작"}
+            </button>
+            {isRecheckActive ? (
+              <button type="button" className="btn btn-small" onClick={() => void handleCancelRecheck()}>
+                취소
+              </button>
+            ) : null}
+          </div>
+        </div>
       ) : null}
     </section>
   );

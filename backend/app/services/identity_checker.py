@@ -154,6 +154,8 @@ def check_identity(
     """
     from app.integrations.image_tagger.hf_wd_tagger import (
         DEFAULT_HF_WD_MODEL,
+        TAGGER_ERROR,
+        classify_tagger_error,
         predict_tags_via_hf,
     )
 
@@ -164,7 +166,7 @@ def check_identity(
             hair_color_confidence=None,
             conflicting_character_tag=None,
             conflicting_character_confidence=None,
-            reasons=["tagger_unavailable"],
+            reasons=["tagger_auth_error"],
             suggested_multicolor_tags=[],
         )
 
@@ -178,13 +180,16 @@ def check_identity(
     )
 
     if error or not predictions:
+        reason = classify_tagger_error(error) if error else "tagger_invalid_response"
+        if reason is None:
+            reason = TAGGER_ERROR
         return IdentityCheckResult(
             status="warning",
             character_confidence=None,
             hair_color_confidence=None,
             conflicting_character_tag=None,
             conflicting_character_confidence=None,
-            reasons=["tagger_error"] if error else ["tagger_no_predictions"],
+            reasons=[reason],
             suggested_multicolor_tags=[],
         )
 

@@ -31,6 +31,8 @@ import type {
   NaiaStatus,
   NotificationDisplay,
   NotificationMode,
+  PendingImageRecheckJob,
+  PendingImageRecheckPreview,
   PipelineStatus,
   RelevanceCollectJob,
   RelevanceCollectStartPayload,
@@ -683,4 +685,26 @@ export const api = {
 
   resumeV2GenerationJob: (jobId: string) =>
     request<V2GenerationJobState>(`/generation/v2/jobs/${jobId}/resume`, { method: "POST" }),
+
+  previewPendingImageRecheck: (batchSize?: number) =>
+    request<PendingImageRecheckPreview>(
+      `/generation/v2/pending-image-recheck/preview${buildQuery({ batch_size: batchSize })}`,
+    ),
+
+  startPendingImageRecheck: (batchSize?: number) =>
+    request<PendingImageRecheckJob>("/generation/v2/pending-image-recheck/start", {
+      method: "POST",
+      body: JSON.stringify({ batch_size: batchSize ?? 200 }),
+    }),
+
+  getPendingImageRecheckStatus: () =>
+    request<PendingImageRecheckJob>("/generation/v2/pending-image-recheck/status"),
+
+  getPendingImageRecheckJob: (jobId: string) =>
+    request<PendingImageRecheckJob>(`/generation/v2/pending-image-recheck/jobs/${jobId}`),
+
+  cancelPendingImageRecheckJob: (jobId: string) =>
+    request<PendingImageRecheckJob>(`/generation/v2/pending-image-recheck/jobs/${jobId}/cancel`, {
+      method: "POST",
+    }),
 };

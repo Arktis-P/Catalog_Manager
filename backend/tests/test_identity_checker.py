@@ -141,7 +141,7 @@ def test_check_identity_returns_warning_when_hf_token_missing(tmp_path: Path) ->
         hf_token=None,
     )
     assert result.status == "warning"
-    assert "tagger_unavailable" in result.reasons
+    assert "tagger_auth_error" in result.reasons
 
 
 def test_check_identity_uses_mocked_tagger_predictions(monkeypatch, tmp_path: Path) -> None:
@@ -193,3 +193,29 @@ def test_check_identity_returns_warning_on_tagger_error(monkeypatch, tmp_path: P
     )
     assert result.status == "warning"
     assert "tagger_error" in result.reasons
+
+
+def test_check_identity_uses_stable_tagger_reason_code(monkeypatch, tmp_path: Path) -> None:
+    from app.integrations.image_tagger.hf_wd_tagger import (
+        HFWdTaggerErrorMessage,
+        TAGGER_RATE_LIMITED,
+    )
+
+    image_path = tmp_path / "image.png"
+    image_path.write_bytes(b"placeholder")
+
+    def fake_predict(*args, **kwargs):
+        return [], HFWdTaggerErrorMessage("retry later", TAGGER_RATE_LIMITED)
+
+    monkeypatch.setattr(
+        "app.integrations.image_tagger.hf_wd_tagger.predict_tags_via_hf", fake_predict
+    )
+
+    result = check_identity(
+        image_path,
+        character_tag="hakurei_reimu",
+        primary_hair_color="black_hair",
+        hf_token="fake-token",
+    )
+    assert result.status == "warning"
+    assert result.reasons == ["tagger_rate_limited"]

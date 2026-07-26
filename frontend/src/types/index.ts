@@ -298,6 +298,42 @@ export interface RelevanceCollectStartPayload {
   min_post_count?: number;
 }
 
+export interface PendingImageRecheckPreview {
+  eligible_images: number;
+  batch_size: number;
+  first_image_id: number | null;
+  last_image_id: number | null;
+  // 구버전 백엔드와의 호환을 위해 선택 필드로 둔다 — 없으면 UI에서 렌더링을 생략한다.
+  excluded_completed?: number;
+  missing_files?: number;
+}
+
+export interface PendingImageRecheckJob {
+  job_id: string;
+  status: string;
+  phase: string;
+  message: string;
+  current: number;
+  total: number;
+  completed: number;
+  // 구버전 백엔드와의 호환을 위해 선택 필드로 둔다 — 없으면 UI에서 렌더링을 생략한다.
+  succeeded?: number;
+  warnings?: number;
+  rejected?: number;
+  failed: number;
+  skipped: number;
+  batch_size: number;
+  last_image_id: number | null;
+  current_image_id: number | null;
+  current_character_id: number | null;
+  current_character_tag: string;
+  identity_status: string | null;
+  identity_reasons: string[];
+  errors: Array<Record<string, unknown>>;
+  started_at: string;
+  finished_at: string | null;
+}
+
 export type V2GenerationTarget = "selected" | "page" | "not_generated" | "min_posts";
 
 export interface V2GenerationStartPayload {

@@ -165,3 +165,41 @@ class V2GenerationJobState(BaseModel):
 
 class V2GenerationJobListResponse(BaseModel):
     items: list[V2GenerationJobState]
+
+
+class PendingImageRecheckStartRequest(BaseModel):
+    batch_size: int = Field(default=200, ge=100, le=500)
+
+
+class PendingImageRecheckPreviewResponse(BaseModel):
+    eligible_images: int
+    excluded_completed: int
+    missing_files: int
+    batch_size: int
+    first_image_id: int | None = None
+    last_image_id: int | None = None
+
+
+class PendingImageRecheckJobState(BaseModel):
+    job_id: str
+    status: str
+    phase: str
+    message: str
+    current: int
+    total: int
+    completed: int
+    succeeded: int = 0
+    warnings: int = 0
+    rejected: int = 0
+    failed: int
+    skipped: int
+    batch_size: int
+    last_image_id: int | None = None
+    current_image_id: int | None = None
+    current_character_id: int | None = None
+    current_character_tag: str = ""
+    identity_status: str | None = None
+    identity_reasons: list[str] = Field(default_factory=list)
+    errors: list[dict[str, object]] = Field(default_factory=list)
+    started_at: str
+    finished_at: str | None = None
