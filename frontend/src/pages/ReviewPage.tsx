@@ -3,6 +3,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { AppearanceReviewPanel } from "../components/review/AppearanceReviewPanel";
 import { CatalogReviewPanel } from "../components/review/CatalogReviewPanel";
 import { GlobalCatalogReviewPanel } from "../components/review/GlobalCatalogReviewPanel";
+import { NonHumanTriagePanel } from "../components/review/NonHumanTriagePanel";
+import { ParentChildReviewPanel } from "../components/review/ParentChildReviewPanel";
 import { ReviewRatingGuide } from "../components/review/ReviewRatingGuide";
 import { V2ReviewPanel } from "../components/review/V2ReviewPanel";
 
@@ -12,9 +14,18 @@ export function ReviewPage() {
     searchParams.get("scope") === "series" ? "series" : "characters",
   );
   const rawMode = searchParams.get("mode");
-  // V2 Review가 기본 탭이다. catalog/appearance는 명시적 쿼리로만 진입하고,
-  // 그 외 잘못된 mode 값(예: 오타)도 V2로 폴백한다.
-  const initialMode = rawMode === "catalog" ? "catalog" : rawMode === "appearance" ? "appearance" : "v2";
+  // V2 Review가 기본 탭이다. catalog/appearance/parent-child/non-human은 명시적 쿼리로만
+  // 진입하고, 그 외 잘못된 mode 값(예: 오타)도 V2로 폴백한다.
+  const initialMode =
+    rawMode === "catalog"
+      ? "catalog"
+      : rawMode === "appearance"
+        ? "appearance"
+        : rawMode === "parent-child"
+          ? "parent-child"
+          : rawMode === "non-human"
+            ? "non-human"
+            : "v2";
   const initialSeriesId = useMemo(() => {
     const raw = searchParams.get("series_id");
     if (!raw) {
@@ -36,7 +47,11 @@ export function ReviewPage() {
       ? "카탈로그 검수는 시리즈 또는 전체 캐릭터 범위에서 기존 카탈로그 데이터와 대표 이미지를 집중 확인합니다."
       : initialMode === "appearance"
         ? "외형 검수는 캐릭터의 성별, 머리색, 눈색, 특징 태그 같은 외형 메타데이터를 정리합니다."
-        : "V2 검수는 새 생성 후보를 빠르게 판정하고, 대표 이미지와 프롬프트 태그를 함께 저장하는 기본 워크플로우입니다.";
+        : initialMode === "parent-child"
+          ? "부모-자식 일괄 검수는 부모 캐릭터를 먼저 확인하고, 자식 후보를 한 번에 연결·해제합니다."
+          : initialMode === "non-human"
+            ? "비인간 캐릭터 분류는 사람이 아닌 캐릭터 후보를 빠르게 걸러내고 일반 리뷰로 되돌립니다."
+            : "V2 검수는 새 생성 후보를 빠르게 판정하고, 대표 이미지와 프롬프트 태그를 함께 저장하는 기본 워크플로우입니다.";
 
   return (
     <section className="review-page">
@@ -75,6 +90,22 @@ export function ReviewPage() {
             >
               외형 검수
             </Link>
+            <Link
+              className={`review-mode-tab${initialMode === "parent-child" ? " review-mode-tab--active" : ""}`}
+              to="/review?mode=parent-child"
+              role="tab"
+              aria-selected={initialMode === "parent-child"}
+            >
+              부모-자식 일괄 검수
+            </Link>
+            <Link
+              className={`review-mode-tab${initialMode === "non-human" ? " review-mode-tab--active" : ""}`}
+              to="/review?mode=non-human"
+              role="tab"
+              aria-selected={initialMode === "non-human"}
+            >
+              비인간 분류
+            </Link>
           </div>
 
           {initialMode === "catalog" ? (
@@ -105,7 +136,9 @@ export function ReviewPage() {
         </div>
       </header>
 
-      {initialMode !== "v2" ? <ReviewRatingGuide /> : null}
+      {initialMode !== "v2" && initialMode !== "parent-child" && initialMode !== "non-human" ? (
+        <ReviewRatingGuide />
+      ) : null}
 
       {initialMode === "catalog" ? (
         catalogScope === "series" ? (
@@ -115,6 +148,10 @@ export function ReviewPage() {
         )
       ) : initialMode === "v2" ? (
         <V2ReviewPanel />
+      ) : initialMode === "parent-child" ? (
+        <ParentChildReviewPanel />
+      ) : initialMode === "non-human" ? (
+        <NonHumanTriagePanel />
       ) : (
         <AppearanceReviewPanel />
       )}
