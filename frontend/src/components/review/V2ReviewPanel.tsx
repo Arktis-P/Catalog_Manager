@@ -707,6 +707,19 @@ export function V2ReviewPanel() {
         return;
       }
 
+      if (event.key === " " || event.code === "Space") {
+        event.preventDefault();
+        event.stopPropagation();
+        togglePreview();
+        return;
+      }
+
+      if (previewOpen) {
+        // The image preview dialog owns keyboard input (Escape/Tab) while open;
+        // background destructive/rating/arrow shortcuts must not also fire.
+        return;
+      }
+
       if (event.ctrlKey && event.key === "Enter") {
         event.preventDefault();
         void bulkSaveRatedItems();
@@ -727,13 +740,6 @@ export function V2ReviewPanel() {
           event.preventDefault();
           return;
         }
-      }
-
-      if (event.key === " " || event.code === "Space") {
-        event.preventDefault();
-        event.stopPropagation();
-        togglePreview();
-        return;
       }
 
       if (event.key === "ArrowLeft") {
@@ -855,6 +861,7 @@ export function V2ReviewPanel() {
     gridCols,
     items.length,
     linkingItem,
+    previewOpen,
     regenerateFocused,
     selectFocusedImage,
     togglePreview,
@@ -1175,6 +1182,8 @@ export function V2ReviewPanel() {
           fitToScreen={previewFit}
           onToggleFit={() => setPreviewFit((fit) => !fit)}
           onClose={() => setPreviewOpen(false)}
+          characterId={focusedItem?.id ?? null}
+          characterTag={focusedItem?.character_tag}
         />
       ) : null}
 
