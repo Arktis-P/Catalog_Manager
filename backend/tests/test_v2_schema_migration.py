@@ -45,6 +45,7 @@ def test_init_db_creates_v2_schema(temp_engine: Engine) -> None:
     inspector = inspect(temp_engine)
 
     assert "character_appearance_tag_relevance" in inspector.get_table_names()
+    assert "parent_child_candidate_dismissals" in inspector.get_table_names()
     assert {
         "primary_hair_color",
         "primary_hair_needs_review",
@@ -73,7 +74,15 @@ def test_init_db_creates_v2_schema(temp_engine: Engine) -> None:
         "identity_checker_version",
         "is_provisional",
     }.issubset(_columns(temp_engine, "global_character_images"))
-    assert {"review_status", "rating_stage"}.issubset(_columns(temp_engine, "global_character_reviews"))
+    assert {
+        "review_status",
+        "rating_stage",
+        "non_human_review_result",
+        "non_human_reviewed_at",
+        "non_human_candidate_score",
+        "non_human_candidate_reasons",
+        "non_human_classifier_version",
+    }.issubset(_columns(temp_engine, "global_character_reviews"))
 
 
 def test_legacy_schema_is_migrated_to_v2_columns(temp_engine: Engine) -> None:
@@ -149,14 +158,24 @@ def test_legacy_schema_is_migrated_to_v2_columns(temp_engine: Engine) -> None:
 
     database.init_db()
 
-    assert "character_appearance_tag_relevance" in inspect(temp_engine).get_table_names()
+    table_names = inspect(temp_engine).get_table_names()
+    assert "character_appearance_tag_relevance" in table_names
+    assert "parent_child_candidate_dismissals" in table_names
     assert {"generation_status", "generation_attempts", "primary_hair_needs_review"}.issubset(
         _columns(temp_engine, "global_characters")
     )
     assert {"quality_status", "identity_status", "is_provisional"}.issubset(
         _columns(temp_engine, "global_character_images")
     )
-    assert {"review_status", "rating_stage"}.issubset(_columns(temp_engine, "global_character_reviews"))
+    assert {
+        "review_status",
+        "rating_stage",
+        "non_human_review_result",
+        "non_human_reviewed_at",
+        "non_human_candidate_score",
+        "non_human_candidate_reasons",
+        "non_human_classifier_version",
+    }.issubset(_columns(temp_engine, "global_character_reviews"))
 
 
 def test_appearance_relevance_crud_and_character_cascade(temp_engine: Engine) -> None:

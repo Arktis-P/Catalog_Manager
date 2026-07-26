@@ -21,6 +21,21 @@ from app.schemas.review import (
     GlobalCatalogReviewItemResponse,
     GlobalCatalogReviewListResponse,
     GlobalCatalogReviewPurgeUnselectedResponse,
+    DanbooruReferenceImageListResponse,
+    DanbooruReferenceImageResponse,
+    NonHumanCandidateListResponse,
+    NonHumanCandidateResponse,
+    NonHumanDecisionRequest,
+    NonHumanDecisionResponse,
+    ParentChildApplyConflict,
+    ParentChildApplyRequest,
+    ParentChildApplyResponse,
+    ParentChildCandidateResponse,
+    ParentChildDismissRequest,
+    ParentChildDismissResponse,
+    ParentChildGroupListResponse,
+    ParentChildGroupResponse,
+    ReviewPipelineImageResponse,
     V2BulkCompleteItemResult,
     V2BulkCompleteRequest,
     V2BulkCompleteResponse,
@@ -32,6 +47,10 @@ from app.schemas.review import (
     V2ReviewStatsResponse,
     ReviewRegenerateJobListResponse,
     ReviewRegenerateJobResponse,
+)
+from app.services.review_pipeline_service import (
+    NON_HUMAN_CLASSIFIER_VERSION,
+    ReviewPipelineService,
 )
 from app.services.review_catalog_serializer import (
     parse_json_reason_list,
@@ -49,6 +68,10 @@ router = APIRouter(prefix="/review", tags=["review"])
 
 def get_review_service(db: Session = Depends(get_db)) -> ReviewService:
     return ReviewService(db)
+
+
+def get_review_pipeline_service(db: Session = Depends(get_db)) -> ReviewPipelineService:
+    return ReviewPipelineService(db)
 
 
 def _to_appearance_item(character) -> AppearanceReviewItemResponse:
@@ -141,6 +164,77 @@ def _to_v2_review_character(character) -> V2ReviewCharacterResponse:
         cover_image_id=review.cover_image_id if review else None,
         preview_image=_to_v2_review_image(preview_image) if preview_image else None,
         images=[_to_v2_review_image(image) for image in visible_images],
+    )
+
+
+def _to_pipeline_image(image) -> ReviewPipelineImageResponse | None:
+    if image is None:
+        return None
+    return ReviewPipelineImageResponse(**image.__dict__)
+
+
+def _to_parent_child_candidate(item) -> ParentChildCandidateResponse:
+    character = item.character
+    review = character.review
+    parent = character.parent
+    return ParentChildCandidateResponse(
+        id=character.id,
+        character_tag=character.character_tag,
+        display_name=character.display_name or character.character_tag,
+        post_count=character.post_count,
+        review_status=review.review_status if review else "pending",
+        rating=review.rating if review else None,
+        gender=normalize_gender(review.gender if review and review.gender else character.gender),
+        generation_status=character.generation_status,
+        parent_character_id=character.parent_character_id,
+        parent_character_tag=parent.character_tag if parent else None,
+        child_count=len(character.children),
+        multi_color_hair=character.multi_color_hair,
+        hair_color=character.hair_color,
+        hair_shape=character.hair_shape,
+        eye_color=character.eye_color,
+        feature_tags=character.feature_tags,
+        primary_hair_color=character.primary_hair_color,
+        reasons=item.reasons,
+        confidence=item.confidence,
+        default_selected=item.default_selected,
+        already_linked=item.already_linked,
+        preview_image=_to_pipeline_image(ReviewPipelineService.preview_image(character)),
+    )
+
+
+def _to_parent_child_group(group) -> ParentChildGroupResponse:
+    return ParentChildGroupResponse(
+        group_id=group.group_id,
+        parent=_to_parent_child_candidate(group.parent),
+        children=[_to_parent_child_candidate(child) for child in group.children],
+        candidate_count=len(group.children),
+        selected_count=sum(1 for child in group.children if child.default_selected),
+        conflict_count=group.conflict_count,
+        reasons=group.reasons,
+    )
+
+
+def _to_non_human_candidate(item) -> NonHumanCandidateResponse:
+    character = item.character
+    review = character.review
+    series_tags = [link.copyright_tag for link in character.series_links]
+    return NonHumanCandidateResponse(
+        id=character.id,
+        character_tag=character.character_tag,
+        display_name=character.display_name or character.character_tag,
+        post_count=character.post_count,
+        score=item.score,
+        reasons=item.reasons,
+        classifier_version=NON_HUMAN_CLASSIFIER_VERSION,
+        review_status=review.review_status if review else "pending",
+        current_rating=review.rating if review else None,
+        non_human_review_result=review.non_human_review_result if review else None,
+        gender=normalize_gender(review.gender if review and review.gender else character.gender),
+        generation_status=character.generation_status,
+        series_tags=series_tags,
+        related_tags=item.related_tags,
+        preview_image=_to_pipeline_image(ReviewPipelineService.preview_image(character)),
     )
 
 
@@ -289,6 +383,144 @@ def bulk_complete_v2_review_characters(
 @router.get("/v2/stats", response_model=V2ReviewStatsResponse)
 def get_v2_review_stats(service: ReviewService = Depends(get_review_service)):
     return V2ReviewStatsResponse(**service.get_v2_review_stats())
+
+
+@router.get("/v2/parent-child-groups", response_model=ParentChildGroupListResponse)
+def list_parent_child_groups(
+    series_id: int | None = Query(default=None, ge=1),
+    search: str | None = None,
+    confidence: str = Query(default="all", pattern="^(all|medium|high)$"),
+    already_linked_only: bool = False,
+    unreviewed_first: bool = False,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=30, ge=1, le=100),
+    service: ReviewPipelineService = Depends(get_review_pipeline_service),
+):
+    items, total = service.list_parent_child_groups(
+        series_id=series_id,
+        search=search,
+        confidence=confidence,
+        already_linked_only=already_linked_only,
+        unreviewed_first=unreviewed_first,
+        skip=skip,
+        limit=limit,
+    )
+    return ParentChildGroupListResponse(items=[_to_parent_child_group(item) for item in items], total=total)
+
+
+@router.get("/v2/parent-child-groups/{group_id}", response_model=ParentChildGroupResponse)
+def get_parent_child_group(
+    group_id: str,
+    confidence: str = Query(default="all", pattern="^(all|medium|high)$"),
+    service: ReviewPipelineService = Depends(get_review_pipeline_service),
+):
+    try:
+        group = service.get_parent_child_group(int(group_id), confidence=confidence)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _to_parent_child_group(group)
+
+
+@router.post("/v2/parent-child-groups/{group_id}/apply", response_model=ParentChildApplyResponse)
+def apply_parent_child_group(
+    group_id: str,
+    payload: ParentChildApplyRequest,
+    service: ReviewPipelineService = Depends(get_review_pipeline_service),
+):
+    try:
+        result = service.apply_parent_child_group(int(group_id), payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ParentChildApplyResponse(
+        parent_id=result.parent_id,
+        linked_child_ids=result.linked_child_ids,
+        unlinked_child_ids=result.unlinked_child_ids,
+        inherited_fields=result.inherited_fields,
+        conflicts=[ParentChildApplyConflict(**conflict) for conflict in result.conflicts],
+        completed_child_ids=result.completed_child_ids,
+        parent_completed=result.parent_completed,
+    )
+
+
+@router.post("/v2/parent-child-groups/{group_id}/dismiss-candidate", response_model=ParentChildDismissResponse)
+def dismiss_parent_child_candidate(
+    group_id: str,
+    payload: ParentChildDismissRequest,
+    service: ReviewPipelineService = Depends(get_review_pipeline_service),
+):
+    try:
+        unlinked = service.dismiss_parent_child_candidate(int(group_id), payload.candidate_id, reason=payload.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ParentChildDismissResponse(group_id=group_id, candidate_id=payload.candidate_id, unlinked=unlinked)
+
+
+@router.get("/v2/global-characters/{character_id}/danbooru-reference-images", response_model=DanbooruReferenceImageListResponse)
+def get_danbooru_reference_images(
+    character_id: int,
+    limit: int = Query(default=3, ge=1, le=3),
+    service: ReviewPipelineService = Depends(get_review_pipeline_service),
+):
+    try:
+        payload = service.get_danbooru_reference_images(character_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return DanbooruReferenceImageListResponse(
+        character_id=payload["character_id"],
+        character_tag=payload["character_tag"],
+        images=[DanbooruReferenceImageResponse(**image) for image in payload["images"]],
+        source=payload["source"],
+        error=payload.get("error"),
+    )
+
+
+@router.get("/v2/non-human-candidates", response_model=NonHumanCandidateListResponse)
+def list_non_human_candidates(
+    review_filter: str = Query(default="unreviewed", pattern="^(unreviewed|reviewed|general_review|all)$"),
+    category: str | None = None,
+    series_id: int | None = Query(default=None, ge=1),
+    search: str | None = None,
+    include_completed: bool = False,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=30, ge=1, le=100),
+    service: ReviewPipelineService = Depends(get_review_pipeline_service),
+):
+    items, total = service.list_non_human_candidates(
+        review_filter=review_filter,
+        category=category,
+        series_id=series_id,
+        search=search,
+        include_completed=include_completed,
+        skip=skip,
+        limit=limit,
+    )
+    return NonHumanCandidateListResponse(items=[_to_non_human_candidate(item) for item in items], total=total)
+
+
+@router.post("/v2/non-human-candidates/{character_id}/decision", response_model=NonHumanDecisionResponse)
+def apply_non_human_decision(
+    character_id: int,
+    payload: NonHumanDecisionRequest,
+    service: ReviewPipelineService = Depends(get_review_pipeline_service),
+):
+    try:
+        character = service.apply_non_human_decision(
+            character_id,
+            result=payload.result,
+            complete_review=payload.complete_review,
+            overwrite_existing=payload.overwrite_existing,
+            reopen_completed=payload.reopen_completed,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    review = character.review
+    return NonHumanDecisionResponse(
+        id=character.id,
+        result=payload.result,
+        review_status=review.review_status,
+        rating=review.rating,
+        non_human_review_result=review.non_human_review_result,
+    )
 
 
 @router.get("/appearance", response_model=AppearanceReviewListResponse)

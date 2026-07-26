@@ -326,3 +326,149 @@ class V2BulkCompleteResponse(BaseModel):
     skipped: int
     failed: int
     results: list[V2BulkCompleteItemResult]
+
+
+class ReviewPipelineImageResponse(BaseModel):
+    id: int
+    image_path: str
+    is_cover: bool = False
+    is_rejected: bool = False
+    auto_status: str | None = None
+    quality_status: str | None = None
+    identity_status: str | None = None
+    cover_score: float | None = None
+
+
+class ParentChildCandidateResponse(BaseModel):
+    id: int
+    character_tag: str
+    display_name: str
+    post_count: int
+    review_status: str = "pending"
+    rating: int | None = None
+    gender: str | None = None
+    generation_status: str = "not_generated"
+    parent_character_id: int | None = None
+    parent_character_tag: str | None = None
+    child_count: int = 0
+    multi_color_hair: str | None = None
+    hair_color: str | None = None
+    hair_shape: str | None = None
+    eye_color: str | None = None
+    feature_tags: str | None = None
+    primary_hair_color: str | None = None
+    reasons: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    default_selected: bool = False
+    already_linked: bool = False
+    preview_image: ReviewPipelineImageResponse | None = None
+
+
+class ParentChildGroupResponse(BaseModel):
+    group_id: str
+    parent: ParentChildCandidateResponse
+    children: list[ParentChildCandidateResponse] = Field(default_factory=list)
+    candidate_count: int = 0
+    selected_count: int = 0
+    conflict_count: int = 0
+    reasons: list[str] = Field(default_factory=list)
+
+
+class ParentChildGroupListResponse(BaseModel):
+    items: list[ParentChildGroupResponse]
+    total: int
+
+
+class ParentChildApplyRequest(BaseModel):
+    selected_child_ids: list[int] = Field(default_factory=list, max_length=100)
+    unlink_child_ids: list[int] = Field(default_factory=list, max_length=100)
+    inherit_tags: bool = True
+    apply_parent_rating: bool = False
+    complete_children: bool = False
+    complete_parent: bool = False
+
+
+class ParentChildApplyConflict(BaseModel):
+    child_id: int
+    field: str
+    parent_value: str | None = None
+    child_value: str | None = None
+
+
+class ParentChildApplyResponse(BaseModel):
+    parent_id: int
+    linked_child_ids: list[int] = Field(default_factory=list)
+    unlinked_child_ids: list[int] = Field(default_factory=list)
+    inherited_fields: dict[int, list[str]] = Field(default_factory=dict)
+    conflicts: list[ParentChildApplyConflict] = Field(default_factory=list)
+    completed_child_ids: list[int] = Field(default_factory=list)
+    parent_completed: bool = False
+
+
+class ParentChildDismissRequest(BaseModel):
+    candidate_id: int = Field(ge=1)
+    reason: str | None = None
+
+
+class ParentChildDismissResponse(BaseModel):
+    group_id: str
+    candidate_id: int
+    dismissed: bool = True
+    unlinked: bool = False
+
+
+class DanbooruReferenceImageResponse(BaseModel):
+    post_id: int
+    preview_url: str | None = None
+    sample_url: str | None = None
+    file_url: str | None = None
+    width: int | None = None
+    height: int | None = None
+    rating: str | None = None
+    post_url: str
+
+
+class DanbooruReferenceImageListResponse(BaseModel):
+    character_id: int
+    character_tag: str
+    images: list[DanbooruReferenceImageResponse] = Field(default_factory=list)
+    source: str = "recent_posts"
+    error: str | None = None
+
+
+class NonHumanCandidateResponse(BaseModel):
+    id: int
+    character_tag: str
+    display_name: str
+    post_count: int
+    score: float
+    reasons: list[str] = Field(default_factory=list)
+    classifier_version: str
+    review_status: str = "pending"
+    current_rating: int | None = None
+    non_human_review_result: str | None = None
+    gender: str | None = None
+    generation_status: str = "not_generated"
+    series_tags: list[str] = Field(default_factory=list)
+    related_tags: list[str] = Field(default_factory=list)
+    preview_image: ReviewPipelineImageResponse | None = None
+
+
+class NonHumanCandidateListResponse(BaseModel):
+    items: list[NonHumanCandidateResponse]
+    total: int
+
+
+class NonHumanDecisionRequest(BaseModel):
+    result: str = Field(pattern="^(non_human|generation_unavailable|human_female|general_review)$")
+    complete_review: bool = True
+    overwrite_existing: bool = False
+    reopen_completed: bool = False
+
+
+class NonHumanDecisionResponse(BaseModel):
+    id: int
+    result: str
+    review_status: str
+    rating: int | None = None
+    non_human_review_result: str | None = None

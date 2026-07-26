@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -26,6 +26,11 @@ class GlobalCharacterReview(Base):
     review_status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
     rating_stage: Mapped[str] = mapped_column(String(50), nullable=False, default="primary")
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    non_human_review_result: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    non_human_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    non_human_candidate_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    non_human_candidate_reasons: Mapped[str | None] = mapped_column(Text, nullable=True)
+    non_human_classifier_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False

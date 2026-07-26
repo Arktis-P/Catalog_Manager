@@ -7,6 +7,7 @@ from app.models.global_character_generation_job import GlobalCharacterGeneration
 from app.models.global_character_image import GlobalCharacterImage
 from app.models.global_character_review import GlobalCharacterReview
 from app.models.image import Image
+from app.models.parent_child_candidate_dismissal import ParentChildCandidateDismissal
 from app.models.review import Review
 from app.models.series import Series
 from app.models.setting import Setting
@@ -22,6 +23,7 @@ __all__ = [
     "CharacterAppearanceTagRelevance",
     "GenerationJob",
     "Image",
+    "ParentChildCandidateDismissal",
     "Review",
     "Setting",
 ]

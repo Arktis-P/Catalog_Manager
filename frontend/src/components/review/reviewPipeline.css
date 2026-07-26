@@ -1,0 +1,397 @@
+/* Styles for the review pipeline additions: Parent-Child Batch Review,
+   Non-Human Triage, and the Danbooru reference comparison panel added to
+   ReviewImagePreview. Kept separate from styles/global.css (owned elsewhere). */
+
+/* ── Danbooru reference comparison (ReviewImagePreview extension) ───── */
+
+.review-image-preview-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 8px;
+}
+
+.review-image-preview-body .review-image-preview-scroll {
+  flex: 1;
+  min-width: 0;
+}
+
+.review-image-preview-refs {
+  flex-shrink: 0;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--bg-elevated);
+  overflow-y: auto;
+}
+
+.review-image-preview-refs-title {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-image-preview-refs-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.review-image-preview-ref {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  overflow: hidden;
+  background: #111;
+  aspect-ratio: 1 / 1;
+}
+
+.review-image-preview-ref img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.review-image-preview-ref-skeleton {
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-small);
+  background: linear-gradient(90deg, var(--bg-hover) 25%, var(--border) 37%, var(--bg-hover) 63%);
+  background-size: 400% 100%;
+  animation: review-pipeline-shimmer 1.4s ease infinite;
+}
+
+@keyframes review-pipeline-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+.review-image-preview-refs-empty {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+
+.review-image-preview-refs-empty--error {
+  color: var(--danger);
+}
+
+/* ── Shared review-pipeline panel chrome ─────────────────────────────── */
+
+.rp-panel-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.rp-error {
+  color: var(--danger);
+}
+
+/* ── Parent-Child Batch Review ───────────────────────────────────────── */
+
+.pc-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pc-parent-card {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.pc-parent-card .pc-card-image {
+  width: 96px;
+  height: 128px;
+}
+
+.pc-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pc-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pc-card-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.pc-card-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pc-reason-chip {
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.pc-child-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.pc-child-card {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  cursor: pointer;
+  outline: none;
+}
+
+.pc-child-card--focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.28);
+}
+
+.pc-child-card--selected {
+  border-color: var(--success);
+}
+
+.pc-child-card--conflict {
+  border-color: var(--warning);
+}
+
+.pc-child-card--already-linked {
+  opacity: 0.85;
+}
+
+.pc-card-image {
+  flex-shrink: 0;
+  width: 64px;
+  height: 84px;
+  border-radius: var(--radius-small);
+  overflow: hidden;
+  background: #111;
+}
+
+.pc-card-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pc-card-image--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.pc-child-select {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.78rem;
+}
+
+.pc-confidence {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.pc-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+}
+
+.pc-options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.pc-conflict-banner {
+  padding: 8px 10px;
+  border-radius: var(--radius-small);
+  background: rgba(212, 160, 23, 0.12);
+  color: var(--warning);
+  font-size: 0.82rem;
+}
+
+.pc-group-list-item {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--bg-elevated);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.pc-group-list-item--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.pc-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(78vh, 900px);
+  overflow: auto;
+}
+
+.pc-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .pc-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Non-Human Triage ────────────────────────────────────────────────── */
+
+.nh-grid {
+  height: min(78vh, 1080px);
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-auto-rows: max-content;
+  gap: 14px;
+  align-items: start;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  outline: none;
+}
+
+.nh-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  outline: none;
+}
+
+.nh-card--focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.28);
+}
+
+.nh-card--decided {
+  border-color: var(--success);
+}
+
+.nh-card--locked {
+  opacity: 0.7;
+}
+
+.nh-card-image {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  background: #111;
+  flex-shrink: 0;
+}
+
+.nh-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+}
+
+.nh-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.nh-card-title {
+  margin: 0;
+  font-size: 0.92rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nh-score {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.nh-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.nh-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.nh-action-btn {
+  flex: 1;
+  min-width: 64px;
+}
+
+.nh-action-btn--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.nh-decision-badge {
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}

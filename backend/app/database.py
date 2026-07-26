@@ -47,6 +47,7 @@ def init_db() -> None:
         global_character_image,
         global_character_review,
         image,
+        parent_child_candidate_dismissal,
         review,
         series,
         setting,
@@ -65,6 +66,7 @@ def init_db() -> None:
     _migrate_global_character_columns()
     _migrate_global_character_image_columns()
     _migrate_review_columns()
+    _migrate_parent_child_candidate_dismissals()
 
 
 def _migrate_character_columns() -> None:
@@ -199,6 +201,26 @@ def _migrate_review_columns() -> None:
                         "ADD COLUMN rating_stage VARCHAR(50) NOT NULL DEFAULT 'primary'"
                     )
                 )
+            migrations = {
+                "non_human_review_result": (
+                    "ALTER TABLE global_character_reviews ADD COLUMN non_human_review_result VARCHAR(50)"
+                ),
+                "non_human_reviewed_at": (
+                    "ALTER TABLE global_character_reviews ADD COLUMN non_human_reviewed_at DATETIME"
+                ),
+                "non_human_candidate_score": (
+                    "ALTER TABLE global_character_reviews ADD COLUMN non_human_candidate_score FLOAT"
+                ),
+                "non_human_candidate_reasons": (
+                    "ALTER TABLE global_character_reviews ADD COLUMN non_human_candidate_reasons TEXT"
+                ),
+                "non_human_classifier_version": (
+                    "ALTER TABLE global_character_reviews ADD COLUMN non_human_classifier_version VARCHAR(50)"
+                ),
+            }
+            for column_name, statement in migrations.items():
+                if column_name not in existing:
+                    connection.execute(text(statement))
 
 
 def _migrate_series_columns() -> None:
@@ -225,4 +247,41 @@ def _migrate_series_columns() -> None:
                 connection.execute(text(statement))
         connection.execute(
             text("UPDATE series SET status = 'tagged' WHERE status = 'all_collected'")
+        )
+
+
+def _migrate_parent_child_candidate_dismissals() -> None:
+    inspector = inspect(engine)
+    if "parent_child_candidate_dismissals" in inspector.get_table_names():
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE parent_child_candidate_dismissals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    parent_character_id INTEGER NOT NULL,
+                    candidate_character_id INTEGER NOT NULL,
+                    reason TEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_parent_child_candidate_dismissal
+                        UNIQUE (parent_character_id, candidate_character_id),
+                    FOREIGN KEY(parent_character_id) REFERENCES global_characters (id) ON DELETE CASCADE,
+                    FOREIGN KEY(candidate_character_id) REFERENCES global_characters (id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX ix_parent_child_candidate_dismissals_parent_character_id "
+                "ON parent_child_candidate_dismissals (parent_character_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX ix_parent_child_candidate_dismissals_candidate_character_id "
+                "ON parent_child_candidate_dismissals (candidate_character_id)"
+            )
         )
