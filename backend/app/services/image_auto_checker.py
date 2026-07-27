@@ -302,12 +302,13 @@ def check_generated_image(
 ) -> ImageAutoCheckResult:
     """생성된 이미지를 자동 검사합니다.
 
-    HF Token이 설정되어 있으면 WD 태거로 캐릭터 태그·외형·성별을 확인합니다.
+    로컬 WD 모델이 설치되어 있으면 캐릭터 태그·외형·성별을 확인합니다.
     없으면 이미지 품질(선명도) 기반 검사만 수행합니다.
     """
-    from app.integrations.image_tagger.hf_wd_tagger import (
-        DEFAULT_HF_WD_MODEL,
-        predict_tags_via_hf,
+    from app.integrations.image_tagger.local_wd_tagger import (
+        DEFAULT_LOCAL_WD_MODEL,
+        is_local_wd_model_installed,
+        predict_tags_locally,
     )
 
     detail = check_detail_quality(image_path)
@@ -323,12 +324,11 @@ def check_generated_image(
     gender_pred: str | None = None
     gender_match: bool | None = None
 
-    if hf_token:
-        model = hf_wd_model or DEFAULT_HF_WD_MODEL
-        preds, tagger_error = predict_tags_via_hf(
+    _ = (hf_token, hf_wd_model)
+    if is_local_wd_model_installed(DEFAULT_LOCAL_WD_MODEL):
+        preds, tagger_error = predict_tags_locally(
             image_path,
-            hf_token=hf_token,
-            model=model,
+            repo_id=DEFAULT_LOCAL_WD_MODEL,
             threshold=min(appearance_threshold, character_confidence_threshold),
         )
 
@@ -353,6 +353,8 @@ def check_generated_image(
             expected_gender = _normalize_tag(character.gender) if character.gender else None
             if expected_gender and gender_pred:
                 gender_match = gender_pred == expected_gender
+    elif hf_token:
+        tagger_error = "tagger_model_unavailable"
 
     auto_status = _determine_auto_status(
         character_confidence=character_confidence,

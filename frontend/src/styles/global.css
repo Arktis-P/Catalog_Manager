@@ -2371,6 +2371,69 @@ button,
   line-height: 1.4;
 }
 
+.recheck-diagnosis {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: rgba(224, 108, 117, 0.06);
+  border: 1px solid rgba(224, 108, 117, 0.25);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.recheck-diagnosis-primary {
+  color: var(--danger);
+}
+
+.recheck-diagnosis-detail {
+  margin-top: 2px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.recheck-diagnosis-heading {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+}
+
+.recheck-diagnosis-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recheck-diagnosis-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.recheck-diagnosis-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.recheck-diagnosis-guidance {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.recheck-diagnosis-guidance ol {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 /* ─── 페이즈 배지 색상 ────────────────────────────────────────────────────── */
 
 .job-phase-badge {

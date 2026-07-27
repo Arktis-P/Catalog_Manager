@@ -139,6 +139,23 @@ def test_generation_webp_settings_are_public_and_clamped(db) -> None:
     assert SettingsService(db).get_generation_webp_quality() == 92
 
 
+def test_hf_token_is_masked_publicly_and_mask_save_preserves_secret(db) -> None:
+    service = SettingsService(db)
+
+    service.set_hf_token("hf_secret_token")
+    public_settings = service.get_public_settings()
+
+    assert public_settings["hf_token"] == "********"
+    assert public_settings["hf_token_configured"] is True
+
+    service.set_hf_token("********")
+    assert service.get_hf_token() == "hf_secret_token"
+
+    service.set_hf_token("")
+    assert service.get_hf_token() == ""
+    assert service.get_public_settings()["hf_token_configured"] is False
+
+
 def test_thumbnail_route_accepts_webp_and_caches_webp(tmp_path, png_bytes) -> None:
     source_dir = config.settings.output_dir / "generated_images" / "pending_review"
     source_dir.mkdir(parents=True)

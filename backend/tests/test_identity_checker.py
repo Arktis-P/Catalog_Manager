@@ -130,7 +130,13 @@ def test_own_character_tag_is_never_treated_as_conflict() -> None:
     assert result.conflicting_character_tag is None
 
 
-def test_check_identity_returns_warning_when_hf_token_missing(tmp_path: Path) -> None:
+def test_check_identity_returns_model_unavailable_when_local_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        "app.integrations.image_tagger.local_wd_tagger.is_local_wd_model_installed",
+        lambda *args, **kwargs: False,
+    )
     image_path = tmp_path / "image.png"
     image_path.write_bytes(b"placeholder")
 
@@ -141,12 +147,16 @@ def test_check_identity_returns_warning_when_hf_token_missing(tmp_path: Path) ->
         hf_token=None,
     )
     assert result.status == "warning"
-    assert "tagger_unavailable" in result.reasons
+    assert "tagger_model_unavailable" in result.reasons
 
 
-def test_check_identity_uses_mocked_tagger_predictions(monkeypatch, tmp_path: Path) -> None:
+def test_check_identity_uses_mocked_local_tagger_predictions(monkeypatch, tmp_path: Path) -> None:
     from app.integrations.image_tagger.hf_wd_tagger import TagPrediction
 
+    monkeypatch.setattr(
+        "app.integrations.image_tagger.local_wd_tagger.is_local_wd_model_installed",
+        lambda *args, **kwargs: True,
+    )
     image_path = tmp_path / "image.png"
     image_path.write_bytes(b"placeholder")
 
@@ -160,7 +170,8 @@ def test_check_identity_uses_mocked_tagger_predictions(monkeypatch, tmp_path: Pa
         )
 
     monkeypatch.setattr(
-        "app.integrations.image_tagger.hf_wd_tagger.predict_tags_via_hf", fake_predict
+        "app.integrations.image_tagger.local_wd_tagger.predict_tags_locally",
+        fake_predict,
     )
 
     result = check_identity(
@@ -168,13 +179,16 @@ def test_check_identity_uses_mocked_tagger_predictions(monkeypatch, tmp_path: Pa
         character_tag="hakurei_reimu",
         primary_hair_color="black_hair",
         known_character_tags=[],
-        hf_token="fake-token",
     )
     assert result.status == "pass"
     assert result.character_confidence == 0.92
 
 
-def test_check_identity_returns_warning_on_tagger_error(monkeypatch, tmp_path: Path) -> None:
+def test_check_identity_returns_warning_on_local_tagger_error(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "app.integrations.image_tagger.local_wd_tagger.is_local_wd_model_installed",
+        lambda *args, **kwargs: True,
+    )
     image_path = tmp_path / "image.png"
     image_path.write_bytes(b"placeholder")
 
@@ -182,14 +196,44 @@ def test_check_identity_returns_warning_on_tagger_error(monkeypatch, tmp_path: P
         return [], "boom"
 
     monkeypatch.setattr(
-        "app.integrations.image_tagger.hf_wd_tagger.predict_tags_via_hf", fake_predict
+        "app.integrations.image_tagger.local_wd_tagger.predict_tags_locally",
+        fake_predict,
     )
 
     result = check_identity(
         image_path,
         character_tag="hakurei_reimu",
         primary_hair_color="black_hair",
-        hf_token="fake-token",
     )
     assert result.status == "warning"
     assert "tagger_error" in result.reasons
+
+
+def test_check_identity_uses_stable_local_tagger_reason_code(monkeypatch, tmp_path: Path) -> None:
+    from app.integrations.image_tagger.hf_wd_tagger import (
+        HFWdTaggerErrorMessage,
+        TAGGER_TIMEOUT,
+    )
+
+    monkeypatch.setattr(
+        "app.integrations.image_tagger.local_wd_tagger.is_local_wd_model_installed",
+        lambda *args, **kwargs: True,
+    )
+    image_path = tmp_path / "image.png"
+    image_path.write_bytes(b"placeholder")
+
+    def fake_predict(*args, **kwargs):
+        return [], HFWdTaggerErrorMessage("timed out", TAGGER_TIMEOUT)
+
+    monkeypatch.setattr(
+        "app.integrations.image_tagger.local_wd_tagger.predict_tags_locally",
+        fake_predict,
+    )
+
+    result = check_identity(
+        image_path,
+        character_tag="hakurei_reimu",
+        primary_hair_color="black_hair",
+    )
+    assert result.status == "warning"
+    assert result.reasons == ["tagger_timeout"]

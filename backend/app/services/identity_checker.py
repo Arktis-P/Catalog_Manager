@@ -12,7 +12,7 @@ from app.integrations.danbooru.appearance_extractor import (
     normalize_gender,
 )
 
-IDENTITY_CHECKER_VERSION = "v2.0"
+IDENTITY_CHECKER_VERSION = "v2.2-local-wd-only"
 
 # ── 임계값 (조정 가능) ──────────────────────────────────────────────
 CHARACTER_CONFLICT_THRESHOLD = 0.75    # 다른 캐릭터 태그 고신뢰 판정 → reject
@@ -147,44 +147,56 @@ def check_identity(
     hf_token: str | None = None,
     hf_wd_model: str | None = None,
 ) -> IdentityCheckResult:
-    """HF WD 태거(기존 연동 재사용)로 이미지를 예측하고 identity 규칙을 적용한다.
+    """로컬 WD ONNX 태거로 이미지를 예측하고 identity 규칙을 적용한다.
 
-    태거를 사용할 수 없거나 예측이 비어 있으면 불확실한 것으로 보고 보수적으로
-    warning을 반환한다 (§8.2 "불확실하면 warning").
+    HF Inference / Gradio Space는 사용하지 않는다. 로컬 모델이 없거나 예측이
+    비어 있으면 불확실한 것으로 보고 보수적으로 warning을 반환한다
+    (§8.2 "불확실하면 warning").
+
+    hf_token / hf_wd_model은 호출부 호환을 위해 남겨 두며 identity 경로에서는
+    무시한다.
     """
     from app.integrations.image_tagger.hf_wd_tagger import (
-        DEFAULT_HF_WD_MODEL,
-        predict_tags_via_hf,
+        TAGGER_ERROR,
+        TAGGER_MODEL_UNAVAILABLE,
+        classify_tagger_error,
+    )
+    from app.integrations.image_tagger.local_wd_tagger import (
+        DEFAULT_LOCAL_WD_MODEL,
+        is_local_wd_model_installed,
+        predict_tags_locally,
     )
 
-    if not hf_token:
+    _ = (hf_token, hf_wd_model)
+    threshold = min(HAIR_COLOR_MATCH_THRESHOLD, CHARACTER_DETECT_THRESHOLD)
+    if not is_local_wd_model_installed(DEFAULT_LOCAL_WD_MODEL):
         return IdentityCheckResult(
             status="warning",
             character_confidence=None,
             hair_color_confidence=None,
             conflicting_character_tag=None,
             conflicting_character_confidence=None,
-            reasons=["tagger_unavailable"],
+            reasons=[TAGGER_MODEL_UNAVAILABLE],
             suggested_multicolor_tags=[],
         )
 
-    model = hf_wd_model or DEFAULT_HF_WD_MODEL
-    threshold = min(HAIR_COLOR_MATCH_THRESHOLD, CHARACTER_DETECT_THRESHOLD)
-    predictions, error = predict_tags_via_hf(
+    predictions, error = predict_tags_locally(
         image_path,
-        hf_token=hf_token,
-        model=model,
+        repo_id=DEFAULT_LOCAL_WD_MODEL,
         threshold=threshold,
     )
 
     if error or not predictions:
+        reason = classify_tagger_error(error) if error else "tagger_invalid_response"
+        if reason is None:
+            reason = TAGGER_ERROR
         return IdentityCheckResult(
             status="warning",
             character_confidence=None,
             hair_color_confidence=None,
             conflicting_character_tag=None,
             conflicting_character_confidence=None,
-            reasons=["tagger_error"] if error else ["tagger_no_predictions"],
+            reasons=[reason],
             suggested_multicolor_tags=[],
         )
 

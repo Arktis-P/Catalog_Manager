@@ -9,3 +9,4 @@ pybooru>=4.2.0
 requests>=2.32.0
 Pillow>=10.0.0
 onnxruntime>=1.19.0
+numpy>=1.26.0

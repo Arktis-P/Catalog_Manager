@@ -16,6 +16,7 @@ class SettingsResponse(BaseModel):
     review_max_loaded_images: int = Field(ge=10, le=120)
     min_character_post_count: int = Field(ge=0, le=500)
     hf_token: str = ""
+    hf_token_configured: bool = False
     hf_wd_model: str = ""
     notification_mode: str = "each"
     notification_display: str = "toast"

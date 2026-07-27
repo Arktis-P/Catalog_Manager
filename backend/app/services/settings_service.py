@@ -24,6 +24,7 @@ SETTING_REVIEW_MAX_LOADED_IMAGES = "review_max_loaded_images"
 SETTING_MIN_CHARACTER_POST_COUNT = "min_character_post_count"
 SETTING_HF_TOKEN = "hf_token"
 SETTING_HF_WD_MODEL = "hf_wd_model"
+HF_TOKEN_MASK = "********"
 SETTING_NOTIFICATION_MODE = "notification_mode"
 VALID_NOTIFICATION_MODES = {"each", "all_done", "none"}
 DEFAULT_NOTIFICATION_MODE = "each"
@@ -214,8 +215,16 @@ class SettingsService:
 
     def set_hf_token(self, value: str) -> str:
         cleaned = value.strip()
+        if cleaned == HF_TOKEN_MASK and self.get_hf_token():
+            return self.get_hf_token()
         self._set_setting(SETTING_HF_TOKEN, cleaned)
         return cleaned
+
+    def has_hf_token(self) -> bool:
+        return bool(self.get_hf_token())
+
+    def get_public_hf_token(self) -> str:
+        return HF_TOKEN_MASK if self.has_hf_token() else ""
 
     def get_hf_wd_model(self) -> str:
         from app.integrations.image_tagger.hf_wd_tagger import DEFAULT_HF_WD_MODEL
@@ -368,7 +377,8 @@ class SettingsService:
             "review_thumbnail_size": self.get_review_thumbnail_size(),
             "review_max_loaded_images": self.get_review_max_loaded_images(),
             "min_character_post_count": self.get_min_character_post_count(),
-            "hf_token": self.get_hf_token(),
+            "hf_token": self.get_public_hf_token(),
+            "hf_token_configured": self.has_hf_token(),
             "hf_wd_model": self.get_hf_wd_model(),
             "notification_mode": self.get_notification_mode(),
             "notification_display": self.get_notification_display(),

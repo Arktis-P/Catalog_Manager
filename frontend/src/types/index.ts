@@ -298,6 +298,58 @@ export interface RelevanceCollectStartPayload {
   min_post_count?: number;
 }
 
+export interface WdTaggerModelStatus {
+  repo_id: string;
+  cache_dir: string;
+  installed: boolean;
+  downloading: boolean;
+  bytes_downloaded: number;
+  total_bytes: number | null;
+  current_file: string | null;
+  error: string | null;
+  updated_at: number;
+}
+
+export interface PendingImageRecheckPreview {
+  eligible_images: number;
+  batch_size: number;
+  first_image_id: number | null;
+  last_image_id: number | null;
+  tagger_failures_only?: boolean;
+  // 구버전 백엔드와의 호환을 위해 선택 필드로 둔다 — 없으면 UI에서 렌더링을 생략한다.
+  excluded_completed?: number;
+  missing_files?: number;
+}
+
+export interface PendingImageRecheckJob {
+  job_id: string;
+  status: string;
+  phase: string;
+  message: string;
+  current: number;
+  total: number;
+  completed: number;
+  // 구버전 백엔드와의 호환을 위해 선택 필드로 둔다 — 없으면 UI에서 렌더링을 생략한다.
+  succeeded?: number;
+  warnings?: number;
+  rejected?: number;
+  failed: number;
+  skipped: number;
+  batch_size: number;
+  tagger_failures_only?: boolean;
+  last_image_id: number | null;
+  current_image_id: number | null;
+  current_character_id: number | null;
+  current_character_tag: string;
+  identity_status: string | null;
+  identity_reasons: string[];
+  // 백엔드가 배열 원소를 문자열/레코드/중첩 reason 필드 등 다양한 형태로 보낼 수 있어
+  // unknown[]으로 두고 UI에서 방어적으로 파싱한다.
+  errors: unknown[];
+  started_at: string;
+  finished_at: string | null;
+}
+
 export type V2GenerationTarget = "selected" | "page" | "not_generated" | "min_posts";
 
 export interface V2GenerationStartPayload {
@@ -423,6 +475,7 @@ export interface AppSettings {
   review_max_loaded_images: number;
   min_character_post_count: number;
   hf_token: string;
+  hf_token_configured?: boolean;
   hf_wd_model: string;
   notification_mode: NotificationMode;
   notification_display: NotificationDisplay;

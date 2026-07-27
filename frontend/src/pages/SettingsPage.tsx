@@ -1,6 +1,13 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
-import type { AppSettings, NotificationDisplay, NotificationMode } from "../types";
+import type {
+  AppSettings,
+  NotificationDisplay,
+  NotificationMode,
+  PendingImageRecheckJob,
+  PendingImageRecheckPreview,
+  WdTaggerModelStatus,
+} from "../types";
 import { useNotificationMode } from "../context/NotificationModeContext";
 import {
   ensureNotificationPermission,
@@ -14,6 +21,196 @@ import {
   setV2ReviewCardWidthPx,
   type V2ReviewCardSize,
 } from "../utils/v2ReviewCardSettings";
+
+// ── Pending 이미지 재검사 진단 코드 ──────────────────────────────────────────
+// identity_reasons / errors에 담기는 값은 백엔드가 고정 문자열(코드)로만 채운다
+// (app/services/identity_checker.py, app/integrations/image_tagger/hf_wd_tagger.py).
+// 여기 목록에 없는 문자열은 원문을 절대 노출하지 않고 "알 수 없는 오류"로 묶는다 —
+// 토큰/URL 등 민감정보가 섞인 예외 메시지가 그대로 렌더링되는 것을 막기 위함이다.
+type RecheckReasonCategory =
+  | "token"
+  | "permission"
+  | "model"
+  | "endpoint"
+  | "network"
+  | "content"
+  | "file"
+  | "unknown";
+
+interface RecheckReasonInfo {
+  label: string;
+  category: RecheckReasonCategory;
+  detail?: string;
+}
+
+const RECHECK_REASON_INFO: Record<string, RecheckReasonInfo> = {
+  tagger_auth_error: {
+    label: "토큰 인증 오류",
+    category: "token",
+    detail:
+      "토큰이 없거나 만료·폐기되었습니다. 이전 버전에서는 Inference Providers 권한 부족(HTTP 403)도 이 코드로 저장됐으므로, 기존 800건은 토큰의 Make calls to Inference Providers 권한도 함께 확인하세요.",
+  },
+  tagger_token_permission: {
+    label: "Inference Providers 권한 없음",
+    category: "permission",
+    detail:
+      "토큰 유효성과 별개로 Inference Providers 권한이 없습니다. Hugging Face 토큰 설정에서 Inference Providers 접근 권한을 추가한 뒤 다시 시도하세요.",
+  },
+  tagger_model_not_found: {
+    label: "모델/엔드포인트를 찾을 수 없음",
+    category: "model",
+    detail: "설정된 경로에서 모델 또는 엔드포인트를 찾을 수 없습니다. 모델 ID나 엔드포인트 URL을 다시 확인하세요.",
+  },
+  tagger_model_unavailable: {
+    label: "모델 미배포 (사용 불가)",
+    category: "model",
+    detail:
+      "선택한 모델이 이 추론 제공자에는 배포되어 있지 않습니다. 다른 모델을 선택하거나 전용(dedicated) Hugging Face Inference Endpoint를 구성한 뒤 다시 시도하세요.",
+  },
+  tagger_service_unavailable: {
+    label: "서비스 사용 불가 (전용 엔드포인트 필요 가능)",
+    category: "endpoint",
+    detail:
+      "레거시 엔드포인트가 제거되었거나 서비스가 응답하지 않습니다. 라우터 또는 전용(dedicated) 엔드포인트 설정을 확인하세요.",
+  },
+  tagger_rate_limited: {
+    label: "요청 한도 초과",
+    category: "network",
+    detail: "잠시 후 다시 시도하거나 전용 엔드포인트 사용을 고려하세요.",
+  },
+  tagger_timeout: {
+    label: "응답 시간 초과",
+    category: "network",
+    detail: "네트워크 상태 또는 엔드포인트 응답 속도를 확인하세요.",
+  },
+  tagger_invalid_response: {
+    label: "잘못된 응답 형식",
+    category: "network",
+    detail: "엔드포인트 설정(모델 경로 등)을 확인하세요.",
+  },
+  tagger_error: {
+    label: "태거 오류",
+    category: "unknown",
+    detail: "원인이 명확하지 않은 태거 호출 오류입니다.",
+  },
+  image_file_missing: {
+    label: "이미지 파일 누락",
+    category: "file",
+    detail: "원본 이미지 파일을 찾을 수 없어 이 이미지는 건너뛰었습니다.",
+  },
+  character_tag_undetected: {
+    label: "캐릭터 태그 미검출",
+    category: "content",
+    detail: "이미지에서 해당 캐릭터 특징이 검출되지 않았습니다.",
+  },
+  boy_character_tag_undetected: {
+    label: "캐릭터 태그 미검출 (남성)",
+    category: "content",
+  },
+  character_tag_low_confidence: {
+    label: "캐릭터 태그 신뢰도 낮음",
+    category: "content",
+  },
+  hair_color_mismatch: {
+    label: "머리색 불일치",
+    category: "content",
+  },
+  unexpected_multicolor_tag: {
+    label: "예상치 못한 멀티컬러 태그",
+    category: "content",
+  },
+  character_tag_confident: {
+    label: "판정 통과",
+    category: "content",
+  },
+};
+
+const RECHECK_UNKNOWN_REASON_CODE = "unknown_error";
+const RECHECK_CONFIG_CATEGORIES = new Set<RecheckReasonCategory>([
+  "token",
+  "permission",
+  "model",
+  "endpoint",
+  "network",
+  "unknown",
+]);
+
+function normalizeRecheckReasonCode(value: string): string {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return RECHECK_UNKNOWN_REASON_CODE;
+  if (RECHECK_REASON_INFO[trimmed]) return trimmed;
+  const prefix = trimmed.split(":")[0].trim();
+  if (RECHECK_REASON_INFO[prefix]) return prefix;
+  return RECHECK_UNKNOWN_REASON_CODE;
+}
+
+function extractRecheckReasonFromRecord(record: Record<string, unknown>): { code: string; count: number } {
+  const rawCount = record.count;
+  const count =
+    typeof rawCount === "number" && Number.isFinite(rawCount) && rawCount > 0 ? Math.floor(rawCount) : 1;
+  for (const key of ["reason_code", "reason", "code", "error"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return { code: normalizeRecheckReasonCode(value), count };
+    }
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const nested = extractRecheckReasonFromRecord(value as Record<string, unknown>);
+      if (nested.code !== RECHECK_UNKNOWN_REASON_CODE) {
+        return { code: nested.code, count };
+      }
+    }
+  }
+  return { code: RECHECK_UNKNOWN_REASON_CODE, count: 1 };
+}
+
+function bumpRecheckReasonCount(map: Map<string, number>, code: string, amount: number): void {
+  map.set(code, (map.get(code) ?? 0) + amount);
+}
+
+function collectRecheckReasonCounts(source: unknown): Map<string, number> {
+  const counts = new Map<string, number>();
+  const visit = (value: unknown) => {
+    if (value === null || value === undefined) return;
+    if (typeof value === "string") {
+      bumpRecheckReasonCount(counts, normalizeRecheckReasonCode(value), 1);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value === "object") {
+      const { code, count } = extractRecheckReasonFromRecord(value as Record<string, unknown>);
+      bumpRecheckReasonCount(counts, code, count);
+      return;
+    }
+  };
+  visit(source);
+  return counts;
+}
+
+interface RecheckReasonBreakdownEntry {
+  code: string;
+  count: number;
+  label: string;
+  category: RecheckReasonCategory;
+  detail?: string;
+}
+
+function toRecheckReasonBreakdown(counts: Map<string, number>): RecheckReasonBreakdownEntry[] {
+  return Array.from(counts.entries())
+    .map(([code, count]) => {
+      const info = RECHECK_REASON_INFO[code];
+      return {
+        code,
+        count,
+        label: info?.label ?? "알 수 없는 오류",
+        category: info?.category ?? "unknown",
+        detail: info?.detail,
+      };
+    })
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ko"));
+}
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -47,6 +244,21 @@ export function SettingsPage() {
   const [notifPermission, setNotifPermission] = useState<NotificationPermissionStatus>(() =>
     getNotificationPermissionStatus(),
   );
+
+  const [recheckBatchSize, setRecheckBatchSize] = useState(200);
+  const [recheckTaggerFailuresOnly, setRecheckTaggerFailuresOnly] = useState(true);
+  const [recheckPreview, setRecheckPreview] = useState<PendingImageRecheckPreview | null>(null);
+  const [recheckPreviewLoading, setRecheckPreviewLoading] = useState(false);
+  const [recheckPreviewError, setRecheckPreviewError] = useState<string | null>(null);
+  const [recheckJob, setRecheckJob] = useState<PendingImageRecheckJob | null>(null);
+  const [recheckStarting, setRecheckStarting] = useState(false);
+  const [recheckActionError, setRecheckActionError] = useState<string | null>(null);
+
+  const [wdModelStatus, setWdModelStatus] = useState<WdTaggerModelStatus | null>(null);
+  const [wdModelLoading, setWdModelLoading] = useState(true);
+  const [wdModelActionError, setWdModelActionError] = useState<string | null>(null);
+  const [wdModelStarting, setWdModelStarting] = useState(false);
+  const [wdModelCancelling, setWdModelCancelling] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -100,6 +312,206 @@ export function SettingsPage() {
     setV2CardWidthPx(px);
     setV2ReviewCardWidthPx(px);
   };
+
+  const isRecheckActive = recheckJob?.status === "queued" || recheckJob?.status === "running";
+
+  const loadRecheckPreview = async (batchSize: number, taggerFailuresOnly = recheckTaggerFailuresOnly) => {
+    setRecheckPreviewLoading(true);
+    setRecheckPreviewError(null);
+    try {
+      const preview = await api.previewPendingImageRecheck(batchSize, taggerFailuresOnly);
+      setRecheckPreview(preview);
+    } catch (err) {
+      setRecheckPreviewError(err instanceof Error ? err.message : "미리보기를 불러오지 못했습니다");
+    } finally {
+      setRecheckPreviewLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadRecheckPreview(recheckBatchSize);
+    void (async () => {
+      try {
+        const job = await api.getPendingImageRecheckStatus();
+        setRecheckJob(job);
+      } catch {
+        // 이전에 실행한 재검사 작업이 없으면 404가 발생합니다 — 무시합니다.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadWdModelStatus = async () => {
+    try {
+      const status = await api.getWdTaggerModelStatus();
+      setWdModelStatus(status);
+      return status;
+    } catch (err) {
+      setWdModelActionError(err instanceof Error ? err.message : "모델 상태를 가져오지 못했습니다");
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    void (async () => {
+      setWdModelLoading(true);
+      await loadWdModelStatus();
+      setWdModelLoading(false);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!wdModelStatus?.downloading) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void loadWdModelStatus();
+    }, 1000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wdModelStatus?.downloading]);
+
+  const handleStartWdModelDownload = async () => {
+    setWdModelStarting(true);
+    setWdModelActionError(null);
+    try {
+      const status = await api.startWdTaggerModelDownload();
+      setWdModelStatus(status);
+    } catch (err) {
+      setWdModelActionError(err instanceof Error ? err.message : "모델 다운로드를 시작하지 못했습니다");
+    } finally {
+      setWdModelStarting(false);
+    }
+  };
+
+  const handleCancelWdModelDownload = async () => {
+    setWdModelCancelling(true);
+    setWdModelActionError(null);
+    try {
+      const status = await api.cancelWdTaggerModelDownload();
+      setWdModelStatus(status);
+    } catch (err) {
+      setWdModelActionError(err instanceof Error ? err.message : "모델 다운로드를 취소하지 못했습니다");
+    } finally {
+      setWdModelCancelling(false);
+    }
+  };
+
+  const wdModelInstalled = wdModelStatus?.installed ?? false;
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes <= 0) return "0 MB";
+    const mb = bytes / (1024 * 1024);
+    if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
+    return `${mb.toFixed(1)} MB`;
+  };
+
+  const wdModelPercent =
+    wdModelStatus && wdModelStatus.total_bytes && wdModelStatus.total_bytes > 0
+      ? Math.min(100, Math.round((wdModelStatus.bytes_downloaded / wdModelStatus.total_bytes) * 100))
+      : null;
+
+  useEffect(() => {
+    if (!recheckJob || (recheckJob.status !== "queued" && recheckJob.status !== "running")) {
+      return;
+    }
+    const jobId = recheckJob.job_id;
+    const poll = async () => {
+      try {
+        const updated = await api.getPendingImageRecheckJob(jobId);
+        setRecheckJob(updated);
+        if (updated.status !== "queued" && updated.status !== "running") {
+          void loadRecheckPreview(recheckBatchSize);
+        }
+      } catch (err) {
+        setRecheckActionError(err instanceof Error ? err.message : "작업 상태를 가져오지 못했습니다");
+      }
+    };
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 1000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recheckJob?.job_id, recheckJob?.status]);
+
+  const handleStartRecheck = async () => {
+    if (!wdModelInstalled) {
+      setRecheckActionError(
+        "로컬 WD 모델이 설치되어 있지 않습니다. 위의 'WD 태거 모델' 섹션에서 모델을 먼저 다운로드한 뒤 재검사를 시작하세요.",
+      );
+      return;
+    }
+    const target = recheckPreview?.eligible_images ?? 0;
+    if (
+      !window.confirm(
+        `대상 이미지 ${target.toLocaleString()}장의 정체성을 재검사합니다` +
+          (recheckTaggerFailuresOnly ? " (태거 실패분만)." : ".") +
+          " 리뷰 완료 항목은 제외되며, 태그·외형 정보는 변경하지 않고 정체성 판정만 다시 계산합니다. 계속할까요?",
+      )
+    ) {
+      return;
+    }
+    setRecheckStarting(true);
+    setRecheckActionError(null);
+    try {
+      const job = await api.startPendingImageRecheck(recheckBatchSize, recheckTaggerFailuresOnly);
+      setRecheckJob(job);
+    } catch (err) {
+      setRecheckActionError(err instanceof Error ? err.message : "재검사를 시작하지 못했습니다");
+    } finally {
+      setRecheckStarting(false);
+    }
+  };
+
+  const handleCancelRecheck = async () => {
+    if (!recheckJob) return;
+    if (!window.confirm("실행 중인 재검사를 취소할까요?")) return;
+    setRecheckActionError(null);
+    try {
+      const job = await api.cancelPendingImageRecheckJob(recheckJob.job_id);
+      setRecheckJob(job);
+    } catch (err) {
+      setRecheckActionError(err instanceof Error ? err.message : "재검사를 취소하지 못했습니다");
+    }
+  };
+
+  const recheckPercent =
+    recheckJob && recheckJob.total > 0
+      ? Math.min(100, Math.round((recheckJob.current / recheckJob.total) * 100))
+      : null;
+
+  const recheckStatusLabels: Record<string, string> = {
+    queued: "대기 중",
+    running: "진행 중",
+    completed: "완료",
+    cancelled: "취소됨",
+    failed: "실패",
+  };
+
+  const identityStatusLabels: Record<string, string> = {
+    pass: "성공",
+    warning: "경고",
+    reject: "거부",
+  };
+
+  // job.identity_reasons는 최근 처리된 이미지의 판정 사유(문자열 배열)만 담고,
+  // job.errors는 이미지별 오류 레코드를 누적한다. 둘 다 방어적으로 파싱해
+  // 코드별 건수로 집계한다 — 백엔드가 향후 누적/카운트 필드를 추가해도 그대로 동작한다.
+  const recheckIdentityReasonBreakdown = useMemo(
+    () => toRecheckReasonBreakdown(collectRecheckReasonCounts(recheckJob?.identity_reasons ?? [])),
+    [recheckJob?.identity_reasons],
+  );
+  const recheckErrorBreakdown = useMemo(
+    () => toRecheckReasonBreakdown(collectRecheckReasonCounts(recheckJob?.errors ?? [])),
+    [recheckJob?.errors],
+  );
+  const recheckHasConfigIssue = [...recheckIdentityReasonBreakdown, ...recheckErrorBreakdown].some(
+    (entry) => RECHECK_CONFIG_CATEGORIES.has(entry.category) && RECHECK_REASON_INFO[entry.code],
+  );
+  const recheckPrimaryIssue =
+    [...recheckIdentityReasonBreakdown, ...recheckErrorBreakdown]
+      .filter((entry) => RECHECK_CONFIG_CATEGORIES.has(entry.category) && RECHECK_REASON_INFO[entry.code])
+      .sort((a, b) => b.count - a.count)[0] ?? null;
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -367,7 +779,7 @@ export function SettingsPage() {
             </div>
 
             <div className="field full-width">
-              <label htmlFor="hf-token">Hugging Face Token (WD 자동 태깅)</label>
+              <label htmlFor="hf-token">Hugging Face Token (선택)</label>
               <input
                 id="hf-token"
                 type="password"
@@ -376,8 +788,8 @@ export function SettingsPage() {
                 onChange={(event) => setHfToken(event.target.value)}
               />
               <p className="field-help">
-                설정하면 이미지 생성 후 HF Inference API로 WD 태그를 추출해 캐릭터·머리색·눈색·성별을
-                자동 검증합니다. 비워두면 선명도 기반 품질 검사만 수행합니다.{" "}
+                캐릭터 재현(identity) 검사와 Pending 재검사는 로컬 WD ONNX 모델만 사용하며, 이 토큰은
+                identity 경로에서 사용하지 않습니다. 다른 HF 연동용으로만 남긴 설정입니다.{" "}
                 <a
                   href="https://huggingface.co/settings/tokens"
                   target="_blank"
@@ -389,7 +801,7 @@ export function SettingsPage() {
             </div>
 
             <div className="field full-width">
-              <label htmlFor="hf-wd-model">HF WD Model ID</label>
+              <label htmlFor="hf-wd-model">HF WD Model ID (미사용)</label>
               <input
                 id="hf-wd-model"
                 placeholder="SmilingWolf/wd-eva02-large-tagger-v3"
@@ -397,7 +809,9 @@ export function SettingsPage() {
                 onChange={(event) => setHfWdModel(event.target.value)}
               />
               <p className="field-help">
-                비워두면 기본값 <code>SmilingWolf/wd-eva02-large-tagger-v3</code>를 사용합니다.
+                identity 검사는 아래 <strong>WD 태거 모델 (로컬)</strong>의{" "}
+                <code>SmilingWolf/wd-swinv2-tagger-v3</code> ONNX만 사용합니다. HF Inference API /
+                공용 Space는 WD 모델 Provider 미배포·큐 제한으로 배치 검사에 쓰지 않습니다.
               </p>
             </div>
 
@@ -518,6 +932,361 @@ export function SettingsPage() {
             </button>
           </div>
         </form>
+      ) : null}
+
+      {!loading ? (
+        <div className="panel" style={{ marginTop: 20 }}>
+          <h2 className="section-title">WD 태거 모델 (로컬)</h2>
+          <p className="field-help">
+            이미지 생성 직후 캐릭터 재현(identity) 검사와 Pending 재검사는 모두 이 컴퓨터에 내려받은
+            로컬 WD ONNX 모델로만 동작합니다. HF Inference API·공용 Gradio Space는 사용하지 않습니다.
+            모델을 설치하기 전에는 identity 결과가 <code>tagger_model_unavailable</code> 경고로
+            기록됩니다.
+          </p>
+
+          {wdModelActionError ? <div className="error-banner">{wdModelActionError}</div> : null}
+
+          {wdModelLoading ? (
+            <div className="empty-state">모델 상태를 불러오는 중...</div>
+          ) : wdModelStatus ? (
+            <div className="job-running-card" style={{ marginBottom: 12 }}>
+              <div className="job-running-meta-row">
+                <span
+                  className={`job-phase-badge job-phase-default`}
+                  style={
+                    wdModelInstalled
+                      ? { color: "var(--success)" }
+                      : wdModelStatus.downloading
+                        ? undefined
+                        : { color: "var(--danger)" }
+                  }
+                >
+                  {wdModelInstalled ? "설치됨" : wdModelStatus.downloading ? "다운로드 중" : "설치되지 않음"}
+                </span>
+                <div className="job-running-meta-spacer" />
+                <span className="job-running-count">{wdModelStatus.repo_id}</span>
+                {wdModelPercent !== null ? (
+                  <span className="job-running-pct-badge">{wdModelPercent}%</span>
+                ) : null}
+              </div>
+              {wdModelStatus.downloading ? (
+                <>
+                  <div
+                    className={`progress-bar job-running-bar${wdModelPercent === null ? " progress-bar-indeterminate" : ""}`}
+                  >
+                    <div
+                      className="progress-bar-fill"
+                      style={wdModelPercent !== null ? { width: `${wdModelPercent}%` } : undefined}
+                    />
+                  </div>
+                  <div className="job-running-message">
+                    {formatBytes(wdModelStatus.bytes_downloaded)}
+                    {wdModelStatus.total_bytes ? ` / ${formatBytes(wdModelStatus.total_bytes)}` : " (전체 크기 확인 중...)"}
+                    {wdModelStatus.current_file ? ` · ${wdModelStatus.current_file}` : ""}
+                  </div>
+                </>
+              ) : null}
+              {!wdModelStatus.downloading && !wdModelInstalled ? (
+                <div className="job-running-message">
+                  모델이 아직 설치되지 않았습니다. 아래 버튼으로 다운로드를 시작하세요 (모델 파일
+                  크기가 크므로 시간이 걸릴 수 있습니다).
+                </div>
+              ) : null}
+              {wdModelStatus.error ? (
+                <div className="job-running-message" style={{ color: "var(--danger)" }} title={wdModelStatus.error}>
+                  {wdModelStatus.error}
+                </div>
+              ) : null}
+              <p className="field-help" style={{ marginTop: 8, marginBottom: 0 }}>
+                저장 경로: <code>{wdModelStatus.cache_dir}</code>
+              </p>
+            </div>
+          ) : null}
+
+          <div className="modal-actions" style={{ justifyContent: "flex-start" }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={wdModelLoading || wdModelStarting || wdModelInstalled || (wdModelStatus?.downloading ?? false)}
+              onClick={() => void handleStartWdModelDownload()}
+            >
+              {wdModelStarting
+                ? "시작하는 중..."
+                : wdModelStatus?.downloading
+                  ? "다운로드 중..."
+                  : wdModelInstalled
+                    ? "설치 완료"
+                    : "모델 다운로드"}
+            </button>
+            {wdModelStatus?.downloading ? (
+              <button
+                type="button"
+                className="btn btn-small"
+                disabled={wdModelCancelling}
+                onClick={() => void handleCancelWdModelDownload()}
+              >
+                {wdModelCancelling ? "취소하는 중..." : "취소"}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {!loading ? (
+        <div className="panel" style={{ marginTop: 20 }}>
+          <h2 className="section-title">Pending 이미지 재검사</h2>
+          <p className="field-help">
+            기본 대상은 리뷰 미완료·비거절 이미지 중 identity_reasons에{" "}
+            <code>tagger_error</code> 등 태거 실패 코드가 있는 항목입니다. 태그·외형 정보는 변경하지
+            않고 정체성(identity) 판정만 다시 계산하며, 위 <strong>WD 태거 모델</strong> 섹션의
+            로컬 ONNX로만 동작합니다.
+          </p>
+
+          {!wdModelLoading && !wdModelInstalled ? (
+            <div className="error-banner">
+              로컬 WD 모델이 설치되어 있지 않아 재검사를 시작할 수 없습니다. 위 'WD 태거 모델'
+              섹션에서 모델을 먼저 다운로드하세요.
+            </div>
+          ) : null}
+
+          {recheckActionError ? <div className="error-banner">{recheckActionError}</div> : null}
+
+          <div className="field full-width">
+            <label htmlFor="recheck-batch-size">배치 크기 (100~500)</label>
+            <div className="settings-range-row">
+              <input
+                id="recheck-batch-size"
+                type="range"
+                min={100}
+                max={500}
+                step={50}
+                value={recheckBatchSize}
+                disabled={isRecheckActive}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  setRecheckBatchSize(value);
+                  void loadRecheckPreview(value, recheckTaggerFailuresOnly);
+                }}
+              />
+              <strong>{recheckBatchSize}</strong>
+            </div>
+          </div>
+
+          <div className="field full-width">
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={recheckTaggerFailuresOnly}
+                disabled={isRecheckActive}
+                onChange={(event) => {
+                  const next = event.target.checked;
+                  setRecheckTaggerFailuresOnly(next);
+                  void loadRecheckPreview(recheckBatchSize, next);
+                }}
+              />
+              태거 실패 이미지만 재검사 (권장)
+            </label>
+            <p className="field-help">
+              끄면 리뷰 미완료·비거절 pending 이미지 전체를 재검사합니다.
+            </p>
+          </div>
+
+          <div className="settings-range-row" style={{ marginTop: 4, marginBottom: 4 }}>
+            {recheckPreviewLoading ? (
+              <span className="field-help">미리보기를 불러오는 중...</span>
+            ) : recheckPreviewError ? (
+              <span style={{ color: "var(--danger)", fontSize: 13 }}>{recheckPreviewError}</span>
+            ) : recheckPreview ? (
+              <span>
+                재검사 대상(리뷰 미완료) 이미지: <strong>{recheckPreview.eligible_images.toLocaleString()}</strong>장
+                {recheckPreview.excluded_completed !== undefined ? (
+                  <>
+                    {" · 리뷰 완료 제외 "}
+                    <strong>{recheckPreview.excluded_completed.toLocaleString()}</strong>장
+                  </>
+                ) : null}
+                {recheckPreview.missing_files !== undefined ? (
+                  <>
+                    {" · 파일 누락 추정 "}
+                    <strong>{recheckPreview.missing_files.toLocaleString()}</strong>장
+                  </>
+                ) : null}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-small"
+              disabled={recheckPreviewLoading}
+              onClick={() => void loadRecheckPreview(recheckBatchSize)}
+            >
+              미리보기 새로고침
+            </button>
+          </div>
+          {recheckPreview &&
+          recheckPreview.excluded_completed === undefined &&
+          recheckPreview.missing_files === undefined ? (
+            <p className="field-help" style={{ marginTop: 0, marginBottom: 12 }}>
+              이 미리보기는 재검사 대상(리뷰 미완료) 이미지 수만 제공합니다. 리뷰 완료 제외 수·파일
+              누락 수는 이 백엔드 버전에서 제공되지 않습니다.
+            </p>
+          ) : (
+            <div style={{ marginBottom: 12 }} />
+          )}
+
+          {recheckJob ? (
+            <div className="job-running-card" style={{ marginBottom: 12 }}>
+              <div className="job-running-meta-row">
+                <span className="job-phase-badge job-phase-default">
+                  {recheckStatusLabels[recheckJob.status] ?? recheckJob.status}
+                </span>
+                <div className="job-running-meta-spacer" />
+                <span className="job-running-count">
+                  {recheckJob.total > 0
+                    ? `${recheckJob.current.toLocaleString()} / ${recheckJob.total.toLocaleString()}`
+                    : ""}
+                  {" · 완료 "}
+                  {recheckJob.completed.toLocaleString()}
+                  {recheckJob.succeeded !== undefined ? (
+                    <>
+                      {" (성공 "}
+                      {recheckJob.succeeded.toLocaleString()}
+                      {recheckJob.warnings !== undefined ? (
+                        <>
+                          {" · 경고 "}
+                          {recheckJob.warnings.toLocaleString()}
+                        </>
+                      ) : null}
+                      {recheckJob.rejected !== undefined ? (
+                        <>
+                          {" · 거부 "}
+                          {recheckJob.rejected.toLocaleString()}
+                        </>
+                      ) : null}
+                      {")"}
+                    </>
+                  ) : null}
+                  {" · 실패 "}
+                  {recheckJob.failed.toLocaleString()}
+                  {" · 파일 누락(건너뜀) "}
+                  {recheckJob.skipped.toLocaleString()}
+                </span>
+                {recheckPercent !== null ? (
+                  <span className="job-running-pct-badge">{recheckPercent}%</span>
+                ) : null}
+              </div>
+              <div
+                className={`progress-bar job-running-bar${recheckPercent === null ? " progress-bar-indeterminate" : ""}`}
+              >
+                <div
+                  className="progress-bar-fill"
+                  style={recheckPercent !== null ? { width: `${recheckPercent}%` } : undefined}
+                />
+              </div>
+              {recheckJob.current_character_tag ? (
+                <div className="job-running-message">
+                  현재: {recheckJob.current_character_tag}
+                  {recheckJob.identity_status
+                    ? ` — 판정: ${identityStatusLabels[recheckJob.identity_status] ?? recheckJob.identity_status}`
+                    : ""}
+                </div>
+              ) : null}
+              {!isRecheckActive ? (
+                <div className="job-running-message">
+                  {recheckJob.status === "completed"
+                    ? `재검사가 끝났습니다 — 성공 ${recheckJob.succeeded ?? recheckJob.completed}건` +
+                      (recheckJob.warnings !== undefined ? `, 경고 ${recheckJob.warnings}건` : "") +
+                      (recheckJob.rejected !== undefined ? `, 거부 ${recheckJob.rejected}건` : "") +
+                      `, 실패 ${recheckJob.failed}건, 파일 누락(건너뜀) ${recheckJob.skipped}건.`
+                    : recheckJob.status === "cancelled"
+                      ? "재검사가 취소되었습니다."
+                      : recheckJob.status === "failed"
+                        ? "재검사가 실패했습니다."
+                        : ""}
+                </div>
+              ) : null}
+              {recheckIdentityReasonBreakdown.length > 0 || recheckErrorBreakdown.length > 0 ? (
+                <div className="recheck-diagnosis">
+                  {recheckPrimaryIssue ? (
+                    <div className="recheck-diagnosis-primary">
+                      <strong>
+                        주요 원인: {recheckPrimaryIssue.label} ({recheckPrimaryIssue.code})
+                      </strong>
+                      {recheckPrimaryIssue.detail ? (
+                        <div className="recheck-diagnosis-detail">{recheckPrimaryIssue.detail}</div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {recheckIdentityReasonBreakdown.length > 0 ? (
+                    <div className="recheck-diagnosis-section">
+                      <div className="recheck-diagnosis-heading">판정 사유별 건수</div>
+                      <ul className="recheck-diagnosis-list">
+                        {recheckIdentityReasonBreakdown.map((entry) => (
+                          <li key={`identity-${entry.code}`}>
+                            {entry.label}
+                            <span className="recheck-diagnosis-count">{entry.count}건</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {recheckErrorBreakdown.length > 0 ? (
+                    <div className="recheck-diagnosis-section">
+                      <div className="recheck-diagnosis-heading">오류 유형별 건수</div>
+                      <ul className="recheck-diagnosis-list">
+                        {recheckErrorBreakdown.map((entry) => (
+                          <li key={`error-${entry.code}`}>
+                            {entry.label}
+                            <span className="recheck-diagnosis-count">{entry.count}건</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {recheckHasConfigIssue ? (
+                    <div className="recheck-diagnosis-guidance">
+                      재검사를 다시 시작하기 전에 다음을 순서대로 확인하세요:
+                      <ol>
+                        <li>설정에 등록된 HF 토큰이 유효한지 확인</li>
+                        <li>해당 계정이 사용 중인 모델에 접근할 권한이 있는지 확인</li>
+                        <li>모델이 사용 가능한 상태로 배포되어 있는지 확인</li>
+                        <li>전용(dedicated) 엔드포인트가 필요한 모델이라면 관련 설정이 올바른지 확인</li>
+                        <li>위 사항을 모두 점검한 뒤 재검사를 다시 시작</li>
+                      </ol>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {recheckJob.message ? (
+                <div className="job-running-message" title={recheckJob.message}>
+                  {recheckJob.message}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="modal-actions" style={{ justifyContent: "flex-start" }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={
+                isRecheckActive ||
+                recheckStarting ||
+                recheckPreviewLoading ||
+                !recheckPreview ||
+                recheckPreview.eligible_images === 0 ||
+                !wdModelInstalled
+              }
+              onClick={() => void handleStartRecheck()}
+            >
+              {recheckStarting ? "시작하는 중..." : "재검사 시작"}
+            </button>
+            {isRecheckActive ? (
+              <button type="button" className="btn btn-small" onClick={() => void handleCancelRecheck()}>
+                취소
+              </button>
+            ) : null}
+          </div>
+        </div>
       ) : null}
     </section>
   );
