@@ -20,8 +20,6 @@ from app.services.character_image_service import (
     move_image_to_catalog_folder,
     purge_character_images,
     purge_global_character_images,
-    purge_noncover_images,
-    purge_noncover_images_global,
 )
 from app.services.db_write_queue import commit_db_session
 from app.services.prompt_service import build_generation_prompt
@@ -820,6 +818,143 @@ class ReviewService:
         self.db.refresh(character)
         return character
 
+    @staticmethod
+    def _preview_image(image: Image | GlobalCharacterImage) -> dict[str, object]:
+        return {"id": image.id, "image_path": image.image_path}
+
+    @staticmethod
+    def _selected_and_delete_images(
+        images: list[Image] | list[GlobalCharacterImage],
+        cover_image_id: int | None,
+    ) -> tuple[Image | GlobalCharacterImage | None, list[Image | GlobalCharacterImage]]:
+        selected = next((image for image in images if image.id == cover_image_id), None) if cover_image_id else None
+        delete_images = [image for image in images if image.id != cover_image_id]
+        return selected, delete_images
+
+    def _purge_images_except_cover_id(
+        self,
+        character: Character | GlobalCharacter,
+        image_model: type[Image] | type[GlobalCharacterImage],
+        owner_column,
+        owner_id: int,
+        cover_image_id: int | None,
+    ) -> int:
+        query = self.db.query(image_model).filter(owner_column == owner_id)
+        if cover_image_id is not None:
+            query = query.filter(image_model.id != cover_image_id)
+        images = query.all()
+        removed = 0
+        for image in images:
+            file_path = settings.project_root / image.image_path
+            if file_path.is_file():
+                file_path.unlink()
+            self.db.delete(image)
+            if image in character.images:
+                character.images.remove(image)
+            removed += 1
+        if removed:
+            self.db.flush()
+        return removed
+
+    def _catalog_purge_preview_item(self, character: Character) -> dict[str, object] | None:
+        review = character.review
+        if not review or review.review_status != "completed" or review.rating is None:
+            return None
+        selected, delete_images = self._selected_and_delete_images(list(character.images), review.cover_image_id)
+        if review.rating not in (-1, 0) and selected is None:
+            return None
+        if not delete_images:
+            return None
+        return {
+            "character_id": character.id,
+            "character_tag": character.character_tag,
+            "display_name": character.display_name or character.character_tag,
+            "rating": review.rating,
+            "selected_image": self._preview_image(selected) if selected else None,
+            "delete_images": [self._preview_image(image) for image in delete_images],
+        }
+
+    def _catalog_global_purge_preview_item(self, character: GlobalCharacter) -> dict[str, object] | None:
+        review = character.review
+        if not review or review.review_status != "completed" or review.rating is None:
+            return None
+        selected, delete_images = self._selected_and_delete_images(list(character.images), review.cover_image_id)
+        if review.rating not in (-1, 0) and selected is None:
+            return None
+        if not delete_images:
+            return None
+        return {
+            "character_id": character.id,
+            "character_tag": character.character_tag,
+            "display_name": character.display_name or character.character_tag,
+            "rating": review.rating,
+            "selected_image": self._preview_image(selected) if selected else None,
+            "delete_images": [self._preview_image(image) for image in delete_images],
+        }
+
+    def _catalog_purge_query(self, series_id: int, *, search: str | None = None):
+        query = (
+            self.db.query(Character)
+            .join(Character.review)
+            .options(joinedload(Character.images), joinedload(Character.review))
+            .filter(
+                Character.series_id == series_id,
+                Review.review_status == "completed",
+                Review.rating.isnot(None),
+            )
+        )
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.filter(or_(Character.character_tag.ilike(pattern), Character.display_name.ilike(pattern)))
+        return query
+
+    def _catalog_global_purge_query(self, *, search: str | None = None):
+        query = (
+            self.db.query(GlobalCharacter)
+            .join(GlobalCharacter.review)
+            .options(joinedload(GlobalCharacter.images), joinedload(GlobalCharacter.review))
+            .filter(
+                GlobalCharacterReview.review_status == "completed",
+                GlobalCharacterReview.rating.isnot(None),
+            )
+        )
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.filter(
+                or_(GlobalCharacter.character_tag.ilike(pattern), GlobalCharacter.display_name.ilike(pattern))
+            )
+        return query
+
+    @staticmethod
+    def _preview_response(items: list[dict[str, object]]) -> dict[str, object]:
+        return {
+            "items": items,
+            "item_count": len(items),
+            "image_count": sum(len(item["delete_images"]) for item in items),
+        }
+
+    def preview_purge_unselected_images(self, series_id: int, *, search: str | None = None) -> dict[str, object]:
+        if not self.db.query(Series.id).filter(Series.id == series_id).first():
+            raise ValueError("Series not found")
+        items = [
+            item
+            for character in self._catalog_purge_query(series_id, search=search)
+            .order_by(Character.post_count.desc(), Character.character_tag.asc(), Character.id.asc())
+            .all()
+            if (item := self._catalog_purge_preview_item(character)) is not None
+        ]
+        return self._preview_response(items)
+
+    def preview_purge_unselected_images_global(self, *, search: str | None = None) -> dict[str, object]:
+        items = [
+            item
+            for character in self._catalog_global_purge_query(search=search)
+            .order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.character_tag.asc(), GlobalCharacter.id.asc())
+            .all()
+            if (item := self._catalog_global_purge_preview_item(character)) is not None
+        ]
+        return self._preview_response(items)
+
     def purge_unselected_images(self, character_id: int) -> tuple[Character, int]:
         """완료된 리뷰에서 커버로 선택되지 않은 이미지를 파일까지 완전히 삭제한다.
         사용자가 명시적으로 버튼을 눌렀을 때만 호출되는 되돌릴 수 없는 동작."""
@@ -836,35 +971,67 @@ class ReviewService:
         if not character.review.cover_image_id and character.review.rating not in (-1, 0):
             raise ValueError("선택된 커버 이미지가 없습니다")
 
-        removed = purge_noncover_images(self.db, character)
+        removed = self._purge_images_except_cover_id(
+            character,
+            Image,
+            Image.character_id,
+            character.id,
+            character.review.cover_image_id,
+        )
         commit_db_session(self.db)
         self.db.refresh(character)
         return character, removed
 
     def purge_unselected_images_bulk(self, series_id: int, *, search: str | None = None) -> tuple[int, int]:
         """완료된 리뷰 전체(현재 페이지 제한 없이)에서 미선택 이미지를 일괄 삭제한다."""
-        query = (
-            self.db.query(Character)
-            .join(Character.review)
-            .filter(Character.series_id == series_id, Review.review_status == "completed")
+        character_ids = [
+            row[0] for row in self._catalog_purge_query(series_id, search=search).with_entities(Character.id).all()
+        ]
+        if not character_ids:
+            return 0, 0
+
+        return self.purge_unselected_images_selected(series_id, character_ids)
+
+    def purge_unselected_images_selected(self, series_id: int, character_ids: list[int]) -> tuple[int, int]:
+        if not character_ids:
+            raise ValueError("character_ids must not be empty")
+        if not self.db.query(Series.id).filter(Series.id == series_id).first():
+            raise ValueError("Series not found")
+
+        scope_ids = {
+            row[0]
+            for row in self.db.query(Character.id)
+            .filter(Character.id.in_(character_ids), Character.series_id == series_id)
+            .all()
+        }
+        outside_scope = [character_id for character_id in character_ids if character_id not in scope_ids]
+        if outside_scope:
+            raise ValueError(f"Character {outside_scope[0]} is outside the requested series scope")
+
+        characters = (
+            self._catalog_purge_query(series_id)
+            .filter(Character.id.in_(character_ids))
+            .order_by(Character.id.asc())
+            .all()
         )
-        if search:
-            pattern = f"%{search.strip()}%"
-            query = query.filter(
-                or_(Character.character_tag.ilike(pattern), Character.display_name.ilike(pattern))
-            )
-        character_ids = [row[0] for row in query.with_entities(Character.id).all()]
 
         affected = 0
         removed_total = 0
-        for character_id in character_ids:
-            try:
-                _, removed = self.purge_unselected_images(character_id)
-            except ValueError:
+        for character in characters:
+            if self._catalog_purge_preview_item(character) is None:
                 continue
+            removed = self._purge_images_except_cover_id(
+                character,
+                Image,
+                Image.character_id,
+                character.id,
+                character.review.cover_image_id,
+            )
             if removed:
                 affected += 1
                 removed_total += removed
+        if removed_total:
+            commit_db_session(self.db)
         return affected, removed_total
 
     def undo_catalog_review_global(self, global_character_id: int) -> GlobalCharacter:
@@ -902,36 +1069,59 @@ class ReviewService:
         if not character.review.cover_image_id and character.review.rating not in (-1, 0):
             raise ValueError("선택된 커버 이미지가 없습니다")
 
-        removed = purge_noncover_images_global(self.db, character)
+        removed = self._purge_images_except_cover_id(
+            character,
+            GlobalCharacterImage,
+            GlobalCharacterImage.global_character_id,
+            character.id,
+            character.review.cover_image_id,
+        )
         commit_db_session(self.db)
         self.db.refresh(character)
         return character, removed
 
     def purge_unselected_images_bulk_global(self, *, search: str | None = None) -> tuple[int, int]:
         """완료된 리뷰 전체(현재 페이지 제한 없이)에서 미선택 이미지를 일괄 삭제한다."""
-        query = (
-            self.db.query(GlobalCharacter)
-            .join(GlobalCharacter.review)
-            .filter(GlobalCharacterReview.review_status == "completed")
-        )
-        if search:
-            pattern = f"%{search.strip()}%"
-            query = query.filter(
-                or_(
-                    GlobalCharacter.character_tag.ilike(pattern),
-                    GlobalCharacter.display_name.ilike(pattern),
-                )
-            )
-        character_ids = [row[0] for row in query.with_entities(GlobalCharacter.id).all()]
+        character_ids = [
+            row[0] for row in self._catalog_global_purge_query(search=search).with_entities(GlobalCharacter.id).all()
+        ]
+        if not character_ids:
+            return 0, 0
 
+        return self.purge_unselected_images_selected_global(character_ids)
+
+    def purge_unselected_images_selected_global(self, character_ids: list[int]) -> tuple[int, int]:
+        if not character_ids:
+            raise ValueError("character_ids must not be empty")
+        existing_ids = {
+            row[0]
+            for row in self.db.query(GlobalCharacter.id).filter(GlobalCharacter.id.in_(character_ids)).all()
+        }
+        missing_ids = [character_id for character_id in character_ids if character_id not in existing_ids]
+        if missing_ids:
+            raise ValueError(f"Character not found: {missing_ids[0]}")
+
+        characters = (
+            self._catalog_global_purge_query()
+            .filter(GlobalCharacter.id.in_(character_ids))
+            .order_by(GlobalCharacter.id.asc())
+            .all()
+        )
         affected = 0
         removed_total = 0
-        for character_id in character_ids:
-            try:
-                _, removed = self.purge_unselected_images_global(character_id)
-            except ValueError:
+        for character in characters:
+            if self._catalog_global_purge_preview_item(character) is None:
                 continue
+            removed = self._purge_images_except_cover_id(
+                character,
+                GlobalCharacterImage,
+                GlobalCharacterImage.global_character_id,
+                character.id,
+                character.review.cover_image_id,
+            )
             if removed:
                 affected += 1
                 removed_total += removed
+        if removed_total:
+            commit_db_session(self.db)
         return affected, removed_total

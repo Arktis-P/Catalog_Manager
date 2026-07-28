@@ -432,10 +432,17 @@ class CharacterCatalogService:
                 GlobalCharacterReview.cover_image_id.isnot(None),
             )
         )
+        completed_zero_rated_cover = exists(
+            select(1).where(
+                GlobalCharacterReview.global_character_id == GlobalCharacter.id,
+                GlobalCharacterReview.review_status == "completed",
+                GlobalCharacterReview.rating.in_((0, -1)),
+            )
+        )
         if has_cover is True:
-            query = query.filter(cover_exists)
+            query = query.filter(or_(cover_exists, completed_zero_rated_cover))
         elif has_cover is False:
-            query = query.filter(~cover_exists)
+            query = query.filter(~cover_exists, ~completed_zero_rated_cover)
 
         sort_columns = {
             "post_count": GlobalCharacter.post_count,

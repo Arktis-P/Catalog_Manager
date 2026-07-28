@@ -529,6 +529,31 @@ export interface GlobalCatalogReviewListResponse {
   total: number;
 }
 
+export interface CatalogReviewPurgePreviewImage {
+  id: number;
+  image_path: string;
+}
+
+export interface CatalogReviewPurgePreviewItem {
+  character_id: number;
+  character_tag: string;
+  display_name: string;
+  rating: number;
+  selected_image: CatalogReviewPurgePreviewImage | null;
+  delete_images: CatalogReviewPurgePreviewImage[];
+}
+
+export interface CatalogReviewPurgePreviewResponse {
+  items: CatalogReviewPurgePreviewItem[];
+  item_count: number;
+  image_count: number;
+}
+
+export interface CatalogReviewPurgeSelectedResult {
+  affected_count: number;
+  removed_count: number;
+}
+
 export interface CatalogReviewCompletePayload {
   cover_image_id?: number | null;
   gender?: string | null;

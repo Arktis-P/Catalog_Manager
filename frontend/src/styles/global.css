@@ -3661,6 +3661,164 @@ button,
   }
 }
 
+/* ─── 미선택 이미지 삭제 모달 (선택 삭제 확인) ──────────────────────────── */
+
+.purge-unselected-modal {
+  display: flex;
+  flex-direction: column;
+}
+
+.purge-unselected-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 4px 0 10px;
+}
+
+.purge-unselected-toolbar-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.purge-unselected-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) 1fr;
+  gap: 16px;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.purge-unselected-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: min(56vh, 560px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.purge-unselected-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.purge-unselected-item:hover:not([aria-disabled="true"]) {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border);
+}
+
+.purge-unselected-item[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.purge-unselected-item--focused {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
+.purge-unselected-item-tag {
+  font-weight: 600;
+  font-size: 13px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.purge-unselected-item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.purge-unselected-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  max-height: min(56vh, 560px);
+  padding: 4px 4px 4px 2px;
+}
+
+.purge-unselected-detail-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.purge-unselected-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.purge-unselected-detail-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.purge-unselected-thumb-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.purge-unselected-thumb {
+  width: 128px;
+  height: 128px;
+  object-fit: cover;
+  border-radius: var(--radius-small);
+  border: 2px solid var(--border);
+}
+
+.purge-unselected-thumb--keep {
+  border-color: var(--success);
+}
+
+.purge-unselected-thumb--delete {
+  border-color: var(--danger);
+  opacity: 0.9;
+}
+
+.purge-unselected-actions {
+  align-items: center;
+}
+
+.purge-unselected-warning {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+@media (max-width: 760px) {
+  .purge-unselected-body {
+    grid-template-columns: 1fr;
+  }
+
+  .purge-unselected-list,
+  .purge-unselected-detail {
+    max-height: 260px;
+  }
+}
+
 /* ─── V2 Review 세로형 카드 그리드 (F5) ──────────────────────────────────── */
 
 .v2-review-grid {

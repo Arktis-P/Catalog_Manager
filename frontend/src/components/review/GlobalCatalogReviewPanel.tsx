@@ -13,6 +13,7 @@ import {
 } from "../../utils/reviewPrompt";
 import { pendingReviewImageUrl } from "../../utils/reviewImages";
 import { CatalogReviewRow, createDraftForItem, type CharacterDraft } from "./CatalogReviewRow";
+import { PurgeUnselectedModal } from "./PurgeUnselectedModal";
 import { ReviewImagePreview } from "./ReviewImagePreview";
 import { toggleRating } from "./ReviewRatingStars";
 import { ReviewShortcutGuide } from "./ReviewShortcutGuide";
@@ -60,7 +61,7 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
   const [focusIndex, setFocusIndex] = useState(0);
   const [drafts, setDrafts] = useState<Record<number, CharacterDraft>>({});
   const [submittingId, setSubmittingId] = useState<number | null>(null);
-  const [bulkPurging, setBulkPurging] = useState(false);
+  const [purgeModalOpen, setPurgeModalOpen] = useState(false);
   const [thumbSize, setThumbSize] = useState(384);
   const [quadLayout, setQuadLayout] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -219,43 +220,23 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
     }
   };
 
-  const handlePurgeUnselected = async (item: CatalogReviewItem) => {
-    if (!window.confirm(`${item.character_tag}의 선택되지 않은 이미지를 삭제할까요? 되돌릴 수 없습니다.`)) {
-      return;
-    }
-    setSubmittingId(item.id);
-    setError(null);
-    try {
-      const response = await api.purgeUnselectedCatalogImagesGlobal(item.id);
-      setItems((current) => current.map((entry) => (entry.id === item.id ? response.item : entry)));
-      setActionMessage(`${item.character_tag} 미선택 이미지 ${response.removed_count}장 삭제됨`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "미선택 이미지 삭제에 실패했습니다.");
-    } finally {
-      setSubmittingId(null);
-    }
-  };
+  const fetchPurgePreview = useCallback(
+    () => api.previewPurgeUnselectedCatalogImagesGlobal({ search: search || undefined }),
+    [search],
+  );
 
-  const handlePurgeUnselectedAll = async () => {
-    if (
-      !window.confirm(
-        "리뷰가 완료된 모든 항목(현재 필터 검색어 기준)의 선택되지 않은 이미지를 모두 삭제할까요? 되돌릴 수 없습니다.",
-      )
-    ) {
-      return;
-    }
-    setBulkPurging(true);
-    setError(null);
-    try {
-      const response = await api.purgeUnselectedCatalogImagesBulkGlobal({ search: search || undefined });
-      setActionMessage(`${response.affected_count}개 항목에서 미선택 이미지 ${response.removed_count}장 삭제됨`);
-      await loadReviews();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "미선택 이미지 일괄 삭제에 실패했습니다.");
-    } finally {
-      setBulkPurging(false);
-    }
-  };
+  const submitPurgeSelected = useCallback(
+    (characterIds: number[]) => api.purgeUnselectedCatalogImagesSelectedGlobal({ character_ids: characterIds }),
+    [],
+  );
+
+  const handlePurgeCompleted = useCallback(
+    (result: { affected_count: number; removed_count: number }) => {
+      setActionMessage(`${result.affected_count}개 항목에서 미선택 이미지 ${result.removed_count}장 삭제됨`);
+      void loadReviews();
+    },
+    [loadReviews],
+  );
 
   const mergeRegeneratedItem = useCallback((updated: CatalogReviewItem) => {
     setItems((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
@@ -418,7 +399,13 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (linkingItem || isEditableTarget(event.target) || !focusedItem || !focusedDraft) {
+      if (
+        linkingItem ||
+        purgeModalOpen ||
+        isEditableTarget(event.target) ||
+        !focusedItem ||
+        !focusedDraft
+      ) {
         return;
       }
 
@@ -516,6 +503,7 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
     focusedLocked,
     items.length,
     linkingItem,
+    purgeModalOpen,
     regenerateFocused,
     shiftFocusedImage,
     togglePreview,
@@ -560,11 +548,10 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
           <button
             className="btn"
             type="button"
-            onClick={() => void handlePurgeUnselectedAll()}
-            disabled={bulkPurging}
-            title="리뷰가 완료된 모든 항목(현재 검색어 기준)의 선택되지 않은 이미지를 모두 삭제합니다."
+            onClick={() => setPurgeModalOpen(true)}
+            title="리뷰가 완료된 항목 중 선택되지 않은 이미지를 미리보고 골라서 삭제합니다."
           >
-            미선택 이미지 전체 삭제
+            미선택 이미지 삭제
           </button>
         </div>
         <ReviewShortcutGuide includeMerge />
@@ -614,7 +601,6 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
                   onRate={(value) => setRating(item.id, value)}
                   onRegenerate={focused ? () => void regenerateFocused() : undefined}
                   onComplete={() => void completeItem(item)}
-                  onPurgeUnselected={() => void handlePurgeUnselected(item)}
                   onOpenLinkModal={() => setLinkingItem(item)}
                   regenerating={locked}
                 />
@@ -650,6 +636,17 @@ export function GlobalCatalogReviewPanel({ initialCharacterId = null }: GlobalCa
           character={toLinkableSummary(linkingItem)}
           onClose={() => setLinkingItem(null)}
           onLinked={() => void loadReviews()}
+        />
+      ) : null}
+
+      {purgeModalOpen ? (
+        <PurgeUnselectedModal
+          title="미선택 이미지 삭제"
+          description="전체 캐릭터 · 현재 검색어 기준 완료 항목"
+          fetchPreview={fetchPurgePreview}
+          onSubmit={submitPurgeSelected}
+          onClose={() => setPurgeModalOpen(false)}
+          onCompleted={handlePurgeCompleted}
         />
       ) : null}
 

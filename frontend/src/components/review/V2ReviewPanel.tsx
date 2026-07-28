@@ -29,6 +29,7 @@ import {
   type V2CharacterDraft,
   type V2ReviewCardSaveStatus,
 } from "./V2ReviewRow";
+import { PurgeUnselectedModal } from "./PurgeUnselectedModal";
 import { ReviewImagePreview } from "./ReviewImagePreview";
 import { toggleRating } from "./ReviewRatingStars";
 import { ReviewShortcutGuide } from "./ReviewShortcutGuide";
@@ -129,6 +130,7 @@ export function V2ReviewPanel() {
   const [failedMessages, setFailedMessages] = useState<Record<number, string>>({});
   const [submittingId, setSubmittingId] = useState<number | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [purgeModalOpen, setPurgeModalOpen] = useState(false);
   const [thumbSize, setThumbSize] = useState(384);
   const [cardSize, setCardSize] = useState<V2ReviewCardSize>("medium");
   const [cardWidthPx, setCardWidthPx] = useState(0);
@@ -526,6 +528,27 @@ export function V2ReviewPanel() {
     }
   }, [bulkSaving, items, drafts, isCharacterRegenerating, skip, loadReviews, loadStats]);
 
+  const fetchPurgePreview = useCallback(
+    () => api.previewPurgeUnselectedCatalogImagesGlobal({ search: search.trim() || undefined }),
+    [search],
+  );
+
+  const submitPurgeSelected = useCallback(
+    (characterIds: number[]) => api.purgeUnselectedCatalogImagesSelectedGlobal({ character_ids: characterIds }),
+    [],
+  );
+
+  const handlePurgeCompleted = useCallback(
+    (result: { affected_count: number; removed_count: number }) => {
+      setActionMessage(
+        `${result.affected_count}개 항목에서 미선택 이미지 ${result.removed_count}개를 삭제했습니다.`,
+      );
+      void loadReviews();
+      void loadStats();
+    },
+    [loadReviews, loadStats],
+  );
+
   // V2 응답(quality/identity 상태, image_id 등)으로 해당 카드 하나만 다시 조회해 직접 갱신한다.
   // V1 job의 CatalogReviewItem 변환을 거치지 않는다.
   const refreshSingleCharacter = useCallback(
@@ -703,7 +726,7 @@ export function V2ReviewPanel() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (linkingItem || isEditableTarget(event.target) || !focusedItem || !focusedDraft) {
+      if (purgeModalOpen || linkingItem || isEditableTarget(event.target) || !focusedItem || !focusedDraft) {
         return;
       }
 
@@ -855,6 +878,7 @@ export function V2ReviewPanel() {
     gridCols,
     items.length,
     linkingItem,
+    purgeModalOpen,
     regenerateFocused,
     selectFocusedImage,
     togglePreview,
@@ -1004,6 +1028,17 @@ export function V2ReviewPanel() {
             onClick={() => void bulkSaveRatedItems()}
           >
             {bulkSaving ? "저장 중..." : "레이팅된 항목 일괄 저장 (Ctrl+Enter)"}
+          </button>
+        </div>
+        <div className="field" style={{ justifyContent: "flex-end" }}>
+          <label>&nbsp;</label>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => setPurgeModalOpen(true)}
+            title="V2 현재 검색어 기준으로 선택되지 않은 이미지를 미리보고 골라서 삭제합니다."
+          >
+            미선택 이미지 삭제
           </button>
         </div>
         {renderPaginationControls()}
@@ -1183,6 +1218,17 @@ export function V2ReviewPanel() {
           character={toLinkableSummary(linkingItem)}
           onClose={() => setLinkingItem(null)}
           onLinked={() => void loadReviews()}
+        />
+      ) : null}
+
+      {purgeModalOpen ? (
+        <PurgeUnselectedModal
+          title="미선택 이미지 삭제"
+          description={`V2 리뷰 · ${search.trim() ? `현재 검색어: ${search.trim()}` : "현재 검색어 없음"}`}
+          fetchPreview={fetchPurgePreview}
+          onSubmit={submitPurgeSelected}
+          onClose={() => setPurgeModalOpen(false)}
+          onCompleted={handlePurgeCompleted}
         />
       ) : null}
 

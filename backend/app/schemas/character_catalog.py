@@ -54,6 +54,12 @@ class GlobalCharacterResponse(BaseModel):
         if primary is not None:
             primary_tag = primary.series.series_tag if primary.series else primary.copyright_tag
         review = character.review
+        has_review_cover = bool(review and review.cover_image_id is not None)
+        has_terminal_no_cover_review = bool(
+            review
+            and review.review_status == "completed"
+            and review.rating in (0, -1)
+        )
         parent = character.parent
         return cls(
             id=character.id,
@@ -76,7 +82,7 @@ class GlobalCharacterResponse(BaseModel):
             primary_series_tag=primary_tag,
             related_series_count=len(links),
             image_count=len(character.images),
-            has_cover_image=bool(review and review.cover_image_id is not None),
+            has_cover_image=has_review_cover or has_terminal_no_cover_review,
             parent_character_id=character.parent_character_id,
             parent_character_tag=parent.character_tag if parent else None,
             parent_display_name=parent.display_name if parent else None,

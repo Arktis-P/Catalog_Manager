@@ -14,12 +14,15 @@ from app.schemas.review import (
     CatalogReviewItemResponse,
     CatalogReviewListResponse,
     CatalogReviewPurgeUnselectedBulkResponse,
+    CatalogReviewPurgePreviewResponse,
+    CatalogReviewPurgeUnselectedSelectedRequest,
     CatalogReviewPurgeUnselectedResponse,
     CatalogReviewRegenerateRequest,
     CatalogReviewRegenerateResponse,
     CatalogReviewUndoResponse,
     GlobalCatalogReviewItemResponse,
     GlobalCatalogReviewListResponse,
+    GlobalCatalogReviewPurgeUnselectedSelectedRequest,
     GlobalCatalogReviewPurgeUnselectedResponse,
     V2BulkCompleteItemResult,
     V2BulkCompleteRequest,
@@ -450,6 +453,30 @@ def purge_unselected_catalog_images_bulk(
     return CatalogReviewPurgeUnselectedBulkResponse(affected_count=affected, removed_count=removed)
 
 
+@router.get("/catalog/purge-unselected-preview", response_model=CatalogReviewPurgePreviewResponse)
+def preview_purge_unselected_catalog_images(
+    series_id: int = Query(..., ge=1),
+    search: str | None = None,
+    service: ReviewService = Depends(get_review_service),
+):
+    try:
+        return service.preview_purge_unselected_images(series_id, search=search)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/catalog/purge-unselected-selected", response_model=CatalogReviewPurgeUnselectedBulkResponse)
+def purge_unselected_selected_catalog_images(
+    payload: CatalogReviewPurgeUnselectedSelectedRequest,
+    service: ReviewService = Depends(get_review_service),
+):
+    try:
+        affected, removed = service.purge_unselected_images_selected(payload.series_id, payload.character_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CatalogReviewPurgeUnselectedBulkResponse(affected_count=affected, removed_count=removed)
+
+
 @router.post("/catalog/{character_id}/dismiss-needs-check", response_model=CatalogReviewDismissNeedsCheckResponse)
 def dismiss_catalog_needs_check(
     character_id: int,
@@ -597,6 +624,26 @@ def purge_unselected_catalog_images_bulk_global(
     service: ReviewService = Depends(get_review_service),
 ):
     affected, removed = service.purge_unselected_images_bulk_global(search=search)
+    return CatalogReviewPurgeUnselectedBulkResponse(affected_count=affected, removed_count=removed)
+
+
+@router.get("/catalog-global/purge-unselected-preview", response_model=CatalogReviewPurgePreviewResponse)
+def preview_purge_unselected_catalog_images_global(
+    search: str | None = None,
+    service: ReviewService = Depends(get_review_service),
+):
+    return service.preview_purge_unselected_images_global(search=search)
+
+
+@router.post("/catalog-global/purge-unselected-selected", response_model=CatalogReviewPurgeUnselectedBulkResponse)
+def purge_unselected_selected_catalog_images_global(
+    payload: GlobalCatalogReviewPurgeUnselectedSelectedRequest,
+    service: ReviewService = Depends(get_review_service),
+):
+    try:
+        affected, removed = service.purge_unselected_images_selected_global(payload.character_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CatalogReviewPurgeUnselectedBulkResponse(affected_count=affected, removed_count=removed)
 
 

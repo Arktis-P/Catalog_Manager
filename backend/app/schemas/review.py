@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AppearanceReviewItemResponse(BaseModel):
@@ -150,6 +150,53 @@ class GlobalCatalogReviewPurgeUnselectedResponse(BaseModel):
 class CatalogReviewPurgeUnselectedBulkResponse(BaseModel):
     affected_count: int
     removed_count: int
+
+
+class CatalogReviewPurgePreviewImageResponse(BaseModel):
+    id: int
+    image_path: str
+
+
+class CatalogReviewPurgePreviewItemResponse(BaseModel):
+    character_id: int
+    character_tag: str
+    display_name: str
+    rating: int
+    selected_image: CatalogReviewPurgePreviewImageResponse | None = None
+    delete_images: list[CatalogReviewPurgePreviewImageResponse] = Field(default_factory=list)
+
+
+class CatalogReviewPurgePreviewResponse(BaseModel):
+    items: list[CatalogReviewPurgePreviewItemResponse]
+    item_count: int
+    image_count: int
+
+
+class CatalogReviewPurgeUnselectedSelectedRequest(BaseModel):
+    series_id: int = Field(ge=1)
+    character_ids: list[int] = Field(min_length=1, max_length=1000)
+
+    @field_validator("character_ids")
+    @classmethod
+    def validate_character_ids(cls, value: list[int]) -> list[int]:
+        if any(character_id <= 0 for character_id in value):
+            raise ValueError("character_ids must contain positive IDs")
+        if len(set(value)) != len(value):
+            raise ValueError("character_ids must be unique")
+        return value
+
+
+class GlobalCatalogReviewPurgeUnselectedSelectedRequest(BaseModel):
+    character_ids: list[int] = Field(min_length=1, max_length=1000)
+
+    @field_validator("character_ids")
+    @classmethod
+    def validate_character_ids(cls, value: list[int]) -> list[int]:
+        if any(character_id <= 0 for character_id in value):
+            raise ValueError("character_ids must contain positive IDs")
+        if len(set(value)) != len(value):
+            raise ValueError("character_ids must be unique")
+        return value
 
 
 class CatalogReviewRegenerateRequest(BaseModel):

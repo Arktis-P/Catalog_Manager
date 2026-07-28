@@ -13,6 +13,7 @@ import {
 import { pendingReviewImageUrl } from "../../utils/reviewImages";
 import { SeriesSearchSelect } from "../SeriesSearchSelect";
 import { CatalogReviewRow, createDraftForItem, type CharacterDraft } from "./CatalogReviewRow";
+import { PurgeUnselectedModal } from "./PurgeUnselectedModal";
 import { ReviewImagePreview } from "./ReviewImagePreview";
 import { ReviewMoveSeriesModal } from "./ReviewMoveSeriesModal";
 import { toggleRating } from "./ReviewRatingStars";
@@ -65,6 +66,7 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
   const [maxLoadedImages, setMaxLoadedImages] = useState(30);
   const [imagesPerCharacter, setImagesPerCharacter] = useState(2);
   const [moveTarget, setMoveTarget] = useState<CatalogReviewItem | null>(null);
+  const [purgeModalOpen, setPurgeModalOpen] = useState(false);
   const [sessionCompleted, setSessionCompleted] = useState(0);
   const [pendingCharacterId, setPendingCharacterId] = useState<number | null>(initialCharacterId);
   const appliedRegenerateJobIdsRef = useRef<Set<string>>(new Set());
@@ -425,49 +427,36 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
     }
   }, [filterStatus, focusedDraft, focusedItem, focusedLocked, submitting]);
 
-  const handlePurgeUnselected = useCallback(async (item: CatalogReviewItem) => {
-    if (!window.confirm(`${item.character_tag}의 선택되지 않은 이미지를 삭제할까요? 되돌릴 수 없습니다.`)) {
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    try {
-      const response = await api.purgeUnselectedCatalogImages(item.id);
-      setItems((current) => current.map((entry) => (entry.id === item.id ? response.item : entry)));
-      setActionMessage(`${item.character_tag} 미선택 이미지 ${response.removed_count}장 삭제됨`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "미선택 이미지 삭제에 실패했습니다.");
-    } finally {
-      setSubmitting(false);
-    }
-  }, []);
-
-  const handlePurgeUnselectedAll = useCallback(async () => {
+  const fetchPurgePreview = useCallback(() => {
     if (!selectedSeriesId) {
-      return;
+      return Promise.reject(new Error("시리즈를 먼저 선택하세요."));
     }
-    if (
-      !window.confirm(
-        "리뷰가 완료된 모든 항목(현재 필터 검색어 기준)의 선택되지 않은 이미지를 모두 삭제할까요? 되돌릴 수 없습니다.",
-      )
-    ) {
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    try {
-      const response = await api.purgeUnselectedCatalogImagesBulk({
+    return api.previewPurgeUnselectedCatalogImages({
+      series_id: selectedSeriesId,
+      search: search || undefined,
+    });
+  }, [selectedSeriesId, search]);
+
+  const submitPurgeSelected = useCallback(
+    (characterIds: number[]) => {
+      if (!selectedSeriesId) {
+        return Promise.reject(new Error("시리즈를 먼저 선택하세요."));
+      }
+      return api.purgeUnselectedCatalogImagesSelected({
         series_id: selectedSeriesId,
-        search: search || undefined,
+        character_ids: characterIds,
       });
-      setActionMessage(`${response.affected_count}개 항목에서 미선택 이미지 ${response.removed_count}장 삭제됨`);
-      await loadReviews();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "미선택 이미지 일괄 삭제에 실패했습니다.");
-    } finally {
-      setSubmitting(false);
-    }
-  }, [selectedSeriesId, search, loadReviews]);
+    },
+    [selectedSeriesId],
+  );
+
+  const handlePurgeCompleted = useCallback(
+    (result: { affected_count: number; removed_count: number }) => {
+      setActionMessage(`${result.affected_count}개 항목에서 미선택 이미지 ${result.removed_count}장 삭제됨`);
+      void loadReviews();
+    },
+    [loadReviews],
+  );
 
   const undoLast = useCallback(async () => {
     const characterId = undoStack[0];
@@ -620,7 +609,13 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (isEditableTarget(event.target) || !focusedItem || !focusedDraft) {
+      if (
+        purgeModalOpen ||
+        moveTarget ||
+        isEditableTarget(event.target) ||
+        !focusedItem ||
+        !focusedDraft
+      ) {
         return;
       }
 
@@ -723,6 +718,8 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
     focusedItem,
     focusedLocked,
     items.length,
+    moveTarget,
+    purgeModalOpen,
     regenerateFocused,
     setRating,
     shiftFocusedImage,
@@ -794,11 +791,11 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
           <button
             className="btn"
             type="button"
-            onClick={() => void handlePurgeUnselectedAll()}
+            onClick={() => setPurgeModalOpen(true)}
             disabled={submitting || !selectedSeriesId}
-            title="리뷰가 완료된 모든 항목(현재 검색어 기준)의 선택되지 않은 이미지를 모두 삭제합니다."
+            title="리뷰가 완료된 항목 중 선택되지 않은 이미지를 미리보고 골라서 삭제합니다."
           >
-            미선택 이미지 전체 삭제
+            미선택 이미지 삭제
           </button>
         </div>
         <ReviewShortcutGuide includeUndo />
@@ -868,7 +865,6 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
                     onComplete={
                       rowIndex === focusIndex ? () => void completeFocused() : undefined
                     }
-                    onPurgeUnselected={() => void handlePurgeUnselected(item)}
                     regenerating={locked}
                   />
                 );
@@ -893,6 +889,21 @@ export function CatalogReviewPanel({ initialSeriesId = "", initialCharacterId = 
           currentSeriesTag={moveTarget.series_tag}
           onClose={() => setMoveTarget(null)}
           onConfirm={(seriesId) => handleMoveSeries(moveTarget, seriesId)}
+        />
+      ) : null}
+
+      {purgeModalOpen ? (
+        <PurgeUnselectedModal
+          title="미선택 이미지 삭제"
+          description={
+            selectedSeries
+              ? `${selectedSeries.display_name || selectedSeries.series_tag} · 현재 검색어 기준 완료 항목`
+              : undefined
+          }
+          fetchPreview={fetchPurgePreview}
+          onSubmit={submitPurgeSelected}
+          onClose={() => setPurgeModalOpen(false)}
+          onCompleted={handlePurgeCompleted}
         />
       ) : null}
     </>

@@ -10,6 +10,8 @@ import type {
   CatalogReviewFilterStatus,
   CatalogReviewItem,
   CatalogReviewListResponse,
+  CatalogReviewPurgePreviewResponse,
+  CatalogReviewPurgeSelectedResult,
   CatalogStats,
   GlobalCatalogReviewListResponse,
   GlobalCatalogListResponse,
@@ -455,6 +457,17 @@ export const api = {
       { method: "POST" },
     ),
 
+  previewPurgeUnselectedCatalogImages: (params: { series_id: number; search?: string }) =>
+    request<CatalogReviewPurgePreviewResponse>(
+      `/review/catalog/purge-unselected-preview${buildQuery(params)}`,
+    ),
+
+  purgeUnselectedCatalogImagesSelected: (payload: { series_id: number; character_ids: number[] }) =>
+    request<CatalogReviewPurgeSelectedResult>("/review/catalog/purge-unselected-selected", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   regenerateCatalogCharacter: (
     characterId: number,
     payload: { prompt: string; gender?: string | null },
@@ -518,6 +531,17 @@ export const api = {
       `/review/catalog-global/purge-unselected-all${buildQuery(params)}`,
       { method: "POST" },
     ),
+
+  previewPurgeUnselectedCatalogImagesGlobal: (params: { search?: string } = {}) =>
+    request<CatalogReviewPurgePreviewResponse>(
+      `/review/catalog-global/purge-unselected-preview${buildQuery(params)}`,
+    ),
+
+  purgeUnselectedCatalogImagesSelectedGlobal: (payload: { character_ids: number[] }) =>
+    request<CatalogReviewPurgeSelectedResult>("/review/catalog-global/purge-unselected-selected", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   listV2ReviewCharacters: (params: V2ReviewFilters = {}) =>
     request<V2ReviewCharacterListResponse>(`/review/v2/characters${buildQuery(params as Record<string, string | number | boolean | undefined>)}`),
