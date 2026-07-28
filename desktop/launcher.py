@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -232,7 +233,24 @@ def release_listening_port(port: int, timeout_seconds: float = 5) -> None:
         time.sleep(0.1)
 
 
-def start_backend() -> Path | None:
+def _can_bind_loopback(port: int) -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", port))
+    except OSError:
+        return False
+    return True
+
+
+def select_backend_port(preferred_port: int = BACKEND_PORT) -> int:
+    if _can_bind_loopback(preferred_port):
+        return preferred_port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def start_backend(port: int = BACKEND_PORT) -> Path | None:
     global _backend_process, _log_handle
 
     if _backend_process and _backend_process.poll() is None:
@@ -252,7 +270,7 @@ def start_backend() -> Path | None:
             "--host",
             "127.0.0.1",
             "--port",
-            str(BACKEND_PORT),
+            str(port),
         ],
         cwd=BACKEND_DIR,
         env=env,
@@ -430,9 +448,16 @@ def run_desktop() -> int:
         # otherwise tear down a freshly started backend (blank app window).
         kill_browser_profile_processes(profile_dir)
         release_listening_port(BACKEND_PORT)
-        log_path = start_backend()
+        backend_port = select_backend_port(BACKEND_PORT)
+        app_url = f"http://127.0.0.1:{backend_port}"
+        if backend_port != BACKEND_PORT:
+            print(
+                f"[desktop] Port {BACKEND_PORT} is unavailable; using {backend_port}.",
+                flush=True,
+            )
+        log_path = start_backend(backend_port)
 
-        if not wait_for_server(f"{APP_URL}/api/health"):
+        if not wait_for_server(f"{app_url}/api/health"):
             log_hint = log_path or runtime_log_dir()
             print(f"[desktop] Backend failed to start. See log: {log_hint}", flush=True)
             print(f"[desktop] {backend_exit_message(log_path)}", flush=True)
@@ -444,11 +469,11 @@ def run_desktop() -> int:
             return 1
 
         # Bust SPA cache and avoid reusing a stale app tab from the shared profile.
-        boot_url = f"{APP_URL}/?_boot={int(time.time())}"
+        boot_url = f"{app_url}/?_boot={int(time.time())}"
         browser_proc = open_app_browser(boot_url, profile_dir)
         if browser_proc is None:
             # 브라우저를 찾지 못한 경우 URL 출력 후 Ctrl+C 대기
-            print(f"[desktop] App running at {APP_URL}  (Ctrl+C to stop)", flush=True)
+            print(f"[desktop] App running at {app_url}  (Ctrl+C to stop)", flush=True)
             if _backend_process is not None:
                 _backend_process.wait()
         else:

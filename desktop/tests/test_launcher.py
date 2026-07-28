@@ -1,5 +1,6 @@
 import io
 import json
+import socket
 import urllib.error
 from unittest.mock import Mock
 
@@ -133,3 +134,66 @@ def test_release_listening_port_kills_orphan_child_when_owner_is_gone(
 
     children.assert_called_once_with(38444)
     assert [call.args[0] for call in kill_tree.call_args_list] == [38444, 46012]
+
+
+def test_select_backend_port_uses_available_preferred_port() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        preferred_port = int(sock.getsockname()[1])
+
+    assert launcher.select_backend_port(preferred_port) == preferred_port
+
+
+def test_select_backend_port_falls_back_when_preferred_port_is_unavailable() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as preferred:
+        preferred.bind(("127.0.0.1", 0))
+        preferred_port = int(preferred.getsockname()[1])
+
+        fallback_port = launcher.select_backend_port(preferred_port)
+
+    assert fallback_port != preferred_port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as fallback:
+        fallback.bind(("127.0.0.1", fallback_port))
+
+
+def test_run_desktop_uses_selected_backend_port(monkeypatch) -> None:
+    backend_process = Mock(poll=Mock(return_value=1))
+    launcher._backend_process = backend_process
+    selected_port = 54321
+    health_urls: list[str] = []
+    browser_urls: list[str] = []
+
+    def start_backend(port: int):
+        launcher._backend_process = backend_process
+        start_backend.called_port = port
+        return launcher.PROJECT_ROOT / "backend.log"
+
+    start_backend.called_port = None
+
+    monkeypatch.setattr(launcher, "ensure_frontend_build", Mock())
+    monkeypatch.setattr(
+        launcher,
+        "browser_profile_dir",
+        Mock(return_value=launcher.PROJECT_ROOT / "profile"),
+    )
+    monkeypatch.setattr(launcher, "kill_browser_profile_processes", Mock())
+    monkeypatch.setattr(launcher, "release_listening_port", Mock())
+    monkeypatch.setattr(launcher, "select_backend_port", Mock(return_value=selected_port))
+    monkeypatch.setattr(launcher, "start_backend", start_backend)
+    monkeypatch.setattr(
+        launcher,
+        "wait_for_server",
+        lambda url: health_urls.append(url) or True,
+    )
+    monkeypatch.setattr(
+        launcher,
+        "open_app_browser",
+        lambda url, _profile_dir: browser_urls.append(url) or None,
+    )
+
+    assert launcher.run_desktop() == 0
+
+    assert start_backend.called_port == selected_port
+    assert health_urls == [f"http://127.0.0.1:{selected_port}/api/health"]
+    assert browser_urls[0].startswith(f"http://127.0.0.1:{selected_port}/?_boot=")
+    backend_process.wait.assert_called_once_with()
