@@ -213,3 +213,45 @@ def test_v2_regeneration_preempts_running_generation_and_auto_resumes(monkeypatc
     assert FakePipeline.started == [1, 9, 2]
     assert manager.get_job(regeneration.job_id).kind == "regenerate"
     assert manager.get_job(regeneration.job_id).character_tag == "character_9"
+
+
+def test_v2_regenerations_are_fifo_and_precede_pending_generation(monkeypatch):
+    patch_v2_dependencies(monkeypatch)
+    manager = V2GenerationJobManager()
+    characters_by_id = {
+        1: make_v2_character(1),
+        2: make_v2_character(2),
+        10: make_v2_character(10),
+        11: make_v2_character(11),
+        12: make_v2_character(12),
+    }
+    monkeypatch.setattr(
+        manager,
+        "_target_characters",
+        lambda _db, ids, _rerun: [characters_by_id[item_id] for item_id in (ids or [])],
+    )
+
+    generation = manager.start(character_ids=[1], rerun=True)
+    FakePipeline.first_started.wait(timeout=1.0)
+    wait_until(lambda: manager.get_job(generation.job_id).status == "running")
+
+    # A second bulk generate job queues up behind the running one.
+    pending_generation = manager.start(character_ids=[2], rerun=True)
+
+    # Regenerations are requested in order A, B, C while the generate job is still busy
+    # with its first (and only) character, so all three land in the queue before it pauses.
+    regen_a = manager.start_regeneration(10, character_tag="character_10")
+    regen_b = manager.start_regeneration(11, character_tag="character_11")
+    regen_c = manager.start_regeneration(12, character_tag="character_12")
+
+    assert regen_a is not None
+    assert regen_b is not None
+    assert regen_c is not None
+
+    wait_until(lambda: manager.get_job(regen_a.job_id).status == "completed")
+    wait_until(lambda: manager.get_job(regen_b.job_id).status == "completed")
+    wait_until(lambda: manager.get_job(regen_c.job_id).status == "completed")
+    wait_until(lambda: manager.get_job(generation.job_id).status == "completed")
+    wait_until(lambda: manager.get_job(pending_generation.job_id).status == "completed")
+
+    assert FakePipeline.started == [1, 10, 11, 12, 2]

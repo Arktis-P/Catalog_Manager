@@ -96,6 +96,17 @@ class V2GenerationJobManager:
         self._dispatch_next()
         return job
 
+    def _regen_insert_index(self) -> int:
+        """대기 중인 재생성 job들 뒤, 첫 generate job 앞의 위치를 돌려준다. (_lock 보유 상태에서 호출)"""
+        index = 0
+        for job_id in self._queue:
+            job = self._jobs.get(job_id)
+            if job is not None and job.kind == "regenerate":
+                index += 1
+                continue
+            break
+        return index
+
     def start_regeneration(
         self,
         character_id: int,
@@ -118,7 +129,7 @@ class V2GenerationJobManager:
                 return None
             self._regenerating_character_ids.add(character_id)
             self._jobs[job.job_id] = job
-            self._queue.appendleft(job.job_id)
+            self._queue.insert(self._regen_insert_index(), job.job_id)
             self._arguments[job.job_id] = ([character_id], True, base_prompt, character_id)
             active_job = self._jobs.get(self._active_job_id or "")
             if active_job and active_job.kind == "generate" and active_job.status == "running":

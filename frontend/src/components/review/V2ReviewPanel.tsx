@@ -452,13 +452,8 @@ export function V2ReviewPanel() {
         const chips = v2AppearanceTagChips(item);
         const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
         const finalPrompt = resolveV2FinalPrompt(item, { ...draft, enabledTags });
-        const defaultCoverIndex = item.images.findIndex(
-          (image) => image.is_cover || image.id === item.cover_image_id,
-        );
-        const defaultImageIndex = defaultCoverIndex >= 0 ? defaultCoverIndex : 0;
         const selectedImage = item.images[draft.imageIndex];
-        const coverImageId =
-          draft.imageIndex !== defaultImageIndex && selectedImage ? selectedImage.id : undefined;
+        const coverImageId = selectedImage ? selectedImage.id : undefined;
         return {
           character_id: item.id,
           rating,

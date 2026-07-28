@@ -267,3 +267,94 @@ def test_v2_review_partial_save_marks_in_progress(db: Session) -> None:
 def test_v2_review_complete_rejects_invalid_rating() -> None:
     with pytest.raises(ValidationError):
         V2ReviewSaveRequest(rating=7)
+
+
+def test_v2_review_images_ordered_by_creation_and_preview_falls_back_to_latest(db: Session) -> None:
+    character = make_character(db, tag="ordered_images")
+    # cover_score is intentionally lower than the first (already-persisted) image so that an id-based
+    # (creation-order) sort can be distinguished from the old cover_score-based sort.
+    character.images.append(
+        GlobalCharacterImage(
+            image_path="/tmp/ordered_images_2.png",
+            auto_status="pass",
+            cover_score=0.1,
+            quality_status="pass",
+            identity_status="match",
+        )
+    )
+    db.add(character)
+    db.commit()
+    db.refresh(character)
+
+    response = review_router.list_v2_review_characters(
+        review_status=None,
+        rating=None,
+        quality_status=None,
+        identity_status=None,
+        generation_status=None,
+        gender=None,
+        series_id=None,
+        multicolor=None,
+        prompt_modified=None,
+        search="ordered_images",
+        skip=0,
+        limit=30,
+        service=ReviewService(db),
+    )
+
+    body = response.model_dump()
+    item = body["items"][0]
+    image_ids = [image["id"] for image in item["images"]]
+    assert image_ids == sorted(image_ids)
+    assert item["images"][-1]["id"] == max(image_ids)
+    # no cover set -> preview falls back to the last (most recently created) image
+    assert item["preview_image"]["id"] == item["images"][-1]["id"]
+
+
+def test_v2_review_preview_image_uses_cover_when_set(db: Session) -> None:
+    character = make_character(db, tag="cover_images")
+    first_image = character.images[0]
+    character.images.append(
+        GlobalCharacterImage(
+            image_path="/tmp/cover_images_2.png",
+            auto_status="pass",
+            cover_score=0.95,
+            quality_status="pass",
+            identity_status="match",
+        )
+    )
+    db.add(character)
+    db.commit()
+    db.refresh(character)
+
+    character.review = GlobalCharacterReview(
+        review_status="pending",
+        rating_stage="primary",
+        cover_image_id=first_image.id,
+    )
+    db.add(character)
+    db.commit()
+
+    response = review_router.list_v2_review_characters(
+        review_status=None,
+        rating=None,
+        quality_status=None,
+        identity_status=None,
+        generation_status=None,
+        gender=None,
+        series_id=None,
+        multicolor=None,
+        prompt_modified=None,
+        search="cover_images",
+        skip=0,
+        limit=30,
+        service=ReviewService(db),
+    )
+
+    body = response.model_dump()
+    item = body["items"][0]
+    # image order stays ascending by id even though the first image is the cover
+    assert item["images"][0]["id"] == first_image.id
+    assert item["images"][-1]["id"] != first_image.id
+    # preview_image should be the cover, not the last (most recent) image
+    assert item["preview_image"]["id"] == first_image.id

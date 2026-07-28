@@ -107,10 +107,14 @@ def _to_v2_review_image(image) -> V2ReviewImageResponse:
 def _to_v2_review_character(character) -> V2ReviewCharacterResponse:
     review = character.review
     visible_images = sorted(
-        [image for image in character.images if not image.is_rejected],
-        key=lambda image: (not image.is_cover, -(image.cover_score or 0), image.id),
+        (image for image in character.images if not image.is_rejected),
+        key=lambda image: image.id,
     )
-    preview_image = visible_images[0] if visible_images else None
+    cover_image_id = review.cover_image_id if review else None
+    preview_image = next(
+        (image for image in visible_images if image.is_cover or image.id == cover_image_id),
+        visible_images[-1] if visible_images else None,
+    )
     series_links = [link for link in character.series_links if link.series_id is not None]
     return V2ReviewCharacterResponse(
         id=character.id,

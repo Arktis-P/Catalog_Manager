@@ -109,12 +109,10 @@ export function createV2DraftForItem(character: V2ReviewCharacter): V2CharacterD
     defaultEnabledTagKeys(chips);
   const autoPrompt = buildFinalPrompt(character.character_tag, character.base_prompt, enabledTags, chips);
   const promptEdited = Boolean(character.base_prompt && character.base_prompt !== autoPrompt);
-  const coverIndex = character.images.findIndex(
-    (image) => image.is_cover || image.id === character.cover_image_id,
-  );
+  const lastIndex = character.images.length > 0 ? character.images.length - 1 : 0;
 
   return {
-    imageIndex: coverIndex >= 0 ? coverIndex : 0,
+    imageIndex: lastIndex,
     gender: character.gender,
     rating: character.rating,
     enabledTags,
