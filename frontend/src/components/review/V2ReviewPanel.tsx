@@ -107,6 +107,7 @@ export function V2ReviewPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusCardFromKeyboardRef = useRef(false);
   const loadedSkipRef = useRef(0);
+  const focusIndexRef = useRef(0);
   const [items, setItems] = useState<V2ReviewCharacter[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<V2ReviewStats | null>(null);
@@ -161,6 +162,10 @@ export function V2ReviewPanel() {
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
+
+  useEffect(() => {
+    focusIndexRef.current = focusIndex;
+  }, [focusIndex]);
 
   const isCharacterRegenerating = useCallback(
     (characterId: number) => {
@@ -223,7 +228,7 @@ export function V2ReviewPanel() {
     void loadStats();
   }, [loadStats]);
 
-  const loadReviews = useCallback(async () => {
+  const loadReviews = useCallback(async (preferredFocusId?: number) => {
     setLoading(true);
     setError(null);
     try {
@@ -254,7 +259,17 @@ export function V2ReviewPanel() {
       }
       setItems(merged);
       setTotal(response.total);
-      setFocusIndex((current) => Math.min(current, Math.max(0, merged.length - 1)));
+      const currentFocusId = itemsRef.current[focusIndexRef.current]?.id;
+      const targetFocusId = preferredFocusId ?? currentFocusId;
+      setFocusIndex((current) => {
+        if (targetFocusId != null) {
+          const matchingIndex = merged.findIndex((entry) => entry.id === targetFocusId);
+          if (matchingIndex >= 0) {
+            return matchingIndex;
+          }
+        }
+        return Math.min(current, Math.max(0, merged.length - 1));
+      });
       setDrafts((current) =>
         Object.fromEntries(merged.map((item) => [item.id, current[item.id] ?? createV2DraftForItem(item)])),
       );
@@ -699,16 +714,12 @@ export function V2ReviewPanel() {
   const previewAlt = focusedItem ? `${focusedItem.character_tag} original` : "";
 
   const openSingleMode = useCallback(() => {
-    const selectedPendingIndex = focusedItem?.review_status === "pending" ? focusIndex : -1;
-    const firstPendingIndex = items.findIndex((entry) => entry.review_status === "pending");
-    const nextIndex = selectedPendingIndex >= 0 ? selectedPendingIndex : firstPendingIndex;
-    if (nextIndex < 0) {
-      setActionMessage("현재 페이지에 pending 항목이 없습니다.");
+    if (!focusedItem) {
+      setActionMessage("현재 선택된 V2 리뷰 항목이 없습니다.");
       return;
     }
-    setFocusIndex(nextIndex);
     setSingleModeOpen(true);
-  }, [focusIndex, focusedItem, items]);
+  }, [focusedItem]);
 
   const multicolorChips = useMemo(
     () => (focusedItem ? v2AppearanceTagChips(focusedItem).filter((chip) => chip.group === "multi") : []),
@@ -840,7 +851,8 @@ export function V2ReviewPanel() {
           event.key === "ArrowRight" ||
           key === "q" ||
           key === "w" ||
-          key === "a";
+          key === "a" ||
+          key === "s";
         if (!allowed) {
           event.preventDefault();
           return;
@@ -919,6 +931,11 @@ export function V2ReviewPanel() {
       }
 
       const key = event.key.toLowerCase();
+      if (key === "s") {
+        event.preventDefault();
+        openSingleMode();
+        return;
+      }
       if (key === "g") {
         event.preventDefault();
         updateDraft(focusedItem.id, { ...focusedDraft, gender: cycleGender(focusedDraft.gender) });
@@ -973,6 +990,7 @@ export function V2ReviewPanel() {
     gridCols,
     items.length,
     linkingItem,
+    openSingleMode,
     purgeModalOpen,
     regenerateFocused,
     selectFocusedImage,
@@ -1334,6 +1352,7 @@ export function V2ReviewPanel() {
               : null
           }
           regenerating={isCharacterRegenerating(focusedItem.id)}
+          suspended={Boolean(linkingItem)}
           onClose={() => setSingleModeOpen(false)}
           onNavigateLocal={navigateSingleLocal}
           onNavigatePage={navigateSinglePage}
@@ -1345,7 +1364,6 @@ export function V2ReviewPanel() {
           onComplete={() => void completeItem(focusedItem)}
           onBulkComplete={() => void bulkSaveRatedItems()}
           onOpenLinkModal={() => {
-            setSingleModeOpen(false);
             setLinkingItem(focusedItem);
           }}
         />
@@ -1355,7 +1373,7 @@ export function V2ReviewPanel() {
         <CharacterLinkModal
           character={toLinkableSummary(linkingItem)}
           onClose={() => setLinkingItem(null)}
-          onLinked={() => void loadReviews()}
+          onLinked={() => void loadReviews(linkingItem.id)}
         />
       ) : null}
 

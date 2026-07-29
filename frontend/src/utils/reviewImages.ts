@@ -2,6 +2,32 @@ function imageSubdir(imagePath: string): "pending_review" | "catalog_selected" {
   return imagePath.replace(/\\/g, "/").includes("/catalog_selected/") ? "catalog_selected" : "pending_review";
 }
 
+const DANBOORU_IMAGE_HOSTS = new Set(["danbooru.donmai.us", "cdn.donmai.us"]);
+
+export function referenceReviewImageUrl(raw: string | null | undefined): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.startsWith("/api/wiki-proxy-image?")) {
+    return trimmed;
+  }
+
+  const normalized = trimmed.startsWith("//") ? `https:${trimmed}` : trimmed;
+  let url: URL;
+  try {
+    url = new URL(normalized);
+  } catch {
+    return null;
+  }
+
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || !DANBOORU_IMAGE_HOSTS.has(url.hostname)) {
+    return null;
+  }
+
+  return `/api/wiki-proxy-image?url=${encodeURIComponent(url.toString())}`;
+}
+
 export function pendingReviewImageUrl(
   imagePath: string | null | undefined,
   options?: { thumbnail?: boolean; thumbSize?: number },

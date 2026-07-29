@@ -7,7 +7,7 @@ import type {
   V2ReviewReferenceImagesResponse,
 } from "../../types";
 import { cycleGender } from "../../utils/reviewPrompt";
-import { pendingReviewImageUrl } from "../../utils/reviewImages";
+import { pendingReviewImageUrl, referenceReviewImageUrl } from "../../utils/reviewImages";
 import {
   identityDotTitle,
   qualityDotTitle,
@@ -40,6 +40,7 @@ interface V2SingleReviewOverlayProps {
   regenerateMessage?: string;
   regenerateProgress?: { current: number; total: number } | null;
   regenerating: boolean;
+  suspended?: boolean;
   onClose: () => void;
   onNavigateLocal: (direction: 1 | -1) => boolean;
   onNavigatePage: (direction: 1 | -1) => void;
@@ -51,10 +52,6 @@ interface V2SingleReviewOverlayProps {
   onComplete: () => void;
   onBulkComplete: () => void;
   onOpenLinkModal: () => void;
-}
-
-function normalizeReferenceUrl(value: string | null | undefined): string | null {
-  return value && value.trim() ? value : null;
 }
 
 function sourceLabel(source: V2ReviewReferenceItem["source"]): string {
@@ -90,7 +87,7 @@ function ReferenceSlot({
   const [imageFailed, setImageFailed] = useState(false);
 
   if (item) {
-    const thumbUrl = normalizeReferenceUrl(item.thumbnail_url) ?? normalizeReferenceUrl(item.preview_url);
+    const thumbUrl = referenceReviewImageUrl(item.thumbnail_url) ?? referenceReviewImageUrl(item.preview_url);
     return (
       <button className="v2-single-reference-slot" type="button" onClick={() => onOpen(item)}>
         {thumbUrl && !imageFailed ? (
@@ -132,6 +129,7 @@ export function V2SingleReviewOverlay({
   regenerateMessage,
   regenerateProgress,
   regenerating,
+  suspended = false,
   onClose,
   onNavigateLocal,
   onNavigatePage,
@@ -407,7 +405,7 @@ export function V2SingleReviewOverlay({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!open) {
+      if (!open || suspended) {
         return;
       }
       event.stopPropagation();
@@ -553,10 +551,12 @@ export function V2SingleReviewOverlay({
     onRegenerate,
     open,
     previewItem,
+    suspended,
   ]);
 
   const slots = Array.from({ length: 5 }, (_, index) => activeReferences[index] ?? null);
-  const previewUrl = normalizeReferenceUrl(previewItem?.preview_url) ?? normalizeReferenceUrl(previewItem?.thumbnail_url);
+  const previewUrl =
+    referenceReviewImageUrl(previewItem?.preview_url) ?? referenceReviewImageUrl(previewItem?.thumbnail_url);
   const wikiReferenceCount = activeReferences.filter((reference) => reference.source === "wiki_sample").length;
   const favoriteReferenceCount = activeReferences.length - wikiReferenceCount;
   const referenceSummary = referenceLoading

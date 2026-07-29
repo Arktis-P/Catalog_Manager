@@ -1617,7 +1617,7 @@ button,
 .merge-image-popup {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  z-index: 1210;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1680,6 +1680,10 @@ button,
   justify-content: center;
   padding: 16px;
   z-index: 1100;
+}
+
+.modal-backdrop-merge {
+  z-index: 1200;
 }
 
 .modal {

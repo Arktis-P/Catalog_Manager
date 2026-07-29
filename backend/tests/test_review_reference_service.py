@@ -52,12 +52,12 @@ def make_post(
     file_ext: str = "jpg",
     is_deleted: bool = False,
 ) -> dict:
-    preview_url = preview or f"https://img.example.test/preview/{post_id}.jpg"
+    preview_url = preview or f"https://cdn.donmai.us/preview/{post_id}.jpg"
     return {
         "id": post_id,
         "preview_file_url": preview_url,
-        "large_file_url": large or f"https://img.example.test/large/{post_id}.jpg",
-        "file_url": file_url or f"https://img.example.test/file/{post_id}.{file_ext}",
+        "large_file_url": large or f"https://cdn.donmai.us/large/{post_id}.jpg",
+        "file_url": file_url or f"https://cdn.donmai.us/file/{post_id}.{file_ext}",
         "file_ext": file_ext,
         "is_deleted": is_deleted,
     }
@@ -97,7 +97,7 @@ def test_extract_wiki_sample_post_ids_preserves_order_dedupes_and_limits() -> No
 
 def test_reference_images_prioritize_wiki_then_fill_with_favorites(db: Session) -> None:
     character = make_character(db)
-    duplicate_preview = "https://img.example.test/shared-preview.jpg"
+    duplicate_preview = "https://cdn.donmai.us/shared-preview.jpg"
     client = FakeDanbooruClient(
         wiki_body="Samples: !post #10 post:20 /posts/30 post #404.",
         posts_by_id={
@@ -110,7 +110,7 @@ def test_reference_images_prioritize_wiki_then_fill_with_favorites(db: Session) 
             make_post(40, file_ext="webm"),
             make_post(50, preview=duplicate_preview),
             make_post(60),
-            make_post(70, large=None, file_url="https://img.example.test/file/70.png"),
+            make_post(70, large=None, file_url="https://cdn.donmai.us/file/70.png"),
             make_post(80),
         ],
     )
@@ -127,6 +127,41 @@ def test_reference_images_prioritize_wiki_then_fill_with_favorites(db: Session) 
         (80, "favorite"),
     ]
     assert client.list_post_tags[-1] == "hakurei_reimu order:favcount"
+
+
+def test_reference_images_normalize_protocol_relative_urls(db: Session) -> None:
+    character = make_character(db)
+    client = FakeDanbooruClient(
+        wiki_body="post #1",
+        posts_by_id={
+            1: make_post(
+                1,
+                preview="//cdn.donmai.us/preview/1.jpg",
+                large="//cdn.donmai.us/large/1.jpg",
+            ),
+        },
+    )
+
+    result = ReviewReferenceService(db, client=client).get_reference_images(character.id)
+
+    assert result.items[0].thumbnail_url == "https://cdn.donmai.us/preview/1.jpg"
+    assert result.items[0].preview_url == "https://cdn.donmai.us/large/1.jpg"
+
+
+def test_reference_images_exclude_invalid_image_urls(db: Session) -> None:
+    character = make_character(db)
+    client = FakeDanbooruClient(
+        wiki_body="post #1 post #2",
+        posts_by_id={
+            1: make_post(1, preview="javascript:alert(1)", large="https://cdn.donmai.us/large/1.jpg"),
+            2: make_post(2, preview="https://example.test/preview/2.jpg", large="https://cdn.donmai.us/large/2.jpg"),
+        },
+        favorite_posts=[make_post(3)],
+    )
+
+    result = ReviewReferenceService(db, client=client).get_reference_images(character.id)
+
+    assert [(item.post_id, item.source) for item in result.items] == [(3, "favorite")]
 
 
 def test_reference_images_use_favorites_when_wiki_has_no_samples(db: Session) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
@@ -13,6 +14,7 @@ from app.models.global_character import GlobalCharacter
 MAX_REFERENCE_IMAGES = 5
 FAVORITE_FALLBACK_LIMIT = 20
 USABLE_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
+ALLOWED_DANBOORU_IMAGE_HOSTS = {"danbooru.donmai.us", "cdn.donmai.us"}
 
 _POST_REFERENCE_RE = re.compile(
     r"(?P<bang>!post\s*#?\s*(?P<bang_id>\d+))"
@@ -159,6 +161,23 @@ class ReviewReferenceService:
         items.append(item)
 
     @staticmethod
+    def _normalize_danbooru_image_url(raw: object) -> str | None:
+        if raw is None:
+            return None
+        url = str(raw).strip()
+        if not url:
+            return None
+        if url.startswith("//"):
+            url = "https:" + url
+
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            return None
+        if parsed.netloc not in ALLOWED_DANBOORU_IMAGE_HOSTS:
+            return None
+        return url
+
+    @staticmethod
     def _post_to_item(post: dict, *, source: Literal["wiki_sample", "favorite"]) -> ReviewReferenceItem | None:
         try:
             post_id = int(post.get("id"))
@@ -171,15 +190,19 @@ class ReviewReferenceService:
         if file_ext and file_ext not in USABLE_IMAGE_EXTENSIONS:
             return None
 
-        thumbnail_url = post.get("preview_file_url")
-        preview_url = post.get("large_file_url") or post.get("file_url") or post.get("preview_file_url")
+        thumbnail_url = ReviewReferenceService._normalize_danbooru_image_url(post.get("preview_file_url"))
+        preview_url = (
+            ReviewReferenceService._normalize_danbooru_image_url(post.get("large_file_url"))
+            or ReviewReferenceService._normalize_danbooru_image_url(post.get("file_url"))
+            or thumbnail_url
+        )
         if not thumbnail_url or not preview_url:
             return None
 
         return ReviewReferenceItem(
             post_id=post_id,
-            thumbnail_url=str(thumbnail_url),
-            preview_url=str(preview_url),
+            thumbnail_url=thumbnail_url,
+            preview_url=preview_url,
             post_url=f"{settings.danbooru_base_url}/posts/{post_id}",
             source=source,
         )

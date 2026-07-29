@@ -187,7 +187,7 @@ export function CharacterLinkModal({ character, onClose, onLinked }: CharacterLi
   }, [alreadyLinked, candidates, isSubmitDisabled, previewCandidate, selectedId, submitting]);
 
   return (
-    <div className="modal-backdrop" onClick={handleClose}>
+    <div className="modal-backdrop modal-backdrop-merge" onClick={handleClose}>
       <div className="modal modal-wide modal-merge" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header-row">
           <div className="modal-header-copy">
