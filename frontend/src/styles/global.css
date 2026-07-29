@@ -4052,13 +4052,14 @@ button,
 
 .v2-single-overlay {
   position: fixed;
-  inset: 0;
   z-index: 1100;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 12px;
   background: rgba(10, 13, 18, 0.96);
+  overflow: hidden;
+  visibility: hidden;
 }
 
 .v2-single-toolbar {
@@ -4066,6 +4067,7 @@ button,
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-shrink: 0;
   min-height: 42px;
   padding: 6px 10px;
   border: 1px solid var(--border);
@@ -4084,14 +4086,19 @@ button,
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(360px, 52vw) minmax(360px, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-small);
+  background: var(--bg-elevated);
 }
 
 .v2-single-generated-pane,
 .v2-single-detail-pane,
 .v2-single-reference-panel {
   min-width: 0;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-small);
   background: var(--bg-elevated);
@@ -4102,6 +4109,10 @@ button,
   flex-direction: column;
   gap: 8px;
   padding: 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.28);
 }
 
 .v2-single-generated-frame {
@@ -4122,6 +4133,7 @@ button,
   width: auto;
   height: auto;
   object-fit: contain;
+  display: block;
 }
 
 .v2-single-regenerating-overlay {
@@ -4162,6 +4174,8 @@ button,
   gap: 10px;
   padding: 10px;
   overflow: hidden;
+  border: 0;
+  border-radius: 0;
 }
 
 .v2-single-row-host {
@@ -4179,6 +4193,9 @@ button,
 
 .v2-single-reference-panel {
   padding: 10px;
+  overflow: hidden;
+  border-color: rgba(255, 255, 255, 0.24);
+  border-top-color: rgba(255, 255, 255, 0.34);
 }
 
 .v2-single-reference-header {
@@ -4193,6 +4210,7 @@ button,
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
+  min-width: 0;
 }
 
 .v2-single-reference-slot {
@@ -4292,8 +4310,13 @@ button,
     grid-template-rows: minmax(320px, 48vh) minmax(0, 1fr);
   }
 
+  .v2-single-generated-pane {
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+  }
+
   .v2-single-reference-grid {
-    grid-template-columns: repeat(5, minmax(56px, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 

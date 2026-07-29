@@ -69,6 +69,11 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
 }
 
+function readPixelValue(value: string): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function ReferenceSlot({
   index,
   item,
@@ -140,6 +145,7 @@ export function V2SingleReviewOverlay({
   onOpenLinkModal,
 }: V2SingleReviewOverlayProps) {
   const [, setCacheVersion] = useState(0);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const cacheRef = useRef<Map<number, ReferenceCacheEntry>>(new Map());
   const generationRef = useRef(0);
   const rangeVersionRef = useRef(0);
@@ -168,6 +174,90 @@ export function V2SingleReviewOverlay({
   );
 
   const bumpCache = useCallback(() => setCacheVersion((version) => version + 1), []);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    let frameId = 0;
+    const overlay = overlayRef.current;
+    const host =
+      overlay?.closest<HTMLElement>(".review-page") ??
+      document.querySelector<HTMLElement>(".review-page") ??
+      null;
+    const pageContainer =
+      host?.closest<HTMLElement>(".page-container") ??
+      document.querySelector<HTMLElement>(".page-container") ??
+      null;
+    const appBody = document.querySelector<HTMLElement>(".app-body");
+    const observed = [host, pageContainer, appBody].filter((node): node is HTMLElement => Boolean(node));
+
+    const measure = () => {
+      frameId = 0;
+      const visibleHost = host ?? pageContainer ?? appBody;
+      if (!visibleHost) {
+        return;
+      }
+
+      const hostRect = visibleHost.getBoundingClientRect();
+      const pageRect = pageContainer?.getBoundingClientRect() ?? hostRect;
+      const bodyRect = appBody?.getBoundingClientRect() ?? pageRect;
+      const pageStyles = pageContainer ? window.getComputedStyle(pageContainer) : null;
+      const inlineInset = pageStyles
+        ? Math.max(8, Math.min(24, readPixelValue(pageStyles.paddingLeft), readPixelValue(pageStyles.paddingRight)))
+        : 12;
+      const bottomInset = pageStyles ? Math.max(8, Math.min(24, readPixelValue(pageStyles.paddingBottom))) : 12;
+
+      const left = Math.max(0, bodyRect.left, pageRect.left, hostRect.left);
+      const top = Math.max(0, bodyRect.top, pageRect.top, hostRect.top);
+      const right = Math.min(window.innerWidth, bodyRect.right, pageRect.right, hostRect.right);
+      const bottom = Math.min(window.innerHeight, bodyRect.bottom, pageRect.bottom, hostRect.bottom) - bottomInset;
+      const width = Math.max(280, Math.floor(right - left - inlineInset));
+      const height = Math.max(320, Math.floor(bottom - top));
+      const nextLeft = Math.round(left);
+      const nextTop = Math.round(top);
+
+      if (overlay) {
+        overlay.style.left = `${nextLeft}px`;
+        overlay.style.top = `${nextTop}px`;
+        overlay.style.width = `${width}px`;
+        overlay.style.height = `${height}px`;
+        overlay.style.visibility = "visible";
+      }
+
+    };
+
+    const scheduleMeasure = () => {
+      if (frameId) {
+        return;
+      }
+      frameId = window.requestAnimationFrame(measure);
+    };
+
+    scheduleMeasure();
+    window.addEventListener("resize", scheduleMeasure);
+    pageContainer?.addEventListener("scroll", scheduleMeasure, { passive: true });
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            scheduleMeasure();
+          });
+    for (const node of observed) {
+      resizeObserver?.observe(node);
+    }
+
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      window.removeEventListener("resize", scheduleMeasure);
+      pageContainer?.removeEventListener("scroll", scheduleMeasure);
+      resizeObserver?.disconnect();
+    };
+  }, [open]);
 
   const ensureReference = useCallback(
     async (characterId: number, generation: number, rangeVersion: number) => {
@@ -484,7 +574,7 @@ export function V2SingleReviewOverlay({
               : "Wiki 5/5";
 
   return (
-    <div className="v2-single-overlay" role="dialog" aria-modal="true" aria-label="단일 항목 보기">
+    <div ref={overlayRef} className="v2-single-overlay" role="dialog" aria-modal="true" aria-label="단일 항목 보기">
       <div className="v2-single-toolbar">
         <div>
           <strong>{item.display_name || item.character_tag}</strong>
