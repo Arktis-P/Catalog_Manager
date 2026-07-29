@@ -46,6 +46,7 @@ import type {
   V2ReviewCharacterListResponse,
   V2ReviewCompleteResponse,
   V2ReviewFilters,
+  V2ReviewReferenceImagesResponse,
   V2ReviewSavePayload,
   V2ReviewStats,
   SeriesCreatePayload,
@@ -545,6 +546,11 @@ export const api = {
 
   listV2ReviewCharacters: (params: V2ReviewFilters = {}) =>
     request<V2ReviewCharacterListResponse>(`/review/v2/characters${buildQuery(params as Record<string, string | number | boolean | undefined>)}`),
+
+  getV2ReviewReferenceImages: (characterId: number, options: { signal?: AbortSignal } = {}) =>
+    request<V2ReviewReferenceImagesResponse>(`/review/v2/characters/${characterId}/reference-images`, {
+      signal: options.signal,
+    }),
 
   completeV2ReviewCharacter: (characterId: number, payload: V2ReviewSavePayload) =>
     request<V2ReviewCompleteResponse>(`/review/v2/characters/${characterId}/complete`, {

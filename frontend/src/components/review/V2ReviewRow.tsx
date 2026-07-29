@@ -139,13 +139,13 @@ export function v2SelectedTagsPayload(character: V2ReviewCharacter, enabledTagKe
   return rawTags.length > 0 ? rawTags.join(",") : null;
 }
 
-function statusDotClass(status: string | null | undefined): string {
+export function statusDotClass(status: string | null | undefined): string {
   if (status === "warning") return "v2-status-dot v2-status-dot--warning";
   if (status === "reject") return "v2-status-dot v2-status-dot--reject";
   return "v2-status-dot v2-status-dot--pass";
 }
 
-function qualityDotTitle(image: V2ReviewImage): string {
+export function qualityDotTitle(image: V2ReviewImage): string {
   const label =
     image.quality_status === "warning"
       ? "품질 확인 필요"
@@ -155,7 +155,7 @@ function qualityDotTitle(image: V2ReviewImage): string {
   return image.quality_reasons ? `${label}: ${image.quality_reasons}` : label;
 }
 
-function identityDotTitle(image: V2ReviewImage): string {
+export function identityDotTitle(image: V2ReviewImage): string {
   const label =
     image.identity_status === "warning"
       ? "캐릭터 재현 확인 필요"

@@ -31,6 +31,7 @@ from app.schemas.review import (
     V2ReviewCharacterResponse,
     V2ReviewCompleteResponse,
     V2ReviewImageResponse,
+    V2ReviewReferenceImagesResponse,
     V2ReviewSaveRequest,
     V2ReviewStatsResponse,
     ReviewRegenerateJobListResponse,
@@ -45,6 +46,7 @@ from app.services.review_regenerate_job_manager import (
     ReviewRegenerateJobState,
     review_regenerate_job_manager,
 )
+from app.services.review_reference_service import ReviewReferenceService, ReviewReferenceUpstreamError
 from app.services.review_service import ReviewService
 
 router = APIRouter(prefix="/review", tags=["review"])
@@ -52,6 +54,10 @@ router = APIRouter(prefix="/review", tags=["review"])
 
 def get_review_service(db: Session = Depends(get_db)) -> ReviewService:
     return ReviewService(db)
+
+
+def get_review_reference_service(db: Session = Depends(get_db)) -> ReviewReferenceService:
+    return ReviewReferenceService(db)
 
 
 def _to_appearance_item(character) -> AppearanceReviewItemResponse:
@@ -214,6 +220,22 @@ def list_v2_review_characters(
         items=[_to_v2_review_character(character) for character in items],
         total=total,
     )
+
+
+@router.get(
+    "/v2/characters/{character_id}/reference-images",
+    response_model=V2ReviewReferenceImagesResponse,
+)
+def get_v2_review_reference_images(
+    character_id: int,
+    service: ReviewReferenceService = Depends(get_review_reference_service),
+):
+    try:
+        return service.get_reference_images(character_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ReviewReferenceUpstreamError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/v2/characters/{character_id}/complete", response_model=V2ReviewCompleteResponse)

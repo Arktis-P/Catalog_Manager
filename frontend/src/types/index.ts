@@ -647,6 +647,22 @@ export interface V2ReviewCharacterListResponse {
   total: number;
 }
 
+export type V2ReviewReferenceImageSource = "wiki_sample" | "favorite";
+
+export interface V2ReviewReferenceItem {
+  post_id: number;
+  thumbnail_url: string;
+  preview_url: string;
+  post_url: string;
+  source: V2ReviewReferenceImageSource;
+}
+
+export interface V2ReviewReferenceImagesResponse {
+  character_id: number;
+  tag: string;
+  items: V2ReviewReferenceItem[];
+}
+
 export type V2ReviewStatus = "pending" | "in_progress" | "completed" | "completed_recent";
 
 export interface V2ReviewFilters {

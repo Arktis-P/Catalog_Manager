@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -329,6 +331,20 @@ class V2ReviewCharacterResponse(BaseModel):
 class V2ReviewCharacterListResponse(BaseModel):
     items: list[V2ReviewCharacterResponse]
     total: int
+
+
+class V2ReviewReferenceImageItemResponse(BaseModel):
+    post_id: int
+    thumbnail_url: str
+    preview_url: str
+    post_url: str
+    source: Literal["wiki_sample", "favorite"]
+
+
+class V2ReviewReferenceImagesResponse(BaseModel):
+    character_id: int
+    tag: str
+    items: list[V2ReviewReferenceImageItemResponse] = Field(default_factory=list)
 
 
 class V2ReviewCompleteResponse(BaseModel):

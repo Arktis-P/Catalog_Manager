@@ -8,6 +8,7 @@ import type {
   Series,
   V2GenerationJobState,
   V2ReviewCharacter,
+  V2ReviewFilters,
   V2ReviewStats,
   V2ReviewStatus,
 } from "../../types";
@@ -29,6 +30,7 @@ import {
   type V2CharacterDraft,
   type V2ReviewCardSaveStatus,
 } from "./V2ReviewRow";
+import { V2SingleReviewOverlay } from "./V2SingleReviewOverlay";
 import { PurgeUnselectedModal } from "./PurgeUnselectedModal";
 import { ReviewImagePreview } from "./ReviewImagePreview";
 import { toggleRating } from "./ReviewRatingStars";
@@ -104,6 +106,7 @@ function isDraftChanged(item: V2ReviewCharacter, draft: V2CharacterDraft): boole
 export function V2ReviewPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusCardFromKeyboardRef = useRef(false);
+  const loadedSkipRef = useRef(0);
   const [items, setItems] = useState<V2ReviewCharacter[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<V2ReviewStats | null>(null);
@@ -139,6 +142,8 @@ export function V2ReviewPanel() {
   const [previewFit, setPreviewFit] = useState(true);
   const [linkingItem, setLinkingItem] = useState<V2ReviewCharacter | null>(null);
   const [pageInput, setPageInput] = useState("1");
+  const [singleModeOpen, setSingleModeOpen] = useState(false);
+  const pendingSinglePageDirectionRef = useRef<{ direction: 1 | -1; targetSkip: number } | null>(null);
 
   const { v2Jobs: contextV2Jobs, startV2Regeneration } = useGenerationJobs();
   const processedV2JobIdsRef = useRef<Set<string>>(new Set());
@@ -236,6 +241,7 @@ export function V2ReviewPanel() {
         skip,
         limit: PAGE_SIZE,
       });
+      loadedSkipRef.current = skip;
       // 재생성 진행 중인 항목이 목록 응답에서 일시적으로 빠질 수 있으므로, 재생성이
       // 끝날 때까지 기존 위치에 유지한다.
       const fetchedIds = new Set(response.items.map((item) => item.id));
@@ -276,8 +282,33 @@ export function V2ReviewPanel() {
   }, [loadReviews]);
 
   useEffect(() => {
+    const pendingNavigation = pendingSinglePageDirectionRef.current;
+    if (
+      !pendingNavigation ||
+      loading ||
+      loadedSkipRef.current !== pendingNavigation.targetSkip ||
+      skip !== pendingNavigation.targetSkip
+    ) {
+      return;
+    }
+    pendingSinglePageDirectionRef.current = null;
+    const nextIndex =
+      pendingNavigation.direction > 0
+        ? items.findIndex((entry) => entry.review_status === "pending")
+        : items.map((entry) => entry.review_status).lastIndexOf("pending");
+    if (nextIndex >= 0) {
+      focusCardFromKeyboardRef.current = true;
+      setFocusIndex(nextIndex);
+      setSingleModeOpen(true);
+      return;
+    }
+    setActionMessage("이동할 pending 항목이 없습니다.");
+  }, [items, loading, skip]);
+
+  useEffect(() => {
     setSkip(0);
     setFocusIndex(0);
+    setSingleModeOpen(false);
   }, [
     reviewStatus,
     ratingFilter,
@@ -501,7 +532,9 @@ export function V2ReviewPanel() {
         setFocusIndex(0);
         scrollRef.current?.scrollTo({ top: 0 });
       }
-      if (skip !== 0) {
+      if (singleModeOpen) {
+        await loadReviews();
+      } else if (skip !== 0) {
         setSkip(0);
       } else {
         await loadReviews();
@@ -521,7 +554,62 @@ export function V2ReviewPanel() {
       setBulkSaving(false);
       setSavingIds((current) => removeManyFromSet(current, eligibleIds));
     }
-  }, [bulkSaving, items, drafts, isCharacterRegenerating, skip, loadReviews, loadStats]);
+  }, [bulkSaving, items, drafts, isCharacterRegenerating, skip, loadReviews, loadStats, singleModeOpen]);
+
+  const reviewListFilters = useMemo<V2ReviewFilters>(
+    () => ({
+      review_status: reviewStatus || undefined,
+      rating: ratingFilter || undefined,
+      quality_status: qualityStatus || undefined,
+      identity_status: identityStatus || undefined,
+      generation_status: generationStatus || undefined,
+      gender: genderFilter || undefined,
+      series_id: seriesId || undefined,
+      multicolor: multicolorFilter || undefined,
+      prompt_modified: promptModifiedOnly ? true : undefined,
+      search: search || undefined,
+    }),
+    [
+      reviewStatus,
+      ratingFilter,
+      qualityStatus,
+      identityStatus,
+      generationStatus,
+      genderFilter,
+      seriesId,
+      multicolorFilter,
+      promptModifiedOnly,
+      search,
+    ],
+  );
+
+  const navigateSingleLocal = useCallback(
+    (direction: 1 | -1) => {
+      const start = focusIndex + direction;
+      for (let index = start; index >= 0 && index < items.length; index += direction) {
+        if (items[index]?.review_status === "pending") {
+          focusCardFromKeyboardRef.current = true;
+          setFocusIndex(index);
+          return true;
+        }
+      }
+      return false;
+    },
+    [focusIndex, items],
+  );
+
+  const navigateSinglePage = useCallback(
+    (direction: 1 | -1) => {
+      const nextSkip = skip + direction * PAGE_SIZE;
+      if (nextSkip < 0 || nextSkip >= total) {
+        setActionMessage("이동할 pending 페이지가 없습니다.");
+        return;
+      }
+      pendingSinglePageDirectionRef.current = { direction, targetSkip: nextSkip };
+      setSkip(nextSkip);
+    },
+    [skip, total],
+  );
 
   const fetchPurgePreview = useCallback(
     () => api.previewPurgeUnselectedCatalogImagesGlobal({ search: search.trim() || undefined }),
@@ -609,6 +697,18 @@ export function V2ReviewPanel() {
   const focusedImage = focusedItem?.images[focusedDraft?.imageIndex ?? 0] ?? null;
   const previewSrc = focusedImage ? pendingReviewImageUrl(focusedImage.image_path) : null;
   const previewAlt = focusedItem ? `${focusedItem.character_tag} original` : "";
+
+  const openSingleMode = useCallback(() => {
+    const selectedPendingIndex = focusedItem?.review_status === "pending" ? focusIndex : -1;
+    const firstPendingIndex = items.findIndex((entry) => entry.review_status === "pending");
+    const nextIndex = selectedPendingIndex >= 0 ? selectedPendingIndex : firstPendingIndex;
+    if (nextIndex < 0) {
+      setActionMessage("현재 페이지에 pending 항목이 없습니다.");
+      return;
+    }
+    setFocusIndex(nextIndex);
+    setSingleModeOpen(true);
+  }, [focusIndex, focusedItem, items]);
 
   const multicolorChips = useMemo(
     () => (focusedItem ? v2AppearanceTagChips(focusedItem).filter((chip) => chip.group === "multi") : []),
@@ -721,7 +821,7 @@ export function V2ReviewPanel() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (purgeModalOpen || linkingItem || isEditableTarget(event.target) || !focusedItem || !focusedDraft) {
+      if (singleModeOpen || purgeModalOpen || linkingItem || isEditableTarget(event.target) || !focusedItem || !focusedDraft) {
         return;
       }
 
@@ -876,6 +976,7 @@ export function V2ReviewPanel() {
     purgeModalOpen,
     regenerateFocused,
     selectFocusedImage,
+    singleModeOpen,
     togglePreview,
   ]);
 
@@ -1011,6 +1112,12 @@ export function V2ReviewPanel() {
           <label>&nbsp;</label>
           <button className="btn" type="button" onClick={() => void loadReviews()}>
             새로고침
+          </button>
+        </div>
+        <div className="field" style={{ justifyContent: "flex-end" }}>
+          <label>&nbsp;</label>
+          <button className="btn" type="button" onClick={openSingleMode}>
+            단일 항목 보기
           </button>
         </div>
         <div className="field" style={{ justifyContent: "flex-end" }}>
@@ -1205,6 +1312,42 @@ export function V2ReviewPanel() {
           fitToScreen={previewFit}
           onToggleFit={() => setPreviewFit((fit) => !fit)}
           onClose={() => setPreviewOpen(false)}
+        />
+      ) : null}
+
+      {singleModeOpen && focusedItem && focusedDraft ? (
+        <V2SingleReviewOverlay
+          open={singleModeOpen}
+          item={focusedItem}
+          rowIndex={focusIndex}
+          globalIndex={skip + focusIndex}
+          total={total}
+          draft={focusedDraft}
+          thumbSize={thumbSize}
+          filters={reviewListFilters}
+          locked={focusedLocked || savingIds.has(focusedItem.id)}
+          saveStatus={getSaveStatus(focusedItem, v2JobsByCharacter[focusedItem.id])}
+          regenerateMessage={v2JobsByCharacter[focusedItem.id]?.message}
+          regenerateProgress={
+            v2JobsByCharacter[focusedItem.id] && v2JobsByCharacter[focusedItem.id].total > 0
+              ? { current: v2JobsByCharacter[focusedItem.id].current, total: v2JobsByCharacter[focusedItem.id].total }
+              : null
+          }
+          regenerating={isCharacterRegenerating(focusedItem.id)}
+          onClose={() => setSingleModeOpen(false)}
+          onNavigateLocal={navigateSingleLocal}
+          onNavigatePage={navigateSinglePage}
+          onDraftChange={(next) => updateDraft(focusedItem.id, next)}
+          onToggleTag={(tagKey) => toggleTag(focusedItem.id, tagKey)}
+          onRate={(value) => setRating(focusedItem.id, value)}
+          onCycleMulticolor={cycleFocusedMulticolor}
+          onRegenerate={() => void regenerateFocused()}
+          onComplete={() => void completeItem(focusedItem)}
+          onBulkComplete={() => void bulkSaveRatedItems()}
+          onOpenLinkModal={() => {
+            setSingleModeOpen(false);
+            setLinkingItem(focusedItem);
+          }}
         />
       ) : null}
 
