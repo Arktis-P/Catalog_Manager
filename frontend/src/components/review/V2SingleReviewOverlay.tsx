@@ -485,7 +485,12 @@ export function V2SingleReviewOverlay({
         onRate(Number(event.key));
         return;
       }
-      if (event.key === "-") {
+      if (key === "z" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        onRate(0);
+        return;
+      }
+      if (event.key === "-" || (key === "x" && !event.ctrlKey && !event.metaKey && !event.altKey)) {
         event.preventDefault();
         onRate(-1);
         return;

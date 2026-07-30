@@ -912,13 +912,20 @@ export function V2ReviewPanel() {
         return;
       }
 
+      const ratingAlias = event.key.toLowerCase();
       if (event.key >= "0" && event.key <= "6") {
         event.preventDefault();
         setRating(focusedItem.id, Number(event.key));
         return;
       }
 
-      if (event.key === "-") {
+      if (ratingAlias === "z" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        setRating(focusedItem.id, 0);
+        return;
+      }
+
+      if (event.key === "-" || (ratingAlias === "x" && !event.ctrlKey && !event.metaKey && !event.altKey)) {
         event.preventDefault();
         setRating(focusedItem.id, -1);
         return;
