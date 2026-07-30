@@ -657,26 +657,27 @@ export function V2SingleReviewOverlay({
             />
           </div>
 
-          <div className="v2-single-reference-panel">
-            <div className="v2-single-reference-header">
-              <strong>Reference Images</strong>
-              <span className="catalog-card-subtitle">{referenceSummary}</span>
-            </div>
-            {referenceError ? <div className="v2-single-reference-error">{referenceError}</div> : null}
-            <div className="v2-single-reference-grid">
-              {slots.map((slot, index) => (
-                <ReferenceSlot
-                  key={slot ? slot.post_id : `empty-${index}`}
-                  index={index}
-                  item={slot}
-                  loading={referenceLoading}
-                  error={referenceError}
-                  onOpen={setPreviewItem}
-                />
-              ))}
-            </div>
-          </div>
         </section>
+
+        <div className="v2-single-reference-panel">
+          <div className="v2-single-reference-header">
+            <strong>Reference Images</strong>
+            <span className="catalog-card-subtitle">{referenceSummary}</span>
+          </div>
+          {referenceError ? <div className="v2-single-reference-error">{referenceError}</div> : null}
+          <div className="v2-single-reference-grid">
+            {slots.map((slot, index) => (
+              <ReferenceSlot
+                key={slot ? slot.post_id : `empty-${index}`}
+                index={index}
+                item={slot}
+                loading={referenceLoading}
+                error={referenceError}
+                onOpen={setPreviewItem}
+              />
+            ))}
+          </div>
+        </div>
       </div>
 
       {previewItem ? (

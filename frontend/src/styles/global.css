@@ -4091,6 +4091,7 @@ button,
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 38%);
   gap: 0;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -4173,9 +4174,8 @@ button,
 }
 
 .v2-single-detail-pane {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
   padding: 10px;
   overflow: hidden;
   border: 0;
@@ -4183,6 +4183,7 @@ button,
 }
 
 .v2-single-row-host {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
 }
@@ -4196,8 +4197,11 @@ button,
 }
 
 .v2-single-reference-panel {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
   padding: 10px;
-  overflow: hidden;
+  overflow: auto;
   border-color: rgba(255, 255, 255, 0.24);
   border-top-color: rgba(255, 255, 255, 0.34);
 }
@@ -4212,7 +4216,7 @@ button,
 
 .v2-single-reference-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(180px, 1fr));
   gap: 8px;
   min-width: 0;
 }
@@ -4232,7 +4236,7 @@ button,
 .v2-single-reference-slot img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 
@@ -4311,7 +4315,9 @@ button,
 @media (max-width: 920px) {
   .v2-single-layout {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(320px, 48vh) minmax(0, 1fr);
+    grid-template-rows: minmax(220px, 48vh) minmax(280px, 1fr) minmax(180px, auto);
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .v2-single-generated-pane {
@@ -4319,8 +4325,16 @@ button,
     border-bottom: 1px solid rgba(255, 255, 255, 0.28);
   }
 
+  .v2-single-detail-pane {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+  }
+
+  .v2-single-reference-panel {
+    grid-column: 1;
+  }
+
   .v2-single-reference-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(140px, 1fr));
   }
 }
 
