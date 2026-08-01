@@ -35,6 +35,11 @@ EXCLUDED_STATUS = "excluded"
 DECIDED_STATUSES = (CONFIRMED_STATUS, EXCLUDED_STATUS)
 NON_HUMAN_REVIEW_STATUSES = (PENDING_STATUS, CONFIRMED_STATUS, EXCLUDED_STATUS)
 
+RATING_FILTER_ALL = "all"
+RATING_FILTER_RATED = "rated"
+RATING_FILTER_UNRATED = "unrated"
+RATING_FILTERS = (RATING_FILTER_ALL, RATING_FILTER_RATED, RATING_FILTER_UNRATED)
+
 CONFIRMABLE_RATINGS = (-1, 3)
 
 _NON_HUMAN_KEYWORDS = frozenset(NO_HUMAN_TAGS)
@@ -224,12 +229,15 @@ class NonHumanReviewService:
         self,
         *,
         filter_status: str = PENDING_STATUS,
+        rating_filter: str = RATING_FILTER_ALL,
         search: str | None = None,
         skip: int = 0,
         limit: int = 30,
     ) -> tuple[list[GlobalCharacter], int]:
         if filter_status not in (*NON_HUMAN_REVIEW_STATUSES, "all"):
             raise ValueError("filter_status must be one of pending, confirmed, excluded, all")
+        if rating_filter not in RATING_FILTERS:
+            raise ValueError("rating_filter must be one of all, rated, unrated")
 
         query = self._base_query()
         if filter_status == PENDING_STATUS:
@@ -239,6 +247,13 @@ class NonHumanReviewService:
             )
         elif filter_status != "all":
             query = query.filter(GlobalCharacter.non_human_review_status == filter_status)
+
+        # outerjoin(GlobalCharacterReview)는 _base_query에서 이미 이뤄지므로, 리뷰가
+        # 아예 없는 캐릭터도 rating IS NULL로 자연스럽게 unrated에 포함된다.
+        if rating_filter == RATING_FILTER_RATED:
+            query = query.filter(GlobalCharacterReview.rating.isnot(None))
+        elif rating_filter == RATING_FILTER_UNRATED:
+            query = query.filter(GlobalCharacterReview.rating.is_(None))
 
         if search:
             pattern = f"%{search.strip()}%"
@@ -253,9 +268,8 @@ class NonHumanReviewService:
         total = query.order_by(None).count()
         items = (
             query.order_by(
-                GlobalCharacter.non_human_candidate_score.desc(),
                 GlobalCharacter.post_count.desc(),
-                GlobalCharacter.id.asc(),
+                GlobalCharacter.character_tag.asc(),
             )
             .offset(skip)
             .limit(limit)

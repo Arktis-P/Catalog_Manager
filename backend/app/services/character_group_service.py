@@ -44,6 +44,7 @@ REVIEW_STATUS_ALL = "all"
 REVIEW_STATUS_FILTERS = (REVIEW_STATUS_PENDING, REVIEW_STATUS_COMPLETED, REVIEW_STATUS_ALL)
 
 _DEFAULT_RECALC_LIMIT = 30
+GROUP_RECALCULATE_ALL_BATCH_SIZE = 200
 
 
 @dataclass(frozen=True)
@@ -363,6 +364,58 @@ class CharacterGroupService:
             commit_db_session(self.db)
         else:
             self.db.rollback()
+        return summary
+
+    def recalculate_all_batched(
+        self,
+        *,
+        limit_per_anchor: int = _DEFAULT_RECALC_LIMIT,
+        batch_size: int = GROUP_RECALCULATE_ALL_BATCH_SIZE,
+    ) -> GroupRecalculateSummary:
+        """요청 경로(HTTP 엔드포인트)에서도 안전하게 호출 가능한 전체 재계산.
+
+        `recalculate_all`(CLI 전용, 앵커 전체를 한 번에 파이썬 리스트로
+        materialize)과 달리, non-human 재계산(recalculate_non_human_candidates)과
+        동일하게 앵커 id 기준 keyset pagination으로 배치 처리해 카탈로그 전체를
+        한 번에 메모리에 올리지 않는다. 배치마다 commit_db_session으로 커밋해
+        SQLite 단일 writer 락을 다른 요청과 공정하게 나눠 쓴다.
+
+        recalculate_group을 그대로 재사용하므로, 이미 거부(rejected)/확정
+        (accepted)된 제안은 절대 건드리지 않고 parent_character_id 관계도
+        변경하지 않는다(생성/자식 앵커는 recalculate_group 내부에서 스킵됨).
+        """
+        summary = GroupRecalculateSummary()
+        last_id = 0
+        while True:
+            batch = (
+                self.db.query(GlobalCharacter)
+                .filter(
+                    GlobalCharacter.id > last_id,
+                    GlobalCharacter.parent_character_id.is_(None),
+                )
+                .order_by(GlobalCharacter.id)
+                .limit(batch_size)
+                .all()
+            )
+            if not batch:
+                break
+            last_id = batch[-1].id
+
+            for anchor in batch:
+                self.recalculate_group(anchor, limit=limit_per_anchor)
+                summary.scanned_anchors += 1
+
+            commit_db_session(self.db)
+
+        counts = dict(
+            self.db.query(CharacterLinkSuggestion.status, func.count(CharacterLinkSuggestion.id))
+            .group_by(CharacterLinkSuggestion.status)
+            .all()
+        )
+        summary.pending_total = counts.get(PENDING, 0)
+        summary.accepted_total = counts.get(ACCEPTED, 0)
+        summary.rejected_total = counts.get(REJECTED, 0)
+        summary.superseded_total = counts.get(SUPERSEDED, 0)
         return summary
 
     # ── 조회 ──────────────────────────────────────────────────────

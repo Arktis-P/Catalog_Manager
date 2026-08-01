@@ -14,6 +14,7 @@ from app.models.character_link_suggestion import CharacterLinkSuggestion
 from app.models.global_character import GlobalCharacter
 from app.models.global_character_image import GlobalCharacterImage
 from app.models.global_character_review import GlobalCharacterReview
+from app.routers import character_catalog as character_catalog_router
 from app.schemas.character_catalog import CharacterGroupActionRequest, CharacterGroupApplyRequest
 from app.services.character_group_service import CharacterGroupService, GroupAction
 from app.services.character_link_service import CharacterLinkService
@@ -740,3 +741,116 @@ def test_character_group_apply_request_rejects_more_than_100_actions() -> None:
 
     # exactly 100 actions must still be accepted
     CharacterGroupApplyRequest(actions=actions[:100])
+
+
+# ── recalculate_all_batched: keyset 배치 전체 재계산 ─────────────────
+
+
+def test_recalculate_all_batched_scans_all_top_level_characters_across_multiple_batches(db: Session) -> None:
+    parent = make_character(db, tag="kitasan_black_(umamusume)", post_count=500)
+    child = make_character(db, tag="kitasan_black_(glided_shrine_to_glory)_(umamusume)", post_count=10)
+    unrelated = make_character(db, tag="totally_unrelated_solo_widget", post_count=50)
+
+    service = CharacterGroupService(db)
+    summary = service.recalculate_all_batched(batch_size=1)
+
+    assert summary.scanned_anchors == 3
+
+    suggestion = (
+        db.query(CharacterLinkSuggestion)
+        .filter_by(parent_character_id=parent.id, child_character_id=child.id)
+        .first()
+    )
+    assert suggestion is not None
+    assert suggestion.status == "pending"
+    assert summary.pending_total >= 1
+
+    # recalculation never mutates parent_character_id relationships
+    db.refresh(parent)
+    db.refresh(child)
+    db.refresh(unrelated)
+    assert parent.parent_character_id is None
+    assert child.parent_character_id is None
+    assert unrelated.parent_character_id is None
+
+
+def test_recalculate_all_batched_skips_already_linked_children_as_anchors(db: Session) -> None:
+    parent = make_character(db, tag="skip_test_parent")
+    linked_child = make_character(db, tag="skip_test_child")
+    linked_child.parent_character_id = parent.id
+    db.commit()
+    solo = make_character(db, tag="skip_test_solo")
+
+    summary = CharacterGroupService(db).recalculate_all_batched(batch_size=1)
+
+    # only parent + solo are top-level (parent_character_id IS NULL); the
+    # already-linked child is never treated as its own anchor.
+    assert summary.scanned_anchors == 2
+
+
+def test_recalculate_all_batched_preserves_rejected_and_accepted_history(db: Session) -> None:
+    parent = make_character(db, tag="idem_parent_alpha")
+    rejected_child = make_character(db, tag="idem_parent_alpha_(rejected_variant)")
+    add_suggestion(db, parent=parent, child=rejected_child, status="rejected")
+
+    accepted_parent = make_character(db, tag="idem_parent_beta")
+    accepted_child = make_character(db, tag="idem_child_beta")
+    accepted_child.parent_character_id = accepted_parent.id
+    add_suggestion(db, parent=accepted_parent, child=accepted_child, status="accepted")
+    db.commit()
+
+    CharacterGroupService(db).recalculate_all_batched(batch_size=2)
+
+    rejected_suggestion = (
+        db.query(CharacterLinkSuggestion)
+        .filter_by(parent_character_id=parent.id, child_character_id=rejected_child.id)
+        .first()
+    )
+    assert rejected_suggestion.status == "rejected"
+
+    accepted_suggestion = (
+        db.query(CharacterLinkSuggestion)
+        .filter_by(parent_character_id=accepted_parent.id, child_character_id=accepted_child.id)
+        .first()
+    )
+    assert accepted_suggestion.status == "accepted"
+
+    db.refresh(accepted_child)
+    assert accepted_child.parent_character_id == accepted_parent.id
+
+
+def test_recalculate_all_batched_is_idempotent(db: Session) -> None:
+    make_character(db, tag="idem_check_parent")
+    make_character(db, tag="idem_check_parent_(variant)")
+
+    service = CharacterGroupService(db)
+    first_summary = service.recalculate_all_batched(batch_size=1)
+    suggestion_count_after_first = db.query(CharacterLinkSuggestion).count()
+
+    second_summary = service.recalculate_all_batched(batch_size=1)
+    suggestion_count_after_second = db.query(CharacterLinkSuggestion).count()
+
+    assert suggestion_count_after_first == suggestion_count_after_second
+    assert first_summary.scanned_anchors == second_summary.scanned_anchors == 2
+    assert first_summary.pending_total == second_summary.pending_total
+
+
+def test_recalculate_all_character_groups_endpoint_returns_compact_counts(db: Session) -> None:
+    parent = make_character(db, tag="endpoint_parent_widget")
+    child = make_character(db, tag="endpoint_parent_widget_(variant)")
+
+    response = character_catalog_router.recalculate_all_character_groups(
+        limit_per_anchor=30,
+        group_service=CharacterGroupService(db),
+    )
+
+    assert response.scanned_anchors == 2
+    assert response.pending_total >= 1
+
+    suggestion = (
+        db.query(CharacterLinkSuggestion)
+        .filter_by(parent_character_id=parent.id, child_character_id=child.id)
+        .first()
+    )
+    assert suggestion is not None
+    assert suggestion.status == "pending"

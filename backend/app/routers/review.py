@@ -336,6 +336,7 @@ def get_v2_review_stats(service: ReviewService = Depends(get_review_service)):
 @router.get("/v2/non-human/candidates", response_model=V2ReviewCharacterListResponse)
 def list_non_human_candidates(
     filter_status: str = Query(default="pending", pattern="^(pending|confirmed|excluded|all)$"),
+    rating_filter: str = Query(default="all", pattern="^(all|rated|unrated)$"),
     search: str | None = None,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=30, ge=1, le=100),
@@ -343,6 +344,7 @@ def list_non_human_candidates(
 ):
     items, total = service.list_candidates(
         filter_status=filter_status,
+        rating_filter=rating_filter,
         search=search,
         skip=skip,
         limit=limit,

@@ -18,6 +18,7 @@ from app.schemas.character_catalog import (
     CharacterGroupApplyRequest,
     CharacterGroupDetailResponse,
     CharacterGroupListResponse,
+    CharacterGroupRecalculateAllResponse,
     CharacterGroupSummaryResponse,
     CharacterLinkCandidate,
     CharacterLinkCandidateListResponse,
@@ -388,6 +389,25 @@ def list_character_groups(
     return CharacterGroupListResponse(
         items=[CharacterGroupSummaryResponse.from_service(item) for item in items],
         total=total,
+    )
+
+
+@router.post("/character-groups/recalculate-all", response_model=CharacterGroupRecalculateAllResponse)
+def recalculate_all_character_groups(
+    limit_per_anchor: int = Query(default=30, ge=1, le=200),
+    group_service: CharacterGroupService = Depends(get_group_service),
+):
+    """카탈로그 전체의 최상위(부모 없음) 캐릭터를 앵커로 그룹 제안을 동기적으로
+    재계산한다. keyset 배치로 순회해 카탈로그 전체를 한 번에 메모리에 올리지
+    않으며, 배치마다 커밋한다. 이미 확정/거부된 제안 이력과 기존
+    parent_character_id 관계는 절대 건드리지 않는다."""
+    summary = group_service.recalculate_all_batched(limit_per_anchor=limit_per_anchor)
+    return CharacterGroupRecalculateAllResponse(
+        scanned_anchors=summary.scanned_anchors,
+        pending_total=summary.pending_total,
+        accepted_total=summary.accepted_total,
+        rejected_total=summary.rejected_total,
+        superseded_total=summary.superseded_total,
     )
 
 

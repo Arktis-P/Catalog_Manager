@@ -52,11 +52,12 @@ def make_character(
     feature_tags: str | None = None,
     display_name: str | None = None,
     series: Series | None = None,
+    post_count: int = 100,
 ) -> GlobalCharacter:
     character = GlobalCharacter(
         character_tag=tag,
         display_name=display_name or tag.replace("_", " ").title(),
-        post_count=100,
+        post_count=post_count,
         gender=gender,
         hair_color=hair_color,
         eye_color=eye_color,
@@ -375,34 +376,40 @@ def test_recalculate_endpoint_skips_decided_and_scopes_by_character_tag(db: Sess
 # ── list pagination/order ────────────────────────────────────────────────
 
 
-def test_list_candidates_orders_by_score_desc_and_paginates(db: Session) -> None:
+def test_list_candidates_orders_by_post_count_desc_then_tag_asc_and_paginates(db: Session) -> None:
+    """정렬은 non_human_candidate_score가 아니라 post_count DESC, character_tag
+    ASC 순서를 엄격히 따른다. mid/low는 post_count가 같아 tag 오름차순으로
+    tie-break되어야 한다 ("low_monster_girl" < "mid_monster_boy")."""
     series = Series(series_tag="linked_series", display_name="Linked", post_count=10)
     db.add(series)
     db.commit()
 
-    high = make_character(db, tag="high_priority_spirit", gender="no_humans")
-    mid = make_character(db, tag="mid_monster_boy", gender="1girl", hair_color="black_hair")
+    high = make_character(db, tag="high_priority_spirit", gender="no_humans", post_count=300)
+    mid = make_character(
+        db, tag="mid_monster_boy", gender="1girl", hair_color="black_hair", post_count=200
+    )
     low = make_character(
         db,
         tag="low_monster_girl",
         gender="1girl",
         hair_color="black_hair",
         series=series,
+        post_count=200,
     )
     not_candidate = make_character(
-        db, tag="not_a_candidate", gender="1girl", hair_color="black_hair", series=series
+        db, tag="not_a_candidate", gender="1girl", hair_color="black_hair", series=series, post_count=999
     )
 
     for character in (high, mid, low, not_candidate):
         apply_recalculation(character)
     db.commit()
 
-    assert high.non_human_candidate_score > mid.non_human_candidate_score > low.non_human_candidate_score
     assert low.non_human_candidate_score >= CANDIDATE_SCORE_THRESHOLD
     assert not_candidate.non_human_candidate_score < CANDIDATE_SCORE_THRESHOLD
 
     response = review_router.list_non_human_candidates(
         filter_status="pending",
+        rating_filter="all",
         search=None,
         skip=0,
         limit=2,
@@ -410,17 +417,61 @@ def test_list_candidates_orders_by_score_desc_and_paginates(db: Session) -> None
     )
     body = response.model_dump()
     assert body["total"] == 3
-    assert [item["character_tag"] for item in body["items"]] == [high.character_tag, mid.character_tag]
+    assert [item["character_tag"] for item in body["items"]] == [high.character_tag, low.character_tag]
     # image-less candidates still serialize with no preview image
     assert body["items"][0]["preview_image"] is None
     assert body["items"][0]["images"] == []
 
     response_page_2 = review_router.list_non_human_candidates(
         filter_status="pending",
+        rating_filter="all",
         search=None,
         skip=2,
         limit=2,
         service=NonHumanReviewService(db),
     )
     body_page_2 = response_page_2.model_dump()
-    assert [item["character_tag"] for item in body_page_2["items"]] == [low.character_tag]
+    assert [item["character_tag"] for item in body_page_2["items"]] == [mid.character_tag]
+
+
+# ── list rating-presence filter ──────────────────────────────────────────
+
+
+def test_list_candidates_rating_filter_defaults_to_all(db: Session) -> None:
+    character = make_character(db, tag="default_filter_spirit", gender="no_humans")
+    apply_recalculation(character)
+    db.commit()
+
+    items, total = NonHumanReviewService(db).list_candidates(filter_status="pending")
+
+    assert total == 1
+    assert items[0].id == character.id
+
+
+def test_list_candidates_rating_filter_separates_rated_and_unrated(db: Session) -> None:
+    rated = make_character(db, tag="rated_no_humans_spirit", gender="no_humans")
+    unrated = make_character(db, tag="unrated_no_humans_spirit", gender="no_humans")
+    apply_recalculation(rated)
+    apply_recalculation(unrated)
+    db.commit()
+
+    ReviewService(db).save_v2_review_character(rated.id, review_status="in_progress", rating=3)
+
+    service = NonHumanReviewService(db)
+
+    all_items, all_total = service.list_candidates(filter_status="pending", rating_filter="all")
+    assert all_total == 2
+    assert {item.id for item in all_items} == {rated.id, unrated.id}
+
+    rated_items, rated_total = service.list_candidates(filter_status="pending", rating_filter="rated")
+    assert rated_total == 1
+    assert rated_items[0].id == rated.id
+
+    unrated_items, unrated_total = service.list_candidates(filter_status="pending", rating_filter="unrated")
+    assert unrated_total == 1
+    assert unrated_items[0].id == unrated.id
+
+
+def test_list_candidates_rejects_invalid_rating_filter(db: Session) -> None:
+    with pytest.raises(ValueError):
+        NonHumanReviewService(db).list_candidates(filter_status="pending", rating_filter="not_a_real_filter")

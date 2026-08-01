@@ -301,6 +301,14 @@ class CharacterGroupDetailResponse(BaseModel):
         )
 
 
+class CharacterGroupRecalculateAllResponse(BaseModel):
+    scanned_anchors: int
+    pending_total: int
+    accepted_total: int
+    rejected_total: int
+    superseded_total: int
+
+
 class CharacterGroupActionRequest(BaseModel):
     op: str = Field(pattern="^(accept|add|reject|unlink|move)$")
     child_id: int = Field(ge=1)
