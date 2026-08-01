@@ -15,6 +15,10 @@ from app.schemas.character_catalog import (
     CatalogRetryFailedRequest,
     CatalogTagsStartRequest,
     CharacterCreateRequest,
+    CharacterGroupApplyRequest,
+    CharacterGroupDetailResponse,
+    CharacterGroupListResponse,
+    CharacterGroupSummaryResponse,
     CharacterLinkCandidate,
     CharacterLinkCandidateListResponse,
     CharacterLinkRequest,
@@ -32,6 +36,7 @@ from app.schemas.tag_relevance import (
 )
 from app.services.character_catalog_job_manager import character_catalog_job_manager
 from app.services.character_catalog_service import CharacterCatalogService
+from app.services.character_group_service import CharacterGroupService, GroupAction
 from app.services.character_link_service import CharacterLinkService, similarity_score
 from app.services.relevance_collect_job_manager import relevance_collect_job_manager
 from app.services.tag_relevance_service import TagRelevanceService
@@ -45,6 +50,10 @@ def get_catalog_service(db: Session = Depends(get_db)) -> CharacterCatalogServic
 
 def get_link_service(db: Session = Depends(get_db)) -> CharacterLinkService:
     return CharacterLinkService(db)
+
+
+def get_group_service(db: Session = Depends(get_db)) -> CharacterGroupService:
+    return CharacterGroupService(db)
 
 
 def _require_danbooru() -> None:
@@ -342,6 +351,84 @@ def unlink_character_from_parent(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CharacterUnlinkResponse(**result.__dict__)
+
+
+@router.get("/character-groups", response_model=CharacterGroupListResponse)
+def list_character_groups(
+    search: str | None = None,
+    state: str = Query(default="all", pattern="^(conflict|pending|unlinked|settled|all)$"),
+    has_image: bool | None = Query(default=None),
+    review_status: str = Query(default="all", pattern="^(pending|completed|all)$"),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    group_service: CharacterGroupService = Depends(get_group_service),
+):
+    """부모 캐릭터를 앵커로 하는 병합 그룹 목록. conflict/pending/unlinked 그룹이
+    settled(완료) 그룹보다 먼저 정렬된다. 목록 조회 자체는 추천 재계산을 하지
+    않는다 (이미 저장된 suggestion 이력만 집계) - 무거운 전체 재계산은 별도
+    유지보수 CLI에서만 수행한다.
+
+    state/has_image/review_status는 부모(앵커) 카드 기준 서버 사이드 필터이며,
+    DB 레벨 페이지네이션/총계를 그대로 유지한다."""
+    items, total = group_service.list_groups(
+        search=search,
+        state=state,
+        has_image=has_image,
+        review_status=review_status,
+        skip=skip,
+        limit=limit,
+    )
+    return CharacterGroupListResponse(
+        items=[CharacterGroupSummaryResponse.from_service(item) for item in items],
+        total=total,
+    )
+
+
+@router.get("/character-groups/{parent_id}", response_model=CharacterGroupDetailResponse)
+def get_character_group(
+    parent_id: int,
+    group_service: CharacterGroupService = Depends(get_group_service),
+):
+    """그룹 상세. 읽기 전용 - 저장된 suggestion 이력만 반환하며 재계산을
+    수행하지 않는다. 최신 후보가 필요하면 별도의 recalculate 엔드포인트를
+    명시적으로 호출해야 한다."""
+    detail = group_service.get_group(parent_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Character not found")
+    return CharacterGroupDetailResponse.from_service(detail)
+
+
+@router.post("/character-groups/{parent_id}/recalculate", response_model=CharacterGroupDetailResponse)
+def recalculate_character_group(
+    parent_id: int,
+    group_service: CharacterGroupService = Depends(get_group_service),
+):
+    """이 앵커 하나에 대해서만 동기적으로 추천을 재계산해 최신 후보를 반영한다
+    (사용자가 이미 거부한 쌍은 보존됨)."""
+    detail = group_service.get_group(parent_id, recalc=True)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Character not found")
+    return CharacterGroupDetailResponse.from_service(detail)
+
+
+@router.post("/character-groups/{parent_id}/apply", response_model=CharacterGroupDetailResponse)
+def apply_character_group_actions(
+    parent_id: int,
+    payload: CharacterGroupApplyRequest,
+    group_service: CharacterGroupService = Depends(get_group_service),
+):
+    """accept/add/reject/unlink/move 액션을 한 트랜잭션으로 적용한다. 하나라도
+    검증(자기 자신, 이중 부모, 순환/깊이 제약, 존재 여부)에 실패하면 그룹 전체를
+    롤백한다."""
+    actions = [
+        GroupAction(op=action.op, child_id=action.child_id, new_parent_id=action.new_parent_id)
+        for action in payload.actions
+    ]
+    try:
+        detail = group_service.apply_actions(parent_id, actions)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CharacterGroupDetailResponse.from_service(detail)
 
 
 @router.post("/list/start", response_model=CatalogJobResponse)

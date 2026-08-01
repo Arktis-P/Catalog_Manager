@@ -269,6 +269,59 @@ export interface CharacterLinkResult {
   parent_character_tag: string;
 }
 
+export type CharacterGroupState = "conflict" | "pending" | "unlinked" | "settled";
+
+export type CharacterGroupStateFilter = CharacterGroupState | "all";
+
+export type CharacterGroupReviewStatusFilter = "pending" | "completed" | "all";
+
+export interface CharacterGroupMember {
+  id: number;
+  character_tag: string;
+  display_name: string;
+  post_count: number;
+  review_status: string | null;
+  rating: number | null;
+  image_count: number;
+  preview_image_path: string | null;
+  is_cover_preview: boolean;
+}
+
+export interface CharacterGroupSuggestion {
+  id: number;
+  child: CharacterGroupMember;
+  score: number;
+  reason: string | null;
+  status: string;
+}
+
+export interface CharacterGroupSummary {
+  parent: CharacterGroupMember;
+  child_count: number;
+  pending_count: number;
+  state: CharacterGroupState;
+}
+
+export interface CharacterGroupListResponse {
+  items: CharacterGroupSummary[];
+  total: number;
+}
+
+export interface CharacterGroupDetail {
+  parent: CharacterGroupMember;
+  children: CharacterGroupMember[];
+  suggestions: CharacterGroupSuggestion[];
+  state: CharacterGroupState;
+}
+
+export type CharacterGroupActionOp = "accept" | "add" | "reject" | "unlink" | "move";
+
+export interface CharacterGroupAction {
+  op: CharacterGroupActionOp;
+  child_id: number;
+  new_parent_id?: number | null;
+}
+
 export type RelevanceCollectTarget = "selected" | "uncollected" | "min_posts";
 
 export interface RelevanceCollectError {

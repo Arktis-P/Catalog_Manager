@@ -17,6 +17,11 @@ import type {
   GlobalCatalogListResponse,
   CatalogJob,
   CharacterCollectResult,
+  CharacterGroupAction,
+  CharacterGroupDetail,
+  CharacterGroupListResponse,
+  CharacterGroupReviewStatusFilter,
+  CharacterGroupStateFilter,
   CharacterLinkCandidate,
   CharacterLinkResult,
   CharacterListResponse,
@@ -306,6 +311,31 @@ export const api = {
 
   unlinkParentCharacter: (childId: number) =>
     request<CharacterLinkResult>(`/character-catalog/characters/${childId}/link`, { method: "DELETE" }),
+
+  listCharacterGroups: (
+    params: {
+      search?: string;
+      state?: CharacterGroupStateFilter;
+      has_image?: boolean;
+      review_status?: CharacterGroupReviewStatusFilter;
+      skip?: number;
+      limit?: number;
+    } = {},
+  ) => request<CharacterGroupListResponse>(`/character-catalog/character-groups${buildQuery(params)}`),
+
+  getCharacterGroup: (parentId: number) =>
+    request<CharacterGroupDetail>(`/character-catalog/character-groups/${parentId}`),
+
+  recalculateCharacterGroup: (parentId: number) =>
+    request<CharacterGroupDetail>(`/character-catalog/character-groups/${parentId}/recalculate`, {
+      method: "POST",
+    }),
+
+  applyCharacterGroupActions: (parentId: number, actions: CharacterGroupAction[]) =>
+    request<CharacterGroupDetail>(`/character-catalog/character-groups/${parentId}/apply`, {
+      method: "POST",
+      body: JSON.stringify({ actions }),
+    }),
 
   startCatalogListJob: (minPostCount: number, restart = false, onlyNew = false) =>
     request<CatalogJob>("/character-catalog/list/start", {

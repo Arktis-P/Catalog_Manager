@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppearanceReviewPanel } from "../components/review/AppearanceReviewPanel";
 import { CatalogReviewPanel } from "../components/review/CatalogReviewPanel";
+import { CharacterGroupReviewPanel } from "../components/review/CharacterGroupReviewPanel";
 import { GlobalCatalogReviewPanel } from "../components/review/GlobalCatalogReviewPanel";
 import { ReviewRatingGuide } from "../components/review/ReviewRatingGuide";
 import { V2ReviewPanel } from "../components/review/V2ReviewPanel";
@@ -12,9 +13,10 @@ export function ReviewPage() {
     searchParams.get("scope") === "series" ? "series" : "characters",
   );
   const rawMode = searchParams.get("mode");
-  // V2 Review가 기본 탭이다. catalog/appearance는 명시적 쿼리로만 진입하고,
+  // V2 Review가 기본 탭이다. catalog/appearance/links는 명시적 쿼리로만 진입하고,
   // 그 외 잘못된 mode 값(예: 오타)도 V2로 폴백한다.
-  const initialMode = rawMode === "catalog" ? "catalog" : rawMode === "appearance" ? "appearance" : "v2";
+  const initialMode =
+    rawMode === "catalog" ? "catalog" : rawMode === "appearance" ? "appearance" : rawMode === "links" ? "links" : "v2";
   const initialSeriesId = useMemo(() => {
     const raw = searchParams.get("series_id");
     if (!raw) {
@@ -36,7 +38,9 @@ export function ReviewPage() {
       ? "카탈로그 검수는 시리즈 또는 전체 캐릭터 범위에서 기존 카탈로그 데이터와 대표 이미지를 집중 확인합니다."
       : initialMode === "appearance"
         ? "외형 검수는 캐릭터의 성별, 머리색, 눈색, 특징 태그 같은 외형 메타데이터를 정리합니다."
-        : "V2 검수는 새 생성 후보를 빠르게 판정하고, 대표 이미지와 프롬프트 태그를 함께 저장하는 기본 워크플로우입니다.";
+        : initialMode === "links"
+          ? "부모/자식 연결 검수는 대기/충돌 그룹을 우선 노출하고, 기존 자식과 추천 후보를 한 화면에서 수락/거부/이동합니다."
+          : "V2 검수는 새 생성 후보를 빠르게 판정하고, 대표 이미지와 프롬프트 태그를 함께 저장하는 기본 워크플로우입니다.";
 
   return (
     <section className="review-page">
@@ -75,6 +79,14 @@ export function ReviewPage() {
             >
               외형 검수
             </Link>
+            <Link
+              className={`review-mode-tab${initialMode === "links" ? " review-mode-tab--active" : ""}`}
+              to="/review?mode=links"
+              role="tab"
+              aria-selected={initialMode === "links"}
+            >
+              부모/자식 연결
+            </Link>
           </div>
 
           {initialMode === "catalog" ? (
@@ -105,7 +117,7 @@ export function ReviewPage() {
         </div>
       </header>
 
-      {initialMode !== "v2" ? <ReviewRatingGuide /> : null}
+      {initialMode !== "v2" && initialMode !== "links" ? <ReviewRatingGuide /> : null}
 
       {initialMode === "catalog" ? (
         catalogScope === "series" ? (
@@ -115,6 +127,8 @@ export function ReviewPage() {
         )
       ) : initialMode === "v2" ? (
         <V2ReviewPanel />
+      ) : initialMode === "links" ? (
+        <CharacterGroupReviewPanel />
       ) : (
         <AppearanceReviewPanel />
       )}

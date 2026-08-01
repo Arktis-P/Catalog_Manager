@@ -40,6 +40,7 @@ def init_db() -> None:
     from app.models import (  # noqa: F401
         appearance_tag_relevance,
         character,
+        character_link_suggestion,
         character_series_link,
         generation_job,
         global_character,

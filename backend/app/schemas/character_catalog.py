@@ -218,6 +218,99 @@ class CharacterUnlinkResponse(BaseModel):
     parent_character_tag: str
 
 
+class CharacterGroupMemberResponse(BaseModel):
+    id: int
+    character_tag: str
+    display_name: str
+    post_count: int
+    review_status: str | None = None
+    rating: int | None = None
+    image_count: int = 0
+    # cover 이미지가 있으면 그 경로, 없으면 가장 최근 생성된 이미지 경로(cover-or-latest).
+    preview_image_path: str | None = None
+    is_cover_preview: bool = False
+
+    @classmethod
+    def from_preview(cls, preview) -> "CharacterGroupMemberResponse":
+        return cls(
+            id=preview.character.id,
+            character_tag=preview.character.character_tag,
+            display_name=preview.character.display_name,
+            post_count=preview.character.post_count,
+            review_status=preview.review_status,
+            rating=preview.rating,
+            image_count=preview.image_count,
+            preview_image_path=preview.preview_image_path,
+            is_cover_preview=preview.is_cover_preview,
+        )
+
+
+class CharacterGroupSuggestionResponse(BaseModel):
+    id: int
+    child: CharacterGroupMemberResponse
+    score: float
+    reason: str | None = None
+    status: str
+
+    @classmethod
+    def from_service(cls, item) -> "CharacterGroupSuggestionResponse":
+        return cls(
+            id=item.id,
+            child=CharacterGroupMemberResponse.from_preview(item.child),
+            score=item.score,
+            reason=item.reason,
+            status=item.status,
+        )
+
+
+class CharacterGroupSummaryResponse(BaseModel):
+    parent: CharacterGroupMemberResponse
+    child_count: int
+    pending_count: int
+    # conflict | pending | unlinked | settled
+    state: str
+
+    @classmethod
+    def from_service(cls, summary) -> "CharacterGroupSummaryResponse":
+        return cls(
+            parent=CharacterGroupMemberResponse.from_preview(summary.parent),
+            child_count=summary.child_count,
+            pending_count=summary.pending_count,
+            state=summary.state,
+        )
+
+
+class CharacterGroupListResponse(BaseModel):
+    items: list[CharacterGroupSummaryResponse]
+    total: int
+
+
+class CharacterGroupDetailResponse(BaseModel):
+    parent: CharacterGroupMemberResponse
+    children: list[CharacterGroupMemberResponse]
+    suggestions: list[CharacterGroupSuggestionResponse]
+    state: str
+
+    @classmethod
+    def from_service(cls, detail) -> "CharacterGroupDetailResponse":
+        return cls(
+            parent=CharacterGroupMemberResponse.from_preview(detail.parent),
+            children=[CharacterGroupMemberResponse.from_preview(child) for child in detail.children],
+            suggestions=[CharacterGroupSuggestionResponse.from_service(item) for item in detail.suggestions],
+            state=detail.state,
+        )
+
+
+class CharacterGroupActionRequest(BaseModel):
+    op: str = Field(pattern="^(accept|add|reject|unlink|move)$")
+    child_id: int = Field(ge=1)
+    new_parent_id: int | None = Field(default=None, ge=1)
+
+
+class CharacterGroupApplyRequest(BaseModel):
+    actions: list[CharacterGroupActionRequest] = Field(..., min_length=1, max_length=100)
+
+
 class GlobalCharacterImageResponse(BaseModel):
     id: int
     image_path: str
