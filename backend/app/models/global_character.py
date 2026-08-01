@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -55,6 +55,14 @@ class GlobalCharacter(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_collected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # 비인간(non-human) 패스트 프리뷰 상태. 정규 리뷰(gender/rating)와는 별개로 관리되며,
+    # 사용자의 confirmed/excluded 결정은 재계산(recalculation)에도 보존되어야 한다.
+    non_human_candidate_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, index=True)
+    non_human_suggested_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    non_human_review_status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
+    non_human_evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    non_human_calculated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

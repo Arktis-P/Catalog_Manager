@@ -24,6 +24,9 @@ from app.schemas.review import (
     GlobalCatalogReviewListResponse,
     GlobalCatalogReviewPurgeUnselectedSelectedRequest,
     GlobalCatalogReviewPurgeUnselectedResponse,
+    NonHumanConfirmRequest,
+    NonHumanConfirmResponse,
+    NonHumanExcludeResponse,
     V2BulkCompleteItemResult,
     V2BulkCompleteRequest,
     V2BulkCompleteResponse,
@@ -42,6 +45,7 @@ from app.services.review_catalog_serializer import (
     to_catalog_item,
     to_catalog_item_global,
 )
+from app.services.non_human_review_service import NonHumanReviewService
 from app.services.review_regenerate_job_manager import (
     ReviewRegenerateJobState,
     review_regenerate_job_manager,
@@ -54,6 +58,10 @@ router = APIRouter(prefix="/review", tags=["review"])
 
 def get_review_service(db: Session = Depends(get_db)) -> ReviewService:
     return ReviewService(db)
+
+
+def get_non_human_review_service(db: Session = Depends(get_db)) -> NonHumanReviewService:
+    return NonHumanReviewService(db)
 
 
 def get_review_reference_service(db: Session = Depends(get_db)) -> ReviewReferenceService:
@@ -154,6 +162,10 @@ def _to_v2_review_character(character) -> V2ReviewCharacterResponse:
         cover_image_id=review.cover_image_id if review else None,
         preview_image=_to_v2_review_image(preview_image) if preview_image else None,
         images=[_to_v2_review_image(image) for image in visible_images],
+        non_human_candidate_score=character.non_human_candidate_score,
+        non_human_suggested_rating=character.non_human_suggested_rating,
+        non_human_review_status=character.non_human_review_status,
+        non_human_evidence=parse_json_reason_list(character.non_human_evidence),
     )
 
 
@@ -318,6 +330,62 @@ def bulk_complete_v2_review_characters(
 @router.get("/v2/stats", response_model=V2ReviewStatsResponse)
 def get_v2_review_stats(service: ReviewService = Depends(get_review_service)):
     return V2ReviewStatsResponse(**service.get_v2_review_stats())
+
+
+@router.get("/v2/non-human/candidates", response_model=V2ReviewCharacterListResponse)
+def list_non_human_candidates(
+    filter_status: str = Query(default="pending", pattern="^(pending|confirmed|excluded|all)$"),
+    search: str | None = None,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=30, ge=1, le=100),
+    service: NonHumanReviewService = Depends(get_non_human_review_service),
+):
+    items, total = service.list_candidates(
+        filter_status=filter_status,
+        search=search,
+        skip=skip,
+        limit=limit,
+    )
+    return V2ReviewCharacterListResponse(
+        items=[_to_v2_review_character(character) for character in items],
+        total=total,
+    )
+
+
+@router.post("/v2/non-human/{character_id}/confirm", response_model=NonHumanConfirmResponse)
+def confirm_non_human_candidate(
+    character_id: int,
+    payload: NonHumanConfirmRequest,
+    service: NonHumanReviewService = Depends(get_non_human_review_service),
+):
+    try:
+        character = service.confirm(character_id, rating=payload.rating)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    review = character.review
+    return NonHumanConfirmResponse(
+        id=character.id,
+        non_human_review_status=character.non_human_review_status,
+        review_status=review.review_status if review else "pending",
+        rating=review.rating if review else None,
+    )
+
+
+@router.post("/v2/non-human/{character_id}/exclude", response_model=NonHumanExcludeResponse)
+def exclude_non_human_candidate(
+    character_id: int,
+    service: NonHumanReviewService = Depends(get_non_human_review_service),
+):
+    try:
+        character = service.exclude(character_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    review = character.review
+    return NonHumanExcludeResponse(
+        id=character.id,
+        non_human_review_status=character.non_human_review_status,
+        review_status=review.review_status if review else None,
+    )
 
 
 @router.get("/appearance", response_model=AppearanceReviewListResponse)

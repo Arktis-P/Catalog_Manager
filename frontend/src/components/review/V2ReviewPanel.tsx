@@ -12,8 +12,9 @@ import type {
   V2ReviewStats,
   V2ReviewStatus,
 } from "../../types";
-import { cycleGender, defaultEnabledTagKeys } from "../../utils/reviewPrompt";
+import { cycleGender, defaultEnabledTagKeys, genderChipClass, genderChipLabel } from "../../utils/reviewPrompt";
 import { pendingReviewImageUrl } from "../../utils/reviewImages";
+import { LazyReviewImage } from "./LazyReviewImage";
 import {
   getV2ReviewCardSize,
   getV2ReviewCardWidthPx,
@@ -103,6 +104,113 @@ function isDraftChanged(item: V2ReviewCharacter, draft: V2CharacterDraft): boole
   );
 }
 
+function nonHumanEvidenceLabel(code: string): string {
+  return code.replace(/_/g, " ").replace(/:/g, ": ");
+}
+
+interface NonHumanQueueCardProps {
+  item: V2ReviewCharacter;
+  focused: boolean;
+  acting: boolean;
+  failedMessage?: string;
+  onSelect: () => void;
+  onConfirmProposed: () => void;
+  onConfirm: (rating: -1 | 3) => void;
+  onExclude: () => void;
+}
+
+function NonHumanQueueCard({
+  item,
+  focused,
+  acting,
+  failedMessage,
+  onSelect,
+  onConfirmProposed,
+  onConfirm,
+  onExclude,
+}: NonHumanQueueCardProps) {
+  const image = item.preview_image;
+  const primarySeriesTag = item.series_tags[0] ?? null;
+  const suggested = item.non_human_suggested_rating;
+  const hasSuggested = suggested === -1 || suggested === 3;
+  const cardLabel = `${item.display_name || item.character_tag}, 후보 점수 ${item.non_human_candidate_score.toFixed(2)}`;
+
+  return (
+    <article
+      className={`v2-review-card v2-non-human-card${focused ? " v2-review-card--focused" : ""}${acting ? " v2-review-card--locked" : ""}`}
+      data-character-id={item.id}
+      tabIndex={focused ? 0 : -1}
+      aria-current={focused ? "true" : undefined}
+      aria-busy={acting}
+      aria-label={cardLabel}
+      onMouseDown={onSelect}
+      onFocus={onSelect}
+    >
+      <div className="v2-review-card-image-wrap">
+        {image ? (
+          <LazyReviewImage
+            imagePath={image.image_path}
+            alt={`${item.character_tag} preview`}
+            active={focused}
+            eager
+            thumbSize={320}
+          />
+        ) : (
+          <div className="review-image-slot review-image-slot--empty">
+            <span className="review-image-placeholder">No image</span>
+          </div>
+        )}
+      </div>
+      <div className="v2-review-card-body">
+        <div className="v2-review-card-name-row">
+          <h3 className="v2-review-card-name">{item.display_name || item.character_tag}</h3>
+          <span className={genderChipClass(item.gender)}>{genderChipLabel(item.gender)}</span>
+        </div>
+        <div className="v2-review-card-series-row">
+          <span className="catalog-card-subtitle">{primarySeriesTag ?? "시리즈 없음"}</span>
+          <span className="badge">{item.post_count.toLocaleString()} posts</span>
+          <span className="badge badge-muted">점수 {item.non_human_candidate_score.toFixed(2)}</span>
+          {hasSuggested ? (
+            <span className="badge badge-warning">제안 {suggested}</span>
+          ) : (
+            <span className="badge badge-muted">제안 없음</span>
+          )}
+        </div>
+        {item.non_human_evidence.length > 0 ? (
+          <div className="v2-non-human-evidence">
+            {item.non_human_evidence.map((code) => (
+              <span key={code} className="badge badge-muted">
+                {nonHumanEvidenceLabel(code)}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {failedMessage ? <div className="v2-non-human-error">{failedMessage}</div> : null}
+        <div className="v2-review-card-actions">
+          <button
+            className="btn btn-small"
+            type="button"
+            disabled={acting || !hasSuggested}
+            title="Enter"
+            onClick={onConfirmProposed}
+          >
+            제안 확정{hasSuggested ? ` (${suggested})` : ""}
+          </button>
+          <button className="btn btn-small" type="button" disabled={acting} title="-" onClick={() => onConfirm(-1)}>
+            -1
+          </button>
+          <button className="btn btn-small" type="button" disabled={acting} title="3" onClick={() => onConfirm(3)}>
+            3
+          </button>
+          <button className="btn btn-small" type="button" disabled={acting} title="e" onClick={onExclude}>
+            제외
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export function V2ReviewPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusCardFromKeyboardRef = useRef(false);
@@ -146,6 +254,22 @@ export function V2ReviewPanel() {
   const [singleModeOpen, setSingleModeOpen] = useState(false);
   const pendingSinglePageDirectionRef = useRef<{ direction: 1 | -1; targetSkip: number } | null>(null);
 
+  const [panelMode, setPanelMode] = useState<"review" | "non_human">("review");
+  const [nhItems, setNhItems] = useState<V2ReviewCharacter[]>([]);
+  const [nhTotal, setNhTotal] = useState(0);
+  const [nhSkip, setNhSkip] = useState(0);
+  const [nhSearch, setNhSearch] = useState("");
+  const [nhLoading, setNhLoading] = useState(false);
+  const [nhError, setNhError] = useState<string | null>(null);
+  const [nhActionMessage, setNhActionMessage] = useState<string | null>(null);
+  const [nhFocusIndex, setNhFocusIndex] = useState(0);
+  const [nhActingIds, setNhActingIds] = useState<Set<number>>(() => new Set());
+  const [nhFailedMessages, setNhFailedMessages] = useState<Record<number, string>>({});
+  const [nhPreviewOpen, setNhPreviewOpen] = useState(false);
+  const [nhPreviewFit, setNhPreviewFit] = useState(true);
+  const nhItemsRef = useRef<V2ReviewCharacter[]>([]);
+  const nhFocusIndexRef = useRef(0);
+
   const { v2Jobs: contextV2Jobs, startV2Regeneration } = useGenerationJobs();
   const processedV2JobIdsRef = useRef<Set<string>>(new Set());
   const v2JobsByCharacter = useMemo(() => {
@@ -166,6 +290,14 @@ export function V2ReviewPanel() {
   useEffect(() => {
     focusIndexRef.current = focusIndex;
   }, [focusIndex]);
+
+  useEffect(() => {
+    nhItemsRef.current = nhItems;
+  }, [nhItems]);
+
+  useEffect(() => {
+    nhFocusIndexRef.current = nhFocusIndex;
+  }, [nhFocusIndex]);
 
   const isCharacterRegenerating = useCallback(
     (characterId: number) => {
@@ -295,6 +427,236 @@ export function V2ReviewPanel() {
   useEffect(() => {
     void loadReviews();
   }, [loadReviews]);
+
+  const loadNonHumanQueue = useCallback(
+    async (preferredFocusId?: number) => {
+      setNhLoading(true);
+      setNhError(null);
+      try {
+        const response = await api.listNonHumanCandidates({
+          filter_status: "pending",
+          search: nhSearch || undefined,
+          skip: nhSkip,
+          limit: PAGE_SIZE,
+        });
+        setNhItems(response.items);
+        setNhTotal(response.total);
+        const currentFocusId = nhItemsRef.current[nhFocusIndexRef.current]?.id;
+        const targetFocusId = preferredFocusId ?? currentFocusId;
+        const matchingIndex =
+          targetFocusId != null ? response.items.findIndex((entry) => entry.id === targetFocusId) : -1;
+        setNhFocusIndex(matchingIndex >= 0 ? matchingIndex : 0);
+      } catch (err) {
+        setNhError(err instanceof Error ? err.message : "비인간 후보 큐를 불러오지 못했습니다.");
+      } finally {
+        setNhLoading(false);
+      }
+    },
+    [nhSearch, nhSkip],
+  );
+
+  useEffect(() => {
+    if (panelMode !== "non_human") {
+      return;
+    }
+    void loadNonHumanQueue();
+  }, [panelMode, loadNonHumanQueue]);
+
+  useEffect(() => {
+    setNhSkip(0);
+  }, [nhSearch]);
+
+  const nhAdvance = useCallback(
+    (characterId: number) => {
+      const currentIndex = nhItemsRef.current.findIndex((entry) => entry.id === characterId);
+      const nextItems = nhItemsRef.current.filter((entry) => entry.id !== characterId);
+      setNhItems(nextItems);
+      setNhTotal((current) => Math.max(0, current - 1));
+      setNhFocusIndex(Math.min(currentIndex >= 0 ? currentIndex : 0, Math.max(0, nextItems.length - 1)));
+      void loadNonHumanQueue();
+    },
+    [loadNonHumanQueue],
+  );
+
+  const nhConfirm = useCallback(
+    async (item: V2ReviewCharacter, rating: -1 | 3) => {
+      setNhActingIds((current) => new Set(current).add(item.id));
+      setNhError(null);
+      setNhFailedMessages((current) => {
+        if (!(item.id in current)) return current;
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      try {
+        await api.confirmNonHumanCandidate(item.id, { rating });
+        setNhActionMessage(`${item.character_tag} 확정 (rating ${rating}) · 다음 항목으로 이동`);
+        nhAdvance(item.id);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "확정에 실패했습니다.";
+        setNhError(message);
+        setNhFailedMessages((current) => ({ ...current, [item.id]: message }));
+      } finally {
+        setNhActingIds((current) => {
+          const next = new Set(current);
+          next.delete(item.id);
+          return next;
+        });
+      }
+    },
+    [nhAdvance],
+  );
+
+  const nhExclude = useCallback(
+    async (item: V2ReviewCharacter) => {
+      setNhActingIds((current) => new Set(current).add(item.id));
+      setNhError(null);
+      setNhFailedMessages((current) => {
+        if (!(item.id in current)) return current;
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      try {
+        await api.excludeNonHumanCandidate(item.id);
+        setNhActionMessage(`${item.character_tag} 제외 · 다음 항목으로 이동`);
+        nhAdvance(item.id);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "제외에 실패했습니다.";
+        setNhError(message);
+        setNhFailedMessages((current) => ({ ...current, [item.id]: message }));
+      } finally {
+        setNhActingIds((current) => {
+          const next = new Set(current);
+          next.delete(item.id);
+          return next;
+        });
+      }
+    },
+    [nhAdvance],
+  );
+
+  const nhFocusedItem = nhItems[nhFocusIndex] ?? null;
+  const nhFocusedActing = nhFocusedItem ? nhActingIds.has(nhFocusedItem.id) : false;
+  const nhFocusedImage = nhFocusedItem?.preview_image ?? null;
+  const nhPreviewSrc = nhFocusedImage ? pendingReviewImageUrl(nhFocusedImage.image_path) : null;
+  const nhPreviewAlt = nhFocusedItem ? `${nhFocusedItem.character_tag} preview` : "";
+
+  const nhConfirmProposed = useCallback(() => {
+    if (!nhFocusedItem || nhFocusedActing) {
+      return;
+    }
+    const suggested = nhFocusedItem.non_human_suggested_rating;
+    if (suggested !== -1 && suggested !== 3) {
+      setNhActionMessage("제안된 레이팅이 없습니다. -1 또는 3을 직접 선택하세요.");
+      return;
+    }
+    void nhConfirm(nhFocusedItem, suggested);
+  }, [nhFocusedItem, nhFocusedActing, nhConfirm]);
+
+  useEffect(() => {
+    if (!nhFocusedItem || !nhPreviewSrc) {
+      setNhPreviewOpen(false);
+    }
+  }, [nhFocusedItem, nhPreviewSrc]);
+
+  useEffect(() => {
+    if (nhFocusedActing) {
+      setNhPreviewOpen(false);
+    }
+  }, [nhFocusedActing]);
+
+  const nhTogglePreview = useCallback(() => {
+    if (nhFocusedActing) {
+      return;
+    }
+    setNhPreviewOpen((open) => {
+      if (open) {
+        return false;
+      }
+      if (nhPreviewSrc) {
+        setNhPreviewFit(true);
+        return true;
+      }
+      return false;
+    });
+  }, [nhFocusedActing, nhPreviewSrc]);
+
+  useEffect(() => {
+    if (panelMode !== "non_human") {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target) || !nhFocusedItem) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+
+      if (nhFocusedActing) {
+        const allowed = event.key === "ArrowLeft" || event.key === "ArrowRight" || key === "q" || key === "w";
+        if (!allowed) {
+          event.preventDefault();
+        }
+        return;
+      }
+
+      if (event.key === " " || event.code === "Space") {
+        event.preventDefault();
+        nhTogglePreview();
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setNhFocusIndex((index) => Math.max(0, index - 1));
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setNhFocusIndex((index) => Math.min(nhItems.length - 1, index + 1));
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        nhConfirmProposed();
+        return;
+      }
+      if (event.key === "3") {
+        event.preventDefault();
+        void nhConfirm(nhFocusedItem, 3);
+        return;
+      }
+      if (event.key === "-" || (key === "x" && !event.ctrlKey && !event.metaKey && !event.altKey)) {
+        event.preventDefault();
+        void nhConfirm(nhFocusedItem, -1);
+        return;
+      }
+      if (key === "e" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        void nhExclude(nhFocusedItem);
+        return;
+      }
+      if (key === "q") {
+        event.preventDefault();
+        window.open(
+          `https://danbooru.donmai.us/posts?tags=${encodeURIComponent(nhFocusedItem.character_tag)}`,
+          "_blank",
+          "noopener,noreferrer",
+        );
+        return;
+      }
+      if (key === "w") {
+        event.preventDefault();
+        window.open(
+          nhFocusedItem.danbooru_wiki_url ||
+            `https://danbooru.donmai.us/wiki_pages/${encodeURIComponent(nhFocusedItem.character_tag)}`,
+          "_blank",
+          "noopener,noreferrer",
+        );
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [panelMode, nhFocusedItem, nhFocusedActing, nhItems.length, nhConfirmProposed, nhConfirm, nhExclude, nhTogglePreview]);
 
   useEffect(() => {
     const pendingNavigation = pendingSinglePageDirectionRef.current;
@@ -832,7 +1194,15 @@ export function V2ReviewPanel() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (singleModeOpen || purgeModalOpen || linkingItem || isEditableTarget(event.target) || !focusedItem || !focusedDraft) {
+      if (
+        panelMode !== "review" ||
+        singleModeOpen ||
+        purgeModalOpen ||
+        linkingItem ||
+        isEditableTarget(event.target) ||
+        !focusedItem ||
+        !focusedDraft
+      ) {
         return;
       }
 
@@ -998,6 +1368,7 @@ export function V2ReviewPanel() {
     items.length,
     linkingItem,
     openSingleMode,
+    panelMode,
     purgeModalOpen,
     regenerateFocused,
     selectFocusedImage,
@@ -1110,8 +1481,191 @@ export function V2ReviewPanel() {
       : { kind: "clean", label: "변경 없음" };
   };
 
+  const nhPageCount = Math.max(1, Math.ceil(nhTotal / PAGE_SIZE));
+  const nhCurrentPage = Math.floor(nhSkip / PAGE_SIZE) + 1;
+
   return (
     <>
+      <div className="review-mode-tabs" role="tablist" aria-label="V2 검수 서브 모드">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={panelMode === "review"}
+          className={`review-mode-tab${panelMode === "review" ? " review-mode-tab--active" : ""}`}
+          onClick={() => setPanelMode("review")}
+        >
+          일반 검수
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={panelMode === "non_human"}
+          className={`review-mode-tab${panelMode === "non_human" ? " review-mode-tab--active" : ""}`}
+          onClick={() => setPanelMode("non_human")}
+        >
+          비인간 후보 큐 (fast)
+        </button>
+      </div>
+
+      {panelMode === "non_human" ? (
+        <>
+          <div className="toolbar review-toolbar">
+            <div className="field">
+              <label htmlFor="v2-non-human-search">검색</label>
+              <input
+                id="v2-non-human-search"
+                value={nhSearch}
+                onChange={(event) => setNhSearch(event.target.value)}
+                placeholder="character tag"
+              />
+            </div>
+            <div className="field" style={{ justifyContent: "flex-end" }}>
+              <label>&nbsp;</label>
+              <button className="btn" type="button" onClick={() => void loadNonHumanQueue()}>
+                새로고침
+              </button>
+            </div>
+            <div className="series-pagination-controls" aria-label="비인간 후보 큐 pagination">
+              <button
+                className="btn btn-small"
+                type="button"
+                disabled={nhSkip === 0}
+                onClick={() => setNhSkip(0)}
+              >
+                &laquo;
+              </button>
+              <button
+                className="btn btn-small"
+                type="button"
+                disabled={nhSkip === 0}
+                onClick={() => setNhSkip((s) => Math.max(0, s - PAGE_SIZE))}
+              >
+                &lsaquo;
+              </button>
+              <span className="series-pagination-page-total">
+                {nhCurrentPage} / {nhPageCount}
+              </span>
+              <button
+                className="btn btn-small"
+                type="button"
+                disabled={nhCurrentPage >= nhPageCount}
+                onClick={() => setNhSkip((s) => Math.min((nhPageCount - 1) * PAGE_SIZE, s + PAGE_SIZE))}
+              >
+                &rsaquo;
+              </button>
+            </div>
+            <div className="catalog-review-progress">
+              <div>비인간 후보 대기 {nhTotal.toLocaleString()}개</div>
+              <div>
+                표시 {nhItems.length.toLocaleString()}개
+                {nhFocusedItem ? ` · 현재 ${nhFocusedItem.character_tag}` : ""}
+              </div>
+            </div>
+          </div>
+
+          <details className="review-shortcut-guide" open>
+            <summary className="review-shortcut-guide-summary">
+              <span className="review-shortcut-guide-title">단축키</span>
+              <span className="review-shortcut-guide-hint">
+                Enter 제안 확정 · 3 / - (또는 x) 확정 · e 제외 · ←→ 카드 이동 · Space 확대 · q/w Danbooru
+              </span>
+            </summary>
+            <div className="review-shortcut-guide-body">
+              <span>Enter 제안된 레이팅 확정 후 다음으로 이동</span>
+              <span>3 rating 3 확정 후 이동</span>
+              <span>- / x rating -1 확정 후 이동</span>
+              <span>e 제외 후 이동</span>
+              <span>←→ 카드 이동</span>
+              <span>Space 이미지 확대</span>
+              <span>q/w Danbooru 게시물/위키</span>
+            </div>
+          </details>
+
+          {nhError ? <div className="error-banner">{nhError}</div> : null}
+          {nhActionMessage ? (
+            <div className="catalog-card-subtitle" style={{ marginBottom: 8 }}>
+              {nhActionMessage}
+            </div>
+          ) : null}
+
+          {nhLoading ? (
+            <div className="empty-state">Loading non-human queue...</div>
+          ) : nhItems.length === 0 ? (
+            <div className="empty-state panel">대기 중인 비인간 후보가 없습니다.</div>
+          ) : (
+            <div ref={scrollRef} className="v2-review-grid v2-non-human-grid">
+              {nhItems.map((item, rowIndex) => (
+                <NonHumanQueueCard
+                  key={item.id}
+                  item={item}
+                  focused={rowIndex === nhFocusIndex}
+                  acting={nhActingIds.has(item.id)}
+                  failedMessage={nhFailedMessages[item.id]}
+                  onSelect={() => setNhFocusIndex(rowIndex)}
+                  onConfirmProposed={() => {
+                    setNhFocusIndex(rowIndex);
+                    const suggested = item.non_human_suggested_rating;
+                    if (suggested !== -1 && suggested !== 3) {
+                      setNhActionMessage("제안된 레이팅이 없습니다. -1 또는 3을 직접 선택하세요.");
+                      return;
+                    }
+                    void nhConfirm(item, suggested);
+                  }}
+                  onConfirm={(rating) => {
+                    setNhFocusIndex(rowIndex);
+                    void nhConfirm(item, rating);
+                  }}
+                  onExclude={() => {
+                    setNhFocusIndex(rowIndex);
+                    void nhExclude(item);
+                  }}
+                />
+              ))}
+            </div>
+          )}
+
+          {nhPreviewOpen && nhPreviewSrc ? (
+            <ReviewImagePreview
+              src={nhPreviewSrc}
+              alt={nhPreviewAlt}
+              original
+              fitToScreen={nhPreviewFit}
+              onToggleFit={() => setNhPreviewFit((fit) => !fit)}
+              onClose={() => setNhPreviewOpen(false)}
+            />
+          ) : null}
+
+          {nhTotal > PAGE_SIZE ? (
+            <div className="series-pagination">
+              <div className="series-pagination-controls" aria-label="비인간 후보 큐 pagination">
+                <button className="btn btn-small" type="button" disabled={nhSkip === 0} onClick={() => setNhSkip(0)}>
+                  &laquo;
+                </button>
+                <button
+                  className="btn btn-small"
+                  type="button"
+                  disabled={nhSkip === 0}
+                  onClick={() => setNhSkip((s) => Math.max(0, s - PAGE_SIZE))}
+                >
+                  &lsaquo;
+                </button>
+                <span className="series-pagination-page-total">
+                  {nhCurrentPage} / {nhPageCount}
+                </span>
+                <button
+                  className="btn btn-small"
+                  type="button"
+                  disabled={nhCurrentPage >= nhPageCount}
+                  onClick={() => setNhSkip((s) => Math.min((nhPageCount - 1) * PAGE_SIZE, s + PAGE_SIZE))}
+                >
+                  &rsaquo;
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : (
+      <>
       <div className="toolbar review-toolbar">
         <div className="field">
           <label htmlFor="v2-review-status">리뷰 상태</label>
@@ -1400,6 +1954,8 @@ export function V2ReviewPanel() {
           {renderPaginationControls()}
         </div>
       ) : null}
+      </>
+      )}
     </>
   );
 }

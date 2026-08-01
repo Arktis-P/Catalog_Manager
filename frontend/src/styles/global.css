@@ -4054,6 +4054,23 @@ button,
   }
 }
 
+/* ─── 비인간(non-human) 후보 fast 큐 카드 ─────────────────────────────── */
+
+.v2-non-human-card .v2-review-card-body {
+  gap: 6px;
+}
+
+.v2-non-human-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.v2-non-human-error {
+  color: #ffadb4;
+  font-size: 0.78rem;
+}
+
 .v2-single-overlay {
   position: fixed;
   z-index: 1100;

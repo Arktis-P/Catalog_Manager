@@ -640,11 +640,41 @@ export interface V2ReviewCharacter {
   cover_image_id: number | null;
   preview_image: V2ReviewImage | null;
   images: V2ReviewImage[];
+  non_human_candidate_score: number;
+  non_human_suggested_rating: number | null;
+  non_human_review_status: string;
+  non_human_evidence: string[];
 }
 
 export interface V2ReviewCharacterListResponse {
   items: V2ReviewCharacter[];
   total: number;
+}
+
+export type NonHumanReviewFilterStatus = "pending" | "confirmed" | "excluded" | "all";
+
+export interface NonHumanCandidateFilters {
+  filter_status?: NonHumanReviewFilterStatus;
+  search?: string;
+  skip?: number;
+  limit?: number;
+}
+
+export interface NonHumanConfirmPayload {
+  rating: -1 | 3;
+}
+
+export interface NonHumanConfirmResponse {
+  id: number;
+  non_human_review_status: string;
+  review_status: string;
+  rating: number | null;
+}
+
+export interface NonHumanExcludeResponse {
+  id: number;
+  non_human_review_status: string;
+  review_status: string | null;
 }
 
 export type V2ReviewReferenceImageSource = "wiki_sample" | "favorite";

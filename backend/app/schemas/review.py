@@ -326,11 +326,39 @@ class V2ReviewCharacterResponse(BaseModel):
     cover_image_id: int | None = None
     preview_image: V2ReviewImageResponse | None = None
     images: list[V2ReviewImageResponse] = Field(default_factory=list)
+    non_human_candidate_score: float = 0.0
+    non_human_suggested_rating: int | None = None
+    non_human_review_status: str = "pending"
+    non_human_evidence: list[str] = Field(default_factory=list)
 
 
 class V2ReviewCharacterListResponse(BaseModel):
     items: list[V2ReviewCharacterResponse]
     total: int
+
+
+class NonHumanConfirmRequest(BaseModel):
+    rating: int
+
+    @field_validator("rating")
+    @classmethod
+    def validate_rating(cls, value: int) -> int:
+        if value not in (-1, 3):
+            raise ValueError("rating must be -1 or 3")
+        return value
+
+
+class NonHumanConfirmResponse(BaseModel):
+    id: int
+    non_human_review_status: str
+    review_status: str
+    rating: int | None = None
+
+
+class NonHumanExcludeResponse(BaseModel):
+    id: int
+    non_human_review_status: str
+    review_status: str | None = None
 
 
 class V2ReviewReferenceImageItemResponse(BaseModel):

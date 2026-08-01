@@ -119,6 +119,20 @@ def _migrate_global_character_columns() -> None:
         "last_failure_reason": (
             "ALTER TABLE global_characters ADD COLUMN last_failure_reason TEXT"
         ),
+        "non_human_candidate_score": (
+            "ALTER TABLE global_characters ADD COLUMN non_human_candidate_score FLOAT NOT NULL DEFAULT 0.0"
+        ),
+        "non_human_suggested_rating": (
+            "ALTER TABLE global_characters ADD COLUMN non_human_suggested_rating INTEGER"
+        ),
+        "non_human_review_status": (
+            "ALTER TABLE global_characters ADD COLUMN non_human_review_status VARCHAR(50) "
+            "NOT NULL DEFAULT 'pending'"
+        ),
+        "non_human_evidence": "ALTER TABLE global_characters ADD COLUMN non_human_evidence TEXT",
+        "non_human_calculated_at": (
+            "ALTER TABLE global_characters ADD COLUMN non_human_calculated_at DATETIME"
+        ),
     }
     with engine.begin() as connection:
         for column_name, statement in migrations.items():

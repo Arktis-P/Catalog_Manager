@@ -31,6 +31,10 @@ import type {
   GlobalGenerationCandidateListResponse,
   GlobalGenerationStartPayload,
   NaiaStatus,
+  NonHumanCandidateFilters,
+  NonHumanConfirmPayload,
+  NonHumanConfirmResponse,
+  NonHumanExcludeResponse,
   NotificationDisplay,
   NotificationMode,
   PipelineStatus,
@@ -571,6 +575,20 @@ export const api = {
     }),
 
   getV2ReviewStats: () => request<V2ReviewStats>("/review/v2/stats"),
+
+  listNonHumanCandidates: (params: NonHumanCandidateFilters = {}) =>
+    request<V2ReviewCharacterListResponse>(
+      `/review/v2/non-human/candidates${buildQuery(params as Record<string, string | number | boolean | undefined>)}`,
+    ),
+
+  confirmNonHumanCandidate: (characterId: number, payload: NonHumanConfirmPayload) =>
+    request<NonHumanConfirmResponse>(`/review/v2/non-human/${characterId}/confirm`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  excludeNonHumanCandidate: (characterId: number) =>
+    request<NonHumanExcludeResponse>(`/review/v2/non-human/${characterId}/exclude`, { method: "POST" }),
 
   regenerateV2Character: (characterId: number, payload: { base_prompt?: string | null }) =>
     request<V2GenerationJobState>(`/generation/v2/characters/${characterId}/regenerate`, {
