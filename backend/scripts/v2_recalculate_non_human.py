@@ -30,6 +30,7 @@ def print_summary(summary, *, apply: bool) -> None:
     print(f"Mode: {mode}")
     print(f"Scanned: {summary.scanned}")
     print(f"Updated: {summary.updated}")
+    print(f"Pending candidates: {summary.candidate_count}")
     print(f"Skipped (confirmed/excluded): {summary.skipped_decided}")
 
 
