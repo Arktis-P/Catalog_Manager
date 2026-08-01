@@ -220,6 +220,67 @@ def test_exclude_marks_excluded_but_leaves_normal_review_pending(db: Session) ->
     assert all(item.id != character.id for item in candidate_items)
 
 
+def test_exclude_rejects_already_confirmed_character(db: Session) -> None:
+    character = make_character(db, tag="lonely_no_humans_d", gender="no_humans")
+    apply_recalculation(character)
+    db.commit()
+
+    service = NonHumanReviewService(db)
+    service.confirm(character.id, rating=-1)
+
+    with pytest.raises(ValueError):
+        service.exclude(character.id)
+
+    db.refresh(character)
+    assert character.non_human_review_status == "confirmed"
+
+
+def test_confirm_rejects_already_excluded_character(db: Session) -> None:
+    character = make_character(db, tag="lonely_no_humans_e", gender="no_humans")
+    apply_recalculation(character)
+    db.commit()
+
+    service = NonHumanReviewService(db)
+    service.exclude(character.id)
+
+    with pytest.raises(ValueError):
+        service.confirm(character.id, rating=-1)
+
+    db.refresh(character)
+    assert character.non_human_review_status == "excluded"
+    assert character.review is None
+
+
+def test_action_rejects_character_below_candidate_score_threshold(db: Session) -> None:
+    series = Series(series_tag="touhou2", display_name="Touhou2", post_count=1000)
+    db.add(series)
+    db.commit()
+
+    character = make_character(
+        db,
+        tag="hakurei_reimu2",
+        gender="1girl",
+        hair_color="black_hair",
+        eye_color="red_eyes",
+        hair_shape="short_hair",
+        series=series,
+    )
+    apply_recalculation(character)
+    db.commit()
+    assert character.non_human_candidate_score < CANDIDATE_SCORE_THRESHOLD
+    assert character.non_human_review_status == "pending"
+
+    service = NonHumanReviewService(db)
+    with pytest.raises(ValueError):
+        service.confirm(character.id, rating=-1)
+    with pytest.raises(ValueError):
+        service.exclude(character.id)
+
+    db.refresh(character)
+    assert character.non_human_review_status == "pending"
+    assert character.review is None
+
+
 # ── recalculation ────────────────────────────────────────────────────────
 
 

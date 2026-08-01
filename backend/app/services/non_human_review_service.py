@@ -231,6 +231,7 @@ class NonHumanReviewService:
         character = self.db.query(GlobalCharacter).filter(GlobalCharacter.id == character_id).first()
         if not character:
             raise ValueError("Character not found")
+        self._assert_actionable(character)
 
         # save_v2_review_character가 동일 세션에서 같은 row를 재조회하므로, 여기서 스테이징한
         # 변경이 그 커밋 한 번에 함께 반영되어 원자적으로 처리된다.
@@ -251,8 +252,27 @@ class NonHumanReviewService:
         )
         if not character:
             raise ValueError("Character not found")
+        self._assert_actionable(character)
 
         character.non_human_review_status = EXCLUDED_STATUS
         commit_db_session(self.db)
         self.db.refresh(character)
         return character
+
+    @staticmethod
+    def _assert_actionable(character: GlobalCharacter) -> None:
+        """confirm/exclude는 pending 상태의 진짜 후보에만 적용한다.
+
+        이미 확정/제외된 결정을 덮어쓰거나, 임계값 미만인 캐릭터를 직접 API 호출로
+        confirm/exclude하는 것을 막는다. 일반 V2 리뷰(별도 rating 변경 흐름)는
+        이 제약과 무관하게 그대로 동작한다.
+        """
+        if character.non_human_review_status != PENDING_STATUS:
+            raise ValueError(
+                f"Cannot act on character with non_human_review_status="
+                f"{character.non_human_review_status!r}; only 'pending' candidates can be confirmed/excluded"
+            )
+        if (character.non_human_candidate_score or 0.0) < CANDIDATE_SCORE_THRESHOLD:
+            raise ValueError(
+                "Character does not meet the non-human candidate score threshold for confirm/exclude"
+            )

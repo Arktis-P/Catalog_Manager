@@ -403,8 +403,15 @@ class CharacterGroupService:
             .group_by(CharacterLinkSuggestion.parent_character_id)
             .subquery()
         )
+        # pending 제안만 앵커 후보로 인정한다: rejected/superseded는 이력일 뿐이며
+        # accepted는 실제 parent_character_id 관계(child_counts_sq)로 이미 발견된다.
+        # 그렇지 않으면 거부/대체된 과거 제안만 남은 캐릭터가 그룹 목록에 유령
+        # 앵커로 계속 노출된다.
         suggestion_parents_sq = (
-            self.db.query(CharacterLinkSuggestion.parent_character_id.label("parent_id")).distinct().subquery()
+            self.db.query(CharacterLinkSuggestion.parent_character_id.label("parent_id"))
+            .filter(CharacterLinkSuggestion.status == PENDING)
+            .distinct()
+            .subquery()
         )
         multi_parent_children_sq = (
             self.db.query(CharacterLinkSuggestion.child_character_id.label("child_id"))
@@ -647,6 +654,11 @@ class CharacterGroupService:
         try:
             for action in actions:
                 self._apply_one(anchor, action)
+                # 프로덕션 SessionLocal은 autoflush=False이므로, 이후 액션의 SQL
+                # 검증(예: _child_count)이 앞선 액션에서 스테이징된 변경을 보도록
+                # 매 액션 뒤에 명시적으로 flush한다. 배치 전체는 여전히 하나의
+                # 트랜잭션이라 롤백 시 모두 되돌아간다.
+                self.db.flush()
             commit_db_session(self.db)
         except Exception:
             self.db.rollback()

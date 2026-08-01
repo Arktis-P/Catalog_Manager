@@ -35,6 +35,25 @@ def db() -> Session:
         Base.metadata.drop_all(engine)
 
 
+@pytest.fixture()
+def db_no_autoflush() -> Session:
+    """production SessionLocal과 동일하게 autoflush=False로 구성된 세션.
+    apply_actions 내부의 명시적 flush가 없으면, 배치 안에서 앞선 액션이 스테이징한
+    변경을 뒤따르는 액션의 SQL 검증(_child_count 등)이 놓칠 수 있다."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine, autoflush=False)()
+    try:
+        yield session
+    finally:
+        session.close()
+        Base.metadata.drop_all(engine)
+
+
 def make_character(db: Session, *, tag: str, post_count: int = 100) -> GlobalCharacter:
     character = GlobalCharacter(
         character_tag=tag,
@@ -87,7 +106,7 @@ def add_suggestion(
 # ── 그룹 정렬 ──────────────────────────────────────────────────────
 
 
-def test_groups_ordered_conflict_pending_unlinked_before_settled(db: Session) -> None:
+def test_groups_ordered_conflict_pending_before_settled(db: Session) -> None:
     settled_parent = make_character(db, tag="settled_parent")
     settled_child = make_character(db, tag="settled_child")
     settled_child.parent_character_id = settled_parent.id
@@ -97,9 +116,11 @@ def test_groups_ordered_conflict_pending_unlinked_before_settled(db: Session) ->
     pending_child = make_character(db, tag="pending_child")
     add_suggestion(db, parent=pending_parent, child=pending_child, status="pending")
 
-    unlinked_parent = make_character(db, tag="unlinked_parent")
-    unlinked_child = make_character(db, tag="unlinked_child")
-    add_suggestion(db, parent=unlinked_parent, child=unlinked_child, status="rejected")
+    # history-only rejected 제안: 실제 자식도, pending 제안도 없으므로 더 이상
+    # 그룹 목록에 유령 앵커로 나타나지 않아야 한다.
+    rejected_only_parent = make_character(db, tag="rejected_only_parent")
+    rejected_only_child = make_character(db, tag="rejected_only_child")
+    add_suggestion(db, parent=rejected_only_parent, child=rejected_only_child, status="rejected")
 
     conflict_parent_a = make_character(db, tag="conflict_parent_a")
     conflict_parent_b = make_character(db, tag="conflict_parent_b")
@@ -108,19 +129,45 @@ def test_groups_ordered_conflict_pending_unlinked_before_settled(db: Session) ->
     add_suggestion(db, parent=conflict_parent_b, child=conflict_child, status="pending")
 
     items, total = CharacterGroupService(db).list_groups(limit=100)
-    assert total == 5
+    assert total == 4
     tags = [item.parent.character.character_tag for item in items]
     states = {item.parent.character.character_tag: item.state for item in items}
+
+    assert "rejected_only_parent" not in tags
 
     assert states["conflict_parent_a"] == "conflict"
     assert states["conflict_parent_b"] == "conflict"
     assert states["pending_parent"] == "pending"
-    assert states["unlinked_parent"] == "unlinked"
     assert states["settled_parent"] == "settled"
 
     assert max(tags.index("conflict_parent_a"), tags.index("conflict_parent_b")) < tags.index("pending_parent")
-    assert tags.index("pending_parent") < tags.index("unlinked_parent")
-    assert tags.index("unlinked_parent") < tags.index("settled_parent")
+    assert tags.index("pending_parent") < tags.index("settled_parent")
+
+
+def test_list_groups_excludes_anchors_with_only_rejected_or_superseded_suggestions(db: Session) -> None:
+    """suggestion anchor 서브쿼리는 pending 제안만 사용해야 한다: rejected/superseded는
+    이력일 뿐이며 앵커를 만들어내면 안 된다. accepted(실제 연결)는 child_counts_sq
+    경로로 여전히 발견되어야 한다."""
+    rejected_parent = make_character(db, tag="history_rejected_parent")
+    rejected_child = make_character(db, tag="history_rejected_child")
+    add_suggestion(db, parent=rejected_parent, child=rejected_child, status="rejected")
+
+    superseded_parent = make_character(db, tag="history_superseded_parent")
+    superseded_child = make_character(db, tag="history_superseded_child")
+    add_suggestion(db, parent=superseded_parent, child=superseded_child, status="superseded")
+
+    accepted_parent = make_character(db, tag="history_accepted_parent")
+    accepted_child = make_character(db, tag="history_accepted_child")
+    accepted_child.parent_character_id = accepted_parent.id
+    db.commit()
+
+    items, total = CharacterGroupService(db).list_groups(state="all", limit=100)
+    tags = {item.parent.character.character_tag for item in items}
+
+    assert "history_rejected_parent" not in tags
+    assert "history_superseded_parent" not in tags
+    assert "history_accepted_parent" in tags
+    assert total == 1
 
 
 # ── 재계산: 거부 이력 보존 ──────────────────────────────────────────
@@ -293,6 +340,40 @@ def test_apply_actions_rolls_back_entire_batch_on_invalid_action(db: Session) ->
     assert db.query(CharacterLinkSuggestion).count() == 0
 
 
+def test_apply_actions_with_autoflush_disabled_catches_staged_move_then_accept_two_level_hierarchy(
+    db_no_autoflush: Session,
+) -> None:
+    """프로덕션 SessionLocal(autoflush=False)을 재현한다. 같은 배치 안에서
+    'C를 B 밑으로 move'가 스테이징된 직후 'B를 A 밑으로 accept'가 실행되면,
+    B가 A의 자식이 되는 동시에 B 자신도 C라는 자식을 갖게 되어 2단계 깊이
+    (A -> B -> C)가 만들어진다. 매 액션 후 명시적 flush가 없으면 accept의
+    _child_count(B) 검증이 아직 flush되지 않은 C의 이동을 보지 못해 이 위반을
+    놓친다."""
+    db = db_no_autoflush
+    anchor_a = make_character(db, tag="two_level_anchor_a")
+    middle_b = make_character(db, tag="two_level_middle_b")
+    child_c = make_character(db, tag="two_level_child_c")
+    child_c.parent_character_id = anchor_a.id
+    db.commit()
+
+    service = CharacterGroupService(db)
+    with pytest.raises(ValueError):
+        service.apply_actions(
+            anchor_a.id,
+            [
+                GroupAction(op="move", child_id=child_c.id, new_parent_id=middle_b.id),
+                GroupAction(op="accept", child_id=middle_b.id),
+            ],
+        )
+
+    db.refresh(anchor_a)
+    db.refresh(middle_b)
+    db.refresh(child_c)
+    assert child_c.parent_character_id == anchor_a.id
+    assert middle_b.parent_character_id is None
+    assert db.query(CharacterLinkSuggestion).count() == 0
+
+
 # ── 검증: 자기 자신 / 이중 부모 / 순환 / 1단계 깊이 ─────────────────
 
 
@@ -433,9 +514,10 @@ def test_list_groups_filters_by_state(db: Session) -> None:
     pending_child = make_character(db, tag="filter_pending_child")
     add_suggestion(db, parent=pending_parent, child=pending_child, status="pending")
 
-    unlinked_parent = make_character(db, tag="filter_unlinked_parent")
-    unlinked_child = make_character(db, tag="filter_unlinked_child")
-    add_suggestion(db, parent=unlinked_parent, child=unlinked_child, status="rejected")
+    # history-only rejected 제안은 앵커를 만들지 않으므로 어떤 state 필터에도 잡히지 않는다.
+    rejected_only_parent = make_character(db, tag="filter_rejected_only_parent")
+    rejected_only_child = make_character(db, tag="filter_rejected_only_child")
+    add_suggestion(db, parent=rejected_only_parent, child=rejected_only_child, status="rejected")
 
     conflict_parent_a = make_character(db, tag="filter_conflict_parent_a")
     conflict_parent_b = make_character(db, tag="filter_conflict_parent_b")
@@ -457,16 +539,21 @@ def test_list_groups_filters_by_state(db: Session) -> None:
     assert pending_items[0].parent.character.character_tag == "filter_pending_parent"
 
     unlinked_items, unlinked_total = service.list_groups(state="unlinked", limit=100)
-    assert unlinked_total == 1
-    assert unlinked_items[0].parent.character.character_tag == "filter_unlinked_parent"
+    assert unlinked_total == 0
+    assert unlinked_items == []
 
     settled_items, settled_total = service.list_groups(state="settled", limit=100)
     assert settled_total == 1
     assert settled_items[0].parent.character.character_tag == "filter_settled_parent"
 
     all_items, all_total = service.list_groups(state="all", limit=100)
-    assert all_total == 5
-    assert len(all_items) == 5
+    assert all_total == 4
+    assert {item.parent.character.character_tag for item in all_items} == {
+        "filter_conflict_parent_a",
+        "filter_conflict_parent_b",
+        "filter_pending_parent",
+        "filter_settled_parent",
+    }
 
 
 def test_list_groups_filters_by_has_image(db: Session) -> None:
