@@ -361,6 +361,13 @@ class NonHumanExcludeResponse(BaseModel):
     review_status: str | None = None
 
 
+class NonHumanRecalculateResponse(BaseModel):
+    scanned: int
+    updated: int
+    candidate_count: int
+    skipped_decided: int
+
+
 class V2ReviewReferenceImageItemResponse(BaseModel):
     post_id: int
     thumbnail_url: str

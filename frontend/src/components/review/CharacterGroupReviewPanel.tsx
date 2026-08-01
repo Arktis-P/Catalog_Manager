@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { api } from "../../api/client";
 import type {
   CharacterGroupAction,
@@ -222,6 +223,8 @@ function CandidateSearchModal({ title, description, fetchCandidates, onSelect, o
 interface ChildCardProps {
   entry: ChildCardEntry;
   staged?: StagedAction;
+  selected: boolean;
+  onSelect: () => void;
   onAccept: () => void;
   onReject: () => void;
   onUnlink: () => void;
@@ -229,8 +232,12 @@ interface ChildCardProps {
   onUndo: () => void;
 }
 
-function ChildCard({ entry, staged, onAccept, onReject, onUnlink, onMove, onUndo }: ChildCardProps) {
+function ChildCard({ entry, staged, selected, onSelect, onAccept, onReject, onUnlink, onMove, onUndo }: ChildCardProps) {
   const { member } = entry;
+  const withStop = (handler: () => void) => (event: ReactMouseEvent) => {
+    event.stopPropagation();
+    handler();
+  };
   const imageUrl = catalogCoverImageUrl(member.preview_image_path, 320);
   const stagedLabel =
     staged?.op === "accept" || staged?.op === "add"
@@ -247,7 +254,11 @@ function ChildCard({ entry, staged, onAccept, onReject, onUnlink, onMove, onUndo
   const cardStateClass = staged ? (removalStaged ? " character-group-card--pending-remove" : " character-group-card--pending-add") : "";
 
   return (
-    <article className={`character-group-card character-group-card--${entry.kind}${cardStateClass}`}>
+    <article
+      className={`character-group-card character-group-card--${entry.kind}${cardStateClass}${selected ? " character-group-card--selected" : ""}`}
+      aria-current={selected || undefined}
+      onClick={onSelect}
+    >
       <div className="character-group-card-image-wrap">
         {imageUrl ? (
           <img src={imageUrl} alt={member.character_tag} loading="lazy" />
@@ -284,24 +295,24 @@ function ChildCard({ entry, staged, onAccept, onReject, onUnlink, onMove, onUndo
         ) : null}
         <div className="character-group-card-actions">
           {staged ? (
-            <button className="btn btn-small" type="button" onClick={onUndo}>
+            <button className="btn btn-small" type="button" onClick={withStop(onUndo)}>
               되돌리기
             </button>
           ) : entry.kind === "suggested" ? (
             <>
-              <button className="btn btn-small btn-primary" type="button" onClick={onAccept}>
+              <button className="btn btn-small btn-primary" type="button" onClick={withStop(onAccept)}>
                 수락
               </button>
-              <button className="btn btn-small" type="button" onClick={onReject}>
+              <button className="btn btn-small" type="button" onClick={withStop(onReject)}>
                 거부
               </button>
             </>
           ) : entry.kind === "existing" ? (
             <>
-              <button className="btn btn-small" type="button" onClick={onUnlink}>
+              <button className="btn btn-small" type="button" onClick={withStop(onUnlink)}>
                 연결 해제
               </button>
-              <button className="btn btn-small" type="button" onClick={onMove}>
+              <button className="btn btn-small" type="button" onClick={withStop(onMove)}>
                 다른 부모로 이동
               </button>
             </>
@@ -317,6 +328,7 @@ export function CharacterGroupReviewPanel() {
   const [stateFilter, setStateFilter] = useState<CharacterGroupStateFilter>("all");
   const [reviewStatusFilter, setReviewStatusFilter] = useState<CharacterGroupReviewStatusFilter>("all");
   const [hasImageFilter, setHasImageFilter] = useState("");
+  const [includeUnlinkedCandidates, setIncludeUnlinkedCandidates] = useState(true);
   const [skip, setSkip] = useState(0);
 
   const [groups, setGroups] = useState<CharacterGroupSummary[]>([]);
@@ -337,6 +349,7 @@ export function CharacterGroupReviewPanel() {
 
   const [addChildModalOpen, setAddChildModalOpen] = useState(false);
   const [moveChildTarget, setMoveChildTarget] = useState<CharacterGroupMember | null>(null);
+  const [selectedChildKey, setSelectedChildKey] = useState<string | null>(null);
 
   const loadGroups = useCallback(async () => {
     setListLoading(true);
@@ -347,6 +360,7 @@ export function CharacterGroupReviewPanel() {
         state: stateFilter,
         has_image: hasImageFilter ? hasImageFilter === "true" : undefined,
         review_status: reviewStatusFilter,
+        include_unlinked: includeUnlinkedCandidates,
         skip,
         limit: PAGE_SIZE,
       });
@@ -357,7 +371,7 @@ export function CharacterGroupReviewPanel() {
     } finally {
       setListLoading(false);
     }
-  }, [search, stateFilter, hasImageFilter, reviewStatusFilter, skip]);
+  }, [search, stateFilter, hasImageFilter, reviewStatusFilter, includeUnlinkedCandidates, skip]);
 
   useEffect(() => {
     void loadGroups();
@@ -365,7 +379,7 @@ export function CharacterGroupReviewPanel() {
 
   useEffect(() => {
     setSkip(0);
-  }, [search, stateFilter, hasImageFilter, reviewStatusFilter]);
+  }, [search, stateFilter, hasImageFilter, reviewStatusFilter, includeUnlinkedCandidates]);
 
   const loadDetail = useCallback(async (parentId: number) => {
     setDetailLoading(true);
@@ -387,6 +401,7 @@ export function CharacterGroupReviewPanel() {
     }
     setStagedActions({});
     setManualMembers([]);
+    setSelectedChildKey(null);
     setActionMessage(null);
     void loadDetail(selectedParentId);
   }, [selectedParentId, loadDetail]);
@@ -411,8 +426,23 @@ export function CharacterGroupReviewPanel() {
     for (const member of manualMembers) {
       list.push({ key: `manual-${member.id}`, kind: "manual", member });
     }
-    return list;
+    return list.sort(
+      (left, right) =>
+        right.member.post_count - left.member.post_count ||
+        left.member.character_tag.localeCompare(right.member.character_tag, undefined, { sensitivity: "base" }),
+    );
   }, [detail, manualMembers]);
+
+  useEffect(() => {
+    if (!entries.length) {
+      setSelectedChildKey(null);
+      return;
+    }
+    setSelectedChildKey((current) => {
+      if (current && entries.some((entry) => entry.key === current)) return current;
+      return entries.find((entry) => entry.kind === "suggested")?.key ?? entries[0].key;
+    });
+  }, [entries]);
 
   const parentImageUrl = useMemo(
     () => catalogCoverImageUrl(detail?.parent.preview_image_path ?? null, 480),
@@ -545,6 +575,48 @@ export function CharacterGroupReviewPanel() {
   const pageStart = groups.length > 0 ? skip + 1 : 0;
   const pageEnd = skip + groups.length;
 
+  useEffect(() => {
+    const modalOpen = addChildModalOpen || moveChildTarget != null;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        event.repeat ||
+        modalOpen ||
+        target?.matches("input, textarea, select, [contenteditable=true]") ||
+        target?.closest("[contenteditable=true]")
+      ) {
+        return;
+      }
+      const selected = entries.find((entry) => entry.key === selectedChildKey);
+      const key = event.key.toLowerCase();
+      if (event.ctrlKey && !event.altKey && !event.metaKey && event.key === "Enter") {
+        if (hasStagedActions && !applying) {
+          event.preventDefault();
+          void applyStaged();
+        }
+        return;
+      }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "Enter") {
+        if (selected?.kind === "suggested" && !stagedActions[selected.member.id]) {
+          event.preventDefault();
+          handleAccept(selected.member.id);
+        }
+        return;
+      }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "r" && detail && !recalculating) {
+        event.preventDefault();
+        void recalculate();
+        return;
+      }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "a" && detail) {
+        event.preventDefault();
+        setAddChildModalOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [addChildModalOpen, moveChildTarget, entries, selectedChildKey, hasStagedActions, applying, stagedActions, detail, recalculating]);
+
   return (
     <div className="character-group-review">
       <div className="toolbar character-group-toolbar">
@@ -596,7 +668,20 @@ export function CharacterGroupReviewPanel() {
             ))}
           </select>
         </div>
+        <label className="field" htmlFor="group-include-unlinked">
+          <span>미연결 후보 포함</span>
+          <input
+            id="group-include-unlinked"
+            type="checkbox"
+            checked={includeUnlinkedCandidates}
+            onChange={(event) => setIncludeUnlinkedCandidates(event.target.checked)}
+          />
+        </label>
       </div>
+
+      <details className="review-shortcut-guide">
+        <summary className="review-shortcut-guide-summary">단축키: Enter 제안 수락 · Ctrl+Enter 변경 적용 · R 재계산 · A 자식 추가</summary>
+      </details>
 
       {listError ? <div className="error-banner">{listError}</div> : null}
       {actionMessage ? <p className="catalog-card-subtitle character-group-action-message">{actionMessage}</p> : null}
@@ -655,6 +740,9 @@ export function CharacterGroupReviewPanel() {
             onClick={() => setSkip((value) => value + PAGE_SIZE)}
           >
             &rsaquo;
+          </button>
+          <button className="btn btn-small" type="button" disabled={pageEnd >= total} onClick={() => setSkip(Math.max(0, (Math.ceil(total / PAGE_SIZE) - 1) * PAGE_SIZE))}>
+            &raquo;
           </button>
         </div>
       </div>
@@ -728,6 +816,8 @@ export function CharacterGroupReviewPanel() {
                       key={entry.key}
                       entry={entry}
                       staged={stagedActions[entry.member.id]}
+                      selected={entry.key === selectedChildKey}
+                      onSelect={() => setSelectedChildKey(entry.key)}
                       onAccept={() => handleAccept(entry.member.id)}
                       onReject={() => handleReject(entry.member.id)}
                       onUnlink={() => handleUnlink(entry.member.id)}

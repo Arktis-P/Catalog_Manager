@@ -40,6 +40,7 @@ import type {
   NonHumanConfirmPayload,
   NonHumanConfirmResponse,
   NonHumanExcludeResponse,
+  NonHumanRecalculateSummary,
   NotificationDisplay,
   NotificationMode,
   PipelineStatus,
@@ -318,6 +319,7 @@ export const api = {
       state?: CharacterGroupStateFilter;
       has_image?: boolean;
       review_status?: CharacterGroupReviewStatusFilter;
+      include_unlinked?: boolean;
       skip?: number;
       limit?: number;
     } = {},
@@ -619,6 +621,9 @@ export const api = {
 
   excludeNonHumanCandidate: (characterId: number) =>
     request<NonHumanExcludeResponse>(`/review/v2/non-human/${characterId}/exclude`, { method: "POST" }),
+
+  recalculateNonHumanCandidates: () =>
+    request<NonHumanRecalculateSummary>("/review/v2/non-human/recalculate", { method: "POST" }),
 
   regenerateV2Character: (characterId: number, payload: { base_prompt?: string | null }) =>
     request<V2GenerationJobState>(`/generation/v2/characters/${characterId}/regenerate`, {

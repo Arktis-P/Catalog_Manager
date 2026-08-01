@@ -374,6 +374,7 @@ class CharacterGroupService:
         state: str | None = None,
         has_image: bool | None = None,
         review_status: str | None = None,
+        include_unlinked: bool = False,
         skip: int = 0,
         limit: int = 50,
     ) -> tuple[list[GroupSummary], int]:
@@ -384,7 +385,14 @@ class CharacterGroupService:
 
         `state`/`has_image`/`review_status`는 부모(앵커) 카드 기준 필터로,
         모두 EXISTS/서브쿼리를 통해 DB 레벨에서 적용된다 (카탈로그 전체를
-        파이썬으로 materialize하지 않음)."""
+        파이썬으로 materialize하지 않음).
+
+        기본적으로 앵커 후보는 이미 자식이 있거나 pending 제안이 있는
+        캐릭터로 제한된다. `include_unlinked=True`이면 자식/부모 관계가
+        전혀 없는(parent_character_id IS NULL) 캐릭터도 잠재적 부모 후보로
+        포함해, 화면에서 완전히 새로운 그룹을 만들 항목을 찾아 추가할 수 있게
+        한다 - 이 확장도 SQL WHERE 절에서만 이뤄지며 카탈로그를 파이썬으로
+        로드하지 않는다."""
         child_counts_sq = (
             self.db.query(
                 GlobalCharacter.parent_character_id.label("parent_id"),
@@ -442,6 +450,16 @@ class CharacterGroupService:
             else_=_GROUP_STATE_ORDER[GROUP_STATE_SETTLED],
         )
 
+        anchor_conditions = [
+            GlobalCharacter.id.in_(self.db.query(child_counts_sq.c.parent_id)),
+            GlobalCharacter.id.in_(self.db.query(suggestion_parents_sq.c.parent_id)),
+        ]
+        if include_unlinked:
+            # 이미 다른 캐릭터의 자식인 경우는 제외한다(1단계 깊이 제약상 자식은
+            # 앵커가 될 수 없음) - parent_character_id가 없는 캐릭터만 잠재적
+            # 부모 후보로 노출한다.
+            anchor_conditions.append(GlobalCharacter.parent_character_id.is_(None))
+
         base_query = (
             self.db.query(
                 GlobalCharacter,
@@ -452,12 +470,7 @@ class CharacterGroupService:
             .outerjoin(child_counts_sq, child_counts_sq.c.parent_id == GlobalCharacter.id)
             .outerjoin(pending_counts_sq, pending_counts_sq.c.parent_id == GlobalCharacter.id)
             .outerjoin(conflicted_parents_sq, conflicted_parents_sq.c.parent_id == GlobalCharacter.id)
-            .filter(
-                or_(
-                    GlobalCharacter.id.in_(self.db.query(child_counts_sq.c.parent_id)),
-                    GlobalCharacter.id.in_(self.db.query(suggestion_parents_sq.c.parent_id)),
-                )
-            )
+            .filter(or_(*anchor_conditions))
         )
         if search:
             like = f"%{search.strip()}%"
@@ -534,16 +547,17 @@ class CharacterGroupService:
         children = (
             self.db.query(GlobalCharacter)
             .filter(GlobalCharacter.parent_character_id == anchor.id)
-            .order_by(GlobalCharacter.character_tag.asc())
+            .order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.character_tag.asc())
             .all()
         )
         suggestions = (
             self.db.query(CharacterLinkSuggestion)
+            .join(GlobalCharacter, GlobalCharacter.id == CharacterLinkSuggestion.child_character_id)
             .filter(
                 CharacterLinkSuggestion.parent_character_id == anchor.id,
                 CharacterLinkSuggestion.status == PENDING,
             )
-            .order_by(CharacterLinkSuggestion.score.desc())
+            .order_by(GlobalCharacter.post_count.desc(), GlobalCharacter.character_tag.asc())
             .all()
         )
 

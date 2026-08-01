@@ -450,6 +450,92 @@ def test_existing_direct_link_and_unlink_still_works(db: Session) -> None:
     assert child.parent_character_id is None
 
 
+# ── 그룹 상세: children/suggestions 정렬 (post_count desc, tag asc) ────
+
+
+def test_group_detail_orders_children_and_suggestions_by_post_count_then_tag(db: Session) -> None:
+    parent = make_character(db, tag="sort_parent", post_count=500)
+
+    child_low = make_character(db, tag="sort_child_b_low", post_count=10)
+    child_low.parent_character_id = parent.id
+    child_high = make_character(db, tag="sort_child_a_high", post_count=50)
+    child_high.parent_character_id = parent.id
+    child_tie_b = make_character(db, tag="sort_child_tie_b", post_count=30)
+    child_tie_b.parent_character_id = parent.id
+    child_tie_a = make_character(db, tag="sort_child_tie_a", post_count=30)
+    child_tie_a.parent_character_id = parent.id
+    db.commit()
+
+    suggestion_low = make_character(db, tag="suggest_low", post_count=5)
+    suggestion_high = make_character(db, tag="suggest_high", post_count=90)
+    add_suggestion(db, parent=parent, child=suggestion_low, status="pending")
+    add_suggestion(db, parent=parent, child=suggestion_high, status="pending")
+
+    detail = CharacterGroupService(db).get_group(parent.id)
+
+    assert [member.character.character_tag for member in detail.children] == [
+        "sort_child_a_high",
+        "sort_child_tie_a",
+        "sort_child_tie_b",
+        "sort_child_b_low",
+    ]
+    assert [item.child.character.character_tag for item in detail.suggestions] == [
+        "suggest_high",
+        "suggest_low",
+    ]
+
+
+# ── list_groups: include_unlinked (완전 미연결 후보 노출) ──────────────
+
+
+def test_list_groups_include_unlinked_surfaces_pure_candidates(db: Session) -> None:
+    settled_parent = make_character(db, tag="incl_settled_parent")
+    settled_child = make_character(db, tag="incl_settled_child")
+    settled_child.parent_character_id = settled_parent.id
+    db.commit()
+
+    make_character(db, tag="incl_pure_candidate")
+    already_a_child = make_character(db, tag="incl_already_child")
+    already_a_child.parent_character_id = settled_parent.id
+    db.commit()
+
+    service = CharacterGroupService(db)
+
+    default_items, default_total = service.list_groups(limit=100)
+    default_tags = {item.parent.character.character_tag for item in default_items}
+    assert "incl_pure_candidate" not in default_tags
+    assert default_total == 1
+
+    included_items, included_total = service.list_groups(include_unlinked=True, limit=100)
+    tags = {item.parent.character.character_tag for item in included_items}
+    assert "incl_pure_candidate" in tags
+    assert "incl_settled_parent" in tags
+    # already-linked children must never surface as anchor candidates themselves
+    assert "incl_already_child" not in tags
+    assert included_total == 2
+
+    states = {item.parent.character.character_tag: item.state for item in included_items}
+    assert states["incl_pure_candidate"] == "unlinked"
+
+
+def test_list_groups_include_unlinked_total_supports_last_page_calculation(db: Session) -> None:
+    for i in range(5):
+        make_character(db, tag=f"unlinked_candidate_{i}", post_count=100 - i)
+
+    service = CharacterGroupService(db)
+    limit = 2
+    _, total = service.list_groups(include_unlinked=True, skip=0, limit=limit)
+    assert total == 5
+
+    last_page_skip = ((total - 1) // limit) * limit
+    last_page_items, last_page_total = service.list_groups(
+        include_unlinked=True, skip=last_page_skip, limit=limit
+    )
+
+    assert last_page_total == total
+    assert len(last_page_items) == total - last_page_skip
+
+
 # ── GET 그룹 상세: 읽기 전용 vs 명시적 재계산 ─────────────────────────
 
 

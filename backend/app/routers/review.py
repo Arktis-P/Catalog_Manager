@@ -27,6 +27,7 @@ from app.schemas.review import (
     NonHumanConfirmRequest,
     NonHumanConfirmResponse,
     NonHumanExcludeResponse,
+    NonHumanRecalculateResponse,
     V2BulkCompleteItemResult,
     V2BulkCompleteRequest,
     V2BulkCompleteResponse,
@@ -45,7 +46,7 @@ from app.services.review_catalog_serializer import (
     to_catalog_item,
     to_catalog_item_global,
 )
-from app.services.non_human_review_service import NonHumanReviewService
+from app.services.non_human_review_service import NonHumanReviewService, recalculate_non_human_candidates
 from app.services.review_regenerate_job_manager import (
     ReviewRegenerateJobState,
     review_regenerate_job_manager,
@@ -349,6 +350,23 @@ def list_non_human_candidates(
     return V2ReviewCharacterListResponse(
         items=[_to_v2_review_character(character) for character in items],
         total=total,
+    )
+
+
+@router.post("/v2/non-human/recalculate", response_model=NonHumanRecalculateResponse)
+def recalculate_non_human_candidates_endpoint(
+    character_tag: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """UI 버튼용 동기 재계산. Danbooru 재조회 없이 로컬 데이터만으로 후보
+    점수를 다시 계산해 pending 큐를 채운다 (이미 확정/제외된 행은 건드리지
+    않는다)."""
+    summary = recalculate_non_human_candidates(db, character_tag=character_tag)
+    return NonHumanRecalculateResponse(
+        scanned=summary.scanned,
+        updated=summary.updated,
+        candidate_count=summary.candidate_count,
+        skipped_decided=summary.skipped_decided,
     )
 
 

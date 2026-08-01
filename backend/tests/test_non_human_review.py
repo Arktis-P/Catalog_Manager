@@ -321,6 +321,57 @@ def test_recalculation_updates_pending_rows(db: Session) -> None:
     assert character.non_human_candidate_score >= CANDIDATE_SCORE_THRESHOLD
 
 
+# ── recalculate endpoint (UI button) ─────────────────────────────────────
+
+
+def test_recalculate_endpoint_populates_pending_queue_and_counts_candidates(db: Session) -> None:
+    candidate = make_character(db, tag="new_no_humans_spirit", gender="no_humans")
+    non_candidate = make_character(
+        db,
+        tag="ordinary_ojou_sama",
+        gender="1girl",
+        hair_color="black_hair",
+        eye_color="red_eyes",
+        hair_shape="short_hair",
+    )
+    assert candidate.non_human_candidate_score == 0.0
+    assert non_candidate.non_human_candidate_score == 0.0
+
+    response = review_router.recalculate_non_human_candidates_endpoint(character_tag=None, db=db)
+
+    assert response.scanned == 2
+    assert response.updated == 2
+    assert response.skipped_decided == 0
+    assert response.candidate_count == 1
+
+    candidate_items, total = NonHumanReviewService(db).list_candidates(filter_status="pending")
+    assert total == 1
+    assert candidate_items[0].id == candidate.id
+
+    db.refresh(non_candidate)
+    assert non_candidate.non_human_candidate_score < CANDIDATE_SCORE_THRESHOLD
+
+
+def test_recalculate_endpoint_skips_decided_and_scopes_by_character_tag(db: Session) -> None:
+    confirmed = make_character(db, tag="already_confirmed_spirit", gender="no_humans")
+    apply_recalculation(confirmed)
+    confirmed.non_human_review_status = "confirmed"
+    db.commit()
+    other = make_character(db, tag="unscoped_candidate", gender="no_humans")
+
+    response = review_router.recalculate_non_human_candidates_endpoint(
+        character_tag=confirmed.character_tag, db=db
+    )
+
+    assert response.scanned == 1
+    assert response.skipped_decided == 1
+    assert response.updated == 0
+    assert response.candidate_count == 0
+
+    db.refresh(other)
+    assert other.non_human_candidate_score == 0.0
+
+
 # ── list pagination/order ────────────────────────────────────────────────
 
 

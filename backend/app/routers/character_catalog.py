@@ -359,6 +359,10 @@ def list_character_groups(
     state: str = Query(default="all", pattern="^(conflict|pending|unlinked|settled|all)$"),
     has_image: bool | None = Query(default=None),
     review_status: str = Query(default="all", pattern="^(pending|completed|all)$"),
+    include_unlinked: bool = Query(
+        default=False,
+        description="자식/제안이 전혀 없는 캐릭터도 잠재적 부모 후보로 포함할지 여부",
+    ),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     group_service: CharacterGroupService = Depends(get_group_service),
@@ -369,12 +373,15 @@ def list_character_groups(
     유지보수 CLI에서만 수행한다.
 
     state/has_image/review_status는 부모(앵커) 카드 기준 서버 사이드 필터이며,
-    DB 레벨 페이지네이션/총계를 그대로 유지한다."""
+    DB 레벨 페이지네이션/총계를 그대로 유지한다. include_unlinked=True이면
+    자식/제안이 전혀 없는 캐릭터도 잠재적 부모 후보로 노출해 화면에서 새로운
+    그룹을 만들 항목을 찾아 추가할 수 있다."""
     items, total = group_service.list_groups(
         search=search,
         state=state,
         has_image=has_image,
         review_status=review_status,
+        include_unlinked=include_unlinked,
         skip=skip,
         limit=limit,
     )

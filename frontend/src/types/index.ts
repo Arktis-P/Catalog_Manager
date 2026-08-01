@@ -730,6 +730,13 @@ export interface NonHumanExcludeResponse {
   review_status: string | null;
 }
 
+export interface NonHumanRecalculateSummary {
+  scanned: number;
+  updated: number;
+  candidate_count: number;
+  skipped_decided: number;
+}
+
 export type V2ReviewReferenceImageSource = "wiki_sample" | "favorite";
 
 export interface V2ReviewReferenceItem {

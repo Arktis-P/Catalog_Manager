@@ -262,6 +262,7 @@ export function V2ReviewPanel() {
   const [nhLoading, setNhLoading] = useState(false);
   const [nhError, setNhError] = useState<string | null>(null);
   const [nhActionMessage, setNhActionMessage] = useState<string | null>(null);
+  const [nhRecalculating, setNhRecalculating] = useState(false);
   const [nhFocusIndex, setNhFocusIndex] = useState(0);
   const [nhActingIds, setNhActingIds] = useState<Set<number>>(() => new Set());
   const [nhFailedMessages, setNhFailedMessages] = useState<Record<number, string>>({});
@@ -535,6 +536,22 @@ export function V2ReviewPanel() {
     },
     [nhAdvance],
   );
+
+  const recalculateNonHumanCandidates = useCallback(async () => {
+    setNhRecalculating(true);
+    setNhError(null);
+    try {
+      const summary = await api.recalculateNonHumanCandidates();
+      setNhActionMessage(
+        `후보 재계산 완료 · ${summary.updated.toLocaleString()}개 갱신 / ${summary.scanned.toLocaleString()}개 검사 / 후보 ${summary.candidate_count.toLocaleString()}개 / 결정 보존 ${summary.skipped_decided.toLocaleString()}개`,
+      );
+      await loadNonHumanQueue();
+    } catch (err) {
+      setNhError(err instanceof Error ? err.message : "비인간 후보 재계산에 실패했습니다.");
+    } finally {
+      setNhRecalculating(false);
+    }
+  }, [loadNonHumanQueue]);
 
   const nhFocusedItem = nhItems[nhFocusIndex] ?? null;
   const nhFocusedActing = nhFocusedItem ? nhActingIds.has(nhFocusedItem.id) : false;
@@ -1521,7 +1538,15 @@ export function V2ReviewPanel() {
             </div>
             <div className="field" style={{ justifyContent: "flex-end" }}>
               <label>&nbsp;</label>
-              <button className="btn" type="button" onClick={() => void loadNonHumanQueue()}>
+              <button
+                className="btn"
+                type="button"
+                disabled={nhRecalculating}
+                onClick={() => void recalculateNonHumanCandidates()}
+              >
+                {nhRecalculating ? "후보 분리 중..." : "후보 재계산 / 분리"}
+              </button>
+              <button className="btn" type="button" disabled={nhRecalculating} onClick={() => void loadNonHumanQueue()}>
                 새로고침
               </button>
             </div>

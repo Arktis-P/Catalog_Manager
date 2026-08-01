@@ -128,7 +128,11 @@ def apply_recalculation(character: GlobalCharacter) -> bool:
 class NonHumanRecalculateSummary:
     scanned: int = 0
     updated: int = 0
+    candidate_count: int = 0
     skipped_decided: int = 0
+
+
+RECALCULATE_BATCH_SIZE = 500
 
 
 def recalculate_non_human_candidates(
@@ -137,21 +141,56 @@ def recalculate_non_human_candidates(
     character_tag: str | None = None,
     apply: bool = True,
 ) -> NonHumanRecalculateSummary:
-    query = db.query(GlobalCharacter).options(selectinload(GlobalCharacter.series_links))
-    if character_tag:
-        query = query.filter(GlobalCharacter.character_tag == character_tag)
+    """로컬 데이터만으로 후보 점수를 재계산해 pending 큐를 채운다.
 
+    Danbooru 등 외부 네트워크 조회 없이 이미 저장된 필드만 사용하므로 UI
+    버튼에서 호출해도 안전한 동기 작업이다. candidate_count는 재계산 직후
+    실제로 pending 큐에 노출될 행 수(상태가 pending이고 점수가 임계값 이상)를
+    같은 in-memory 상태에서 집계한다.
+
+    카탈로그 전체(수십만 행)를 단일 쿼리로 한 번에 파이썬 리스트에
+    materialize하지 않도록 id 기준 keyset pagination으로 배치 처리한다 -
+    한 번에 DB에서 가져와 메모리에 올리는 행 수를 배치 크기로 제한한다.
+    session.expunge()는 쓰지 않는다: db는 호출자와 공유되는 세션이라
+    (예: 라우터의 다른 코드나 호출자가 이미 들고 있는 GlobalCharacter
+    인스턴스) 여기서 임의로 detach하면 호출자 쪽 참조가 깨질 수 있다.
+    apply=True(UI 버튼 경로)면 배치마다 commit_db_session으로 커밋해
+    SQLite 단일 writer 락을 다른 요청과 공정하게 나눠 쓰고, apply=False
+    (dry-run, CLI 전용)면 어떤 배치도 커밋하지 않다가 끝까지 스캔한 뒤
+    한 번에 rollback해 진짜 미리보기를 보장한다."""
     summary = NonHumanRecalculateSummary()
-    for character in query.order_by(GlobalCharacter.id).all():
-        summary.scanned += 1
-        if apply_recalculation(character):
-            summary.updated += 1
-        else:
-            summary.skipped_decided += 1
+    last_id = 0
+    while True:
+        query = (
+            db.query(GlobalCharacter)
+            .options(selectinload(GlobalCharacter.series_links))
+            .filter(GlobalCharacter.id > last_id)
+        )
+        if character_tag:
+            query = query.filter(GlobalCharacter.character_tag == character_tag)
 
-    if apply:
-        db.commit()
-    else:
+        batch = query.order_by(GlobalCharacter.id).limit(RECALCULATE_BATCH_SIZE).all()
+        if not batch:
+            break
+        last_id = batch[-1].id
+
+        for character in batch:
+            summary.scanned += 1
+            if apply_recalculation(character):
+                summary.updated += 1
+            else:
+                summary.skipped_decided += 1
+
+            if (
+                character.non_human_review_status == PENDING_STATUS
+                and (character.non_human_candidate_score or 0.0) >= CANDIDATE_SCORE_THRESHOLD
+            ):
+                summary.candidate_count += 1
+
+        if apply:
+            commit_db_session(db)
+
+    if not apply:
         db.rollback()
     return summary
 
