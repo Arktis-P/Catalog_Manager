@@ -4060,6 +4060,65 @@ button,
   gap: 6px;
 }
 
+/* Fast non-human queue: its compact geometry must not change the regular V2 review grid. */
+.v2-review-grid.v2-non-human-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.v2-non-human-toolbar {
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 8px;
+  overflow-x: auto;
+}
+
+.v2-non-human-toolbar .field {
+  flex: 0 0 auto;
+  gap: 3px;
+}
+
+.v2-non-human-toolbar input,
+.v2-non-human-toolbar select,
+.v2-non-human-toolbar .btn {
+  min-height: 30px;
+  padding: 4px 7px;
+  font-size: 0.8rem;
+}
+
+.v2-non-human-grid .v2-review-card-body {
+  padding: 8px;
+}
+
+.v2-non-human-grid .v2-review-card-name {
+  font-size: 0.85rem;
+}
+
+.v2-non-human-grid .v2-review-card-actions {
+  gap: 4px;
+}
+
+.v2-non-human-grid .v2-review-card-actions .btn {
+  padding: 4px 6px;
+  font-size: 0.72rem;
+}
+
+@media (max-width: 1180px) {
+  .v2-review-grid.v2-non-human-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .v2-review-grid.v2-non-human-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 680px) {
+  .v2-review-grid.v2-non-human-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 430px) {
+  .v2-review-grid.v2-non-human-grid { grid-template-columns: 1fr; }
+}
+
 .v2-non-human-evidence {
   display: flex;
   flex-wrap: wrap;
@@ -4502,7 +4561,24 @@ button,
 }
 
 .character-group-toolbar {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.character-group-review .character-group-toolbar {
+  gap: 6px;
+  padding: 8px;
+}
+
+.character-group-review .character-group-toolbar .field {
+  gap: 3px;
+}
+
+.character-group-review .character-group-toolbar input,
+.character-group-review .character-group-toolbar select {
+  min-height: 30px;
+  padding: 4px 7px;
+  font-size: 0.8rem;
 }
 
 .character-group-action-message {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { api } from "../../api/client";
 import type {
@@ -256,6 +256,7 @@ function ChildCard({ entry, staged, selected, onSelect, onAccept, onReject, onUn
   return (
     <article
       className={`character-group-card character-group-card--${entry.kind}${cardStateClass}${selected ? " character-group-card--selected" : ""}`}
+      data-child-card-key={entry.key}
       aria-current={selected || undefined}
       onClick={onSelect}
     >
@@ -341,6 +342,7 @@ export function CharacterGroupReviewPanel() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [recalculating, setRecalculating] = useState(false);
+  const [recalculatingAll, setRecalculatingAll] = useState(false);
   const [applying, setApplying] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
@@ -350,6 +352,8 @@ export function CharacterGroupReviewPanel() {
   const [addChildModalOpen, setAddChildModalOpen] = useState(false);
   const [moveChildTarget, setMoveChildTarget] = useState<CharacterGroupMember | null>(null);
   const [selectedChildKey, setSelectedChildKey] = useState<string | null>(null);
+  const childrenGridRef = useRef<HTMLDivElement>(null);
+  const [childGridColumns, setChildGridColumns] = useState(4);
 
   const loadGroups = useCallback(async () => {
     setListLoading(true);
@@ -426,11 +430,7 @@ export function CharacterGroupReviewPanel() {
     for (const member of manualMembers) {
       list.push({ key: `manual-${member.id}`, kind: "manual", member });
     }
-    return list.sort(
-      (left, right) =>
-        right.member.post_count - left.member.post_count ||
-        left.member.character_tag.localeCompare(right.member.character_tag, undefined, { sensitivity: "base" }),
-    );
+    return list;
   }, [detail, manualMembers]);
 
   useEffect(() => {
@@ -440,9 +440,27 @@ export function CharacterGroupReviewPanel() {
     }
     setSelectedChildKey((current) => {
       if (current && entries.some((entry) => entry.key === current)) return current;
-      return entries.find((entry) => entry.kind === "suggested")?.key ?? entries[0].key;
+      return entries[0].key;
     });
   }, [entries]);
+
+  useEffect(() => {
+    if (!selectedChildKey) return;
+    childrenGridRef.current?.querySelector(`[data-child-card-key="${selectedChildKey}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [selectedChildKey]);
+
+  useEffect(() => {
+    const grid = childrenGridRef.current;
+    if (!grid) return;
+    const measure = () => {
+      const columns = window.getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length;
+      setChildGridColumns(Math.max(1, columns));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [entries.length]);
 
   const parentImageUrl = useMemo(
     () => catalogCoverImageUrl(detail?.parent.preview_image_path ?? null, 480),
@@ -534,6 +552,20 @@ export function CharacterGroupReviewPanel() {
     }
   };
 
+  const recalculateAll = async () => {
+    setRecalculatingAll(true);
+    setDetailError(null);
+    try {
+      const summary = await api.recalculateAllCharacterGroups();
+      setActionMessage(`전체 추천 재계산 완료: 부모 ${summary.scanned_anchors.toLocaleString()}개, 대기 추천 ${summary.pending_total.toLocaleString()}개`);
+      await Promise.all([loadGroups(), detail ? loadDetail(detail.parent.id) : Promise.resolve()]);
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : "전체 추천 재계산에 실패했습니다.");
+    } finally {
+      setRecalculatingAll(false);
+    }
+  };
+
   const fetchChildCandidates = useCallback(
     async (searchTerm: string) => {
       if (!detail) {
@@ -611,15 +643,26 @@ export function CharacterGroupReviewPanel() {
       if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "a" && detail) {
         event.preventDefault();
         setAddChildModalOpen(true);
+        return;
+      }
+      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key) && entries.length > 0) {
+        event.preventDefault();
+        const currentIndex = Math.max(0, entries.findIndex((entry) => entry.key === selectedChildKey));
+        const delta = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" ? -childGridColumns : childGridColumns;
+        const nextIndex = Math.max(0, Math.min(entries.length - 1, currentIndex + delta));
+        setSelectedChildKey(entries[nextIndex].key);
       }
     };
     window.addEventListener("keydown", onKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, [addChildModalOpen, moveChildTarget, entries, selectedChildKey, hasStagedActions, applying, stagedActions, detail, recalculating]);
+  }, [addChildModalOpen, moveChildTarget, entries, selectedChildKey, childGridColumns, hasStagedActions, applying, stagedActions, detail, recalculating]);
 
   return (
     <div className="character-group-review">
       <div className="toolbar character-group-toolbar">
+        <button className="btn btn-small" type="button" disabled={recalculatingAll} onClick={() => void recalculateAll()}>
+          {recalculatingAll ? "전체 재계산 중..." : "전체 추천 재계산"}
+        </button>
         <div className="field">
           <label htmlFor="group-search">검색</label>
           <input
@@ -807,7 +850,7 @@ export function CharacterGroupReviewPanel() {
                 </div>
               </div>
 
-              <div className="character-group-children-grid">
+              <div ref={childrenGridRef} className="character-group-children-grid">
                 {entries.length === 0 ? (
                   <div className="empty-state">기존 자식 또는 제안된 후보가 없습니다.</div>
                 ) : (

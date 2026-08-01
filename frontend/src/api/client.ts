@@ -19,6 +19,7 @@ import type {
   CharacterCollectResult,
   CharacterGroupAction,
   CharacterGroupDetail,
+  CharacterGroupRecalculateAllSummary,
   CharacterGroupListResponse,
   CharacterGroupReviewStatusFilter,
   CharacterGroupStateFilter,
@@ -330,6 +331,11 @@ export const api = {
 
   recalculateCharacterGroup: (parentId: number) =>
     request<CharacterGroupDetail>(`/character-catalog/character-groups/${parentId}/recalculate`, {
+      method: "POST",
+    }),
+
+  recalculateAllCharacterGroups: () =>
+    request<CharacterGroupRecalculateAllSummary>("/character-catalog/character-groups/recalculate-all", {
       method: "POST",
     }),
 

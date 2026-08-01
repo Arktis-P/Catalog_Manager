@@ -11,6 +11,7 @@ import type {
   V2ReviewFilters,
   V2ReviewStats,
   V2ReviewStatus,
+  NonHumanRatingFilter,
 } from "../../types";
 import { cycleGender, defaultEnabledTagKeys, genderChipClass, genderChipLabel } from "../../utils/reviewPrompt";
 import { pendingReviewImageUrl } from "../../utils/reviewImages";
@@ -259,6 +260,7 @@ export function V2ReviewPanel() {
   const [nhTotal, setNhTotal] = useState(0);
   const [nhSkip, setNhSkip] = useState(0);
   const [nhSearch, setNhSearch] = useState("");
+  const [nhRatingStatus, setNhRatingStatus] = useState<NonHumanRatingFilter>("all");
   const [nhLoading, setNhLoading] = useState(false);
   const [nhError, setNhError] = useState<string | null>(null);
   const [nhActionMessage, setNhActionMessage] = useState<string | null>(null);
@@ -436,6 +438,7 @@ export function V2ReviewPanel() {
       try {
         const response = await api.listNonHumanCandidates({
           filter_status: "pending",
+          rating_filter: nhRatingStatus,
           search: nhSearch || undefined,
           skip: nhSkip,
           limit: PAGE_SIZE,
@@ -453,7 +456,7 @@ export function V2ReviewPanel() {
         setNhLoading(false);
       }
     },
-    [nhSearch, nhSkip],
+    [nhRatingStatus, nhSearch, nhSkip],
   );
 
   useEffect(() => {
@@ -465,7 +468,7 @@ export function V2ReviewPanel() {
 
   useEffect(() => {
     setNhSkip(0);
-  }, [nhSearch]);
+  }, [nhRatingStatus, nhSearch]);
 
   const nhAdvance = useCallback(
     (characterId: number) => {
@@ -610,7 +613,7 @@ export function V2ReviewPanel() {
       const key = event.key.toLowerCase();
 
       if (nhFocusedActing) {
-        const allowed = event.key === "ArrowLeft" || event.key === "ArrowRight" || key === "q" || key === "w";
+        const allowed = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key) || key === "q" || key === "w";
         if (!allowed) {
           event.preventDefault();
         }
@@ -630,6 +633,16 @@ export function V2ReviewPanel() {
       if (event.key === "ArrowRight") {
         event.preventDefault();
         setNhFocusIndex((index) => Math.min(nhItems.length - 1, index + 1));
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setNhFocusIndex((index) => Math.max(0, index - 5));
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setNhFocusIndex((index) => Math.min(nhItems.length - 1, index + 5));
         return;
       }
       if (event.key === "Enter") {
@@ -1526,7 +1539,7 @@ export function V2ReviewPanel() {
 
       {panelMode === "non_human" ? (
         <>
-          <div className="toolbar review-toolbar">
+          <div className="toolbar review-toolbar v2-non-human-toolbar">
             <div className="field">
               <label htmlFor="v2-non-human-search">검색</label>
               <input
@@ -1535,6 +1548,18 @@ export function V2ReviewPanel() {
                 onChange={(event) => setNhSearch(event.target.value)}
                 placeholder="character tag"
               />
+            </div>
+            <div className="field">
+              <label htmlFor="v2-non-human-rating-status">평점</label>
+              <select
+                id="v2-non-human-rating-status"
+                value={nhRatingStatus}
+                onChange={(event) => setNhRatingStatus(event.target.value as NonHumanRatingFilter)}
+              >
+                <option value="all">전체</option>
+                <option value="rated">평점 있음</option>
+                <option value="unrated">평점 없음</option>
+              </select>
             </div>
             <div className="field" style={{ justifyContent: "flex-end" }}>
               <label>&nbsp;</label>

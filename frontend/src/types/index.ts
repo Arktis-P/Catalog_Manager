@@ -314,6 +314,14 @@ export interface CharacterGroupDetail {
   state: CharacterGroupState;
 }
 
+export interface CharacterGroupRecalculateAllSummary {
+  scanned_anchors: number;
+  pending_total: number;
+  accepted_total: number;
+  rejected_total: number;
+  superseded_total: number;
+}
+
 export type CharacterGroupActionOp = "accept" | "add" | "reject" | "unlink" | "move";
 
 export interface CharacterGroupAction {
@@ -705,9 +713,12 @@ export interface V2ReviewCharacterListResponse {
 }
 
 export type NonHumanReviewFilterStatus = "pending" | "confirmed" | "excluded" | "all";
+export type NonHumanRatingFilter = "all" | "rated" | "unrated";
 
 export interface NonHumanCandidateFilters {
   filter_status?: NonHumanReviewFilterStatus;
+  /** Applied server-side before the queue's post-count/name ordering. */
+  rating_filter?: NonHumanRatingFilter;
   search?: string;
   skip?: number;
   limit?: number;
