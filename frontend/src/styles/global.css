@@ -4103,6 +4103,25 @@ button,
   font-size: 0.72rem;
 }
 
+.v2-non-human-rating-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.v2-non-human-rating-row > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.v2-non-human-rating-row .badge-compact {
+  padding: 2px 4px;
+  font-size: clamp(0.6rem, 0.65vw, 0.68rem);
+}
+
 @media (max-width: 1180px) {
   .v2-review-grid.v2-non-human-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
