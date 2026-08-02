@@ -561,6 +561,19 @@ export function V2ReviewPanel() {
   const nhFocusedImage = nhFocusedItem?.preview_image ?? null;
   const nhPreviewSrc = nhFocusedImage ? pendingReviewImageUrl(nhFocusedImage.image_path) : null;
   const nhPreviewAlt = nhFocusedItem ? `${nhFocusedItem.character_tag} preview` : "";
+  const nhFocusedDraft = nhFocusedItem ? drafts[nhFocusedItem.id] ?? createV2DraftForItem(nhFocusedItem) : null;
+
+  const nhNavigateSingleLocal = useCallback(
+    (direction: 1 | -1) => {
+      const next = nhFocusIndex + direction;
+      if (next < 0 || next >= nhItems.length) {
+        return false;
+      }
+      setNhFocusIndex(next);
+      return true;
+    },
+    [nhFocusIndex, nhItems.length],
+  );
 
   const nhConfirmProposed = useCallback(() => {
     if (!nhFocusedItem || nhFocusedActing) {
@@ -607,7 +620,7 @@ export function V2ReviewPanel() {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (isEditableTarget(event.target) || !nhFocusedItem) {
+      if (isEditableTarget(event.target) || !nhFocusedItem || nhLoading || singleModeOpen) {
         return;
       }
       const key = event.key.toLowerCase();
@@ -617,6 +630,12 @@ export function V2ReviewPanel() {
         if (!allowed) {
           event.preventDefault();
         }
+        return;
+      }
+
+      if (key === "s" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        setSingleModeOpen(true);
         return;
       }
 
@@ -686,7 +705,18 @@ export function V2ReviewPanel() {
     };
     window.addEventListener("keydown", onKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, [panelMode, nhFocusedItem, nhFocusedActing, nhItems.length, nhConfirmProposed, nhConfirm, nhExclude, nhTogglePreview]);
+  }, [
+    panelMode,
+    nhFocusedItem,
+    nhFocusedActing,
+    nhLoading,
+    nhItems.length,
+    singleModeOpen,
+    nhConfirmProposed,
+    nhConfirm,
+    nhExclude,
+    nhTogglePreview,
+  ]);
 
   useEffect(() => {
     const pendingNavigation = pendingSinglePageDirectionRef.current;
@@ -1514,6 +1544,16 @@ export function V2ReviewPanel() {
   const nhPageCount = Math.max(1, Math.ceil(nhTotal / PAGE_SIZE));
   const nhCurrentPage = Math.floor(nhSkip / PAGE_SIZE) + 1;
 
+  const singleModeIsNonHuman = panelMode === "non_human";
+  const singleModeItem = singleModeIsNonHuman ? nhFocusedItem : focusedItem;
+  const singleModeDraft = singleModeIsNonHuman ? nhFocusedDraft : focusedDraft;
+  const singleModeRowIndex = singleModeIsNonHuman ? nhFocusIndex : focusIndex;
+  const singleModeGlobalIndex = singleModeIsNonHuman ? nhSkip + nhFocusIndex : skip + focusIndex;
+  const singleModeTotal = singleModeIsNonHuman ? nhTotal : total;
+  const singleModeLocked = singleModeIsNonHuman
+    ? true
+    : Boolean(focusedLocked) || (focusedItem ? savingIds.has(focusedItem.id) : false);
+
   return (
     <>
       <div className="review-mode-tabs" role="tablist" aria-label="V2 검수 서브 모드">
@@ -1617,7 +1657,7 @@ export function V2ReviewPanel() {
             <summary className="review-shortcut-guide-summary">
               <span className="review-shortcut-guide-title">단축키</span>
               <span className="review-shortcut-guide-hint">
-                Enter 제안 확정 · 3 / - (또는 x) 확정 · e 제외 · ←→ 카드 이동 · Space 확대 · q/w Danbooru
+                Enter 제안 확정 · 3 / - (또는 x) 확정 · e 제외 · s 상세 · ←→ 카드 이동 · Space 확대 · q/w Danbooru
               </span>
             </summary>
             <div className="review-shortcut-guide-body">
@@ -1625,6 +1665,7 @@ export function V2ReviewPanel() {
               <span>3 rating 3 확정 후 이동</span>
               <span>- / x rating -1 확정 후 이동</span>
               <span>e 제외 후 이동</span>
+              <span>s 선택 카드 상세</span>
               <span>←→ 카드 이동</span>
               <span>Space 이미지 확대</span>
               <span>q/w Danbooru 게시물/위키</span>
@@ -1944,39 +1985,46 @@ export function V2ReviewPanel() {
         />
       ) : null}
 
-      {singleModeOpen && focusedItem && focusedDraft ? (
+      {singleModeOpen && singleModeItem && singleModeDraft ? (
         <V2SingleReviewOverlay
           open={singleModeOpen}
-          item={focusedItem}
-          rowIndex={focusIndex}
-          globalIndex={skip + focusIndex}
-          total={total}
-          draft={focusedDraft}
+          item={singleModeItem}
+          rowIndex={singleModeRowIndex}
+          globalIndex={singleModeGlobalIndex}
+          total={singleModeTotal}
+          draft={singleModeDraft}
           thumbSize={thumbSize}
           filters={reviewListFilters}
-          locked={focusedLocked || savingIds.has(focusedItem.id)}
-          saveStatus={getSaveStatus(focusedItem, v2JobsByCharacter[focusedItem.id])}
-          regenerateMessage={v2JobsByCharacter[focusedItem.id]?.message}
+          locked={singleModeLocked}
+          saveStatus={getSaveStatus(singleModeItem, v2JobsByCharacter[singleModeItem.id])}
+          regenerateMessage={v2JobsByCharacter[singleModeItem.id]?.message}
           regenerateProgress={
-            v2JobsByCharacter[focusedItem.id] && v2JobsByCharacter[focusedItem.id].total > 0
-              ? { current: v2JobsByCharacter[focusedItem.id].current, total: v2JobsByCharacter[focusedItem.id].total }
+            v2JobsByCharacter[singleModeItem.id] && v2JobsByCharacter[singleModeItem.id].total > 0
+              ? { current: v2JobsByCharacter[singleModeItem.id].current, total: v2JobsByCharacter[singleModeItem.id].total }
               : null
           }
-          regenerating={isCharacterRegenerating(focusedItem.id)}
+          regenerating={isCharacterRegenerating(singleModeItem.id)}
           suspended={Boolean(linkingItem)}
+          readOnly={singleModeIsNonHuman}
+          canNavigatePrevious={!singleModeIsNonHuman || nhFocusIndex > 0}
+          canNavigateNext={!singleModeIsNonHuman || nhFocusIndex < nhItems.length - 1}
           onClose={() => setSingleModeOpen(false)}
-          onNavigateLocal={navigateSingleLocal}
-          onNavigatePage={navigateSinglePage}
-          onDraftChange={(next) => updateDraft(focusedItem.id, next)}
-          onToggleTag={(tagKey) => toggleTag(focusedItem.id, tagKey)}
-          onRate={(value) => setRating(focusedItem.id, value)}
-          onCycleMulticolor={cycleFocusedMulticolor}
-          onRegenerate={() => void regenerateFocused()}
-          onComplete={() => void completeItem(focusedItem)}
-          onBulkComplete={() => void bulkSaveRatedItems()}
-          onOpenLinkModal={() => {
-            setLinkingItem(focusedItem);
-          }}
+          onNavigateLocal={singleModeIsNonHuman ? nhNavigateSingleLocal : navigateSingleLocal}
+          onNavigatePage={singleModeIsNonHuman ? undefined : navigateSinglePage}
+          onDraftChange={singleModeIsNonHuman ? undefined : (next) => updateDraft(singleModeItem.id, next)}
+          onToggleTag={singleModeIsNonHuman ? undefined : (tagKey) => toggleTag(singleModeItem.id, tagKey)}
+          onRate={singleModeIsNonHuman ? undefined : (value) => setRating(singleModeItem.id, value)}
+          onCycleMulticolor={singleModeIsNonHuman ? undefined : cycleFocusedMulticolor}
+          onRegenerate={singleModeIsNonHuman ? undefined : () => void regenerateFocused()}
+          onComplete={singleModeIsNonHuman ? undefined : () => void completeItem(singleModeItem)}
+          onBulkComplete={singleModeIsNonHuman ? undefined : () => void bulkSaveRatedItems()}
+          onOpenLinkModal={
+            singleModeIsNonHuman
+              ? undefined
+              : () => {
+                  setLinkingItem(singleModeItem);
+                }
+          }
         />
       ) : null}
 

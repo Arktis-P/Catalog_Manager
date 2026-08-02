@@ -41,17 +41,20 @@ interface V2SingleReviewOverlayProps {
   regenerateProgress?: { current: number; total: number } | null;
   regenerating: boolean;
   suspended?: boolean;
+  readOnly?: boolean;
+  canNavigatePrevious?: boolean;
+  canNavigateNext?: boolean;
   onClose: () => void;
   onNavigateLocal: (direction: 1 | -1) => boolean;
-  onNavigatePage: (direction: 1 | -1) => void;
-  onDraftChange: (draft: V2CharacterDraft) => void;
-  onToggleTag: (tagKey: string) => void;
-  onRate: (value: number) => void;
-  onCycleMulticolor: () => void;
-  onRegenerate: () => void;
-  onComplete: () => void;
-  onBulkComplete: () => void;
-  onOpenLinkModal: () => void;
+  onNavigatePage?: (direction: 1 | -1) => void;
+  onDraftChange?: (draft: V2CharacterDraft) => void;
+  onToggleTag?: (tagKey: string) => void;
+  onRate?: (value: number) => void;
+  onCycleMulticolor?: () => void;
+  onRegenerate?: () => void;
+  onComplete?: () => void;
+  onBulkComplete?: () => void;
+  onOpenLinkModal?: () => void;
 }
 
 function sourceLabel(source: V2ReviewReferenceItem["source"]): string {
@@ -130,6 +133,9 @@ export function V2SingleReviewOverlay({
   regenerateProgress,
   regenerating,
   suspended = false,
+  readOnly = false,
+  canNavigatePrevious = true,
+  canNavigateNext = true,
   onClose,
   onNavigateLocal,
   onNavigatePage,
@@ -428,13 +434,13 @@ export function V2SingleReviewOverlay({
       if (isEditableTarget(event.target)) {
         return;
       }
-      if (event.ctrlKey && event.key === "Enter") {
+      if (!readOnly && event.ctrlKey && event.key === "Enter") {
         event.preventDefault();
-        onBulkComplete();
+        onBulkComplete?.();
         return;
       }
       const key = event.key.toLowerCase();
-      if (locked) {
+      if (locked && !readOnly) {
         const allowed =
           event.key === "ArrowLeft" ||
           event.key === "ArrowRight" ||
@@ -453,61 +459,67 @@ export function V2SingleReviewOverlay({
         }
         return;
       }
-      if (event.key === "Enter") {
+      if (!readOnly && event.key === "Enter") {
         event.preventDefault();
-        onComplete();
+        onComplete?.();
         return;
       }
-      if (event.ctrlKey && event.key >= "1" && event.key <= "9") {
+      if (!readOnly && event.ctrlKey && event.key >= "1" && event.key <= "9") {
         event.preventDefault();
         const imageIndex = Number(event.key) - 1;
         if (imageIndex < item.images.length) {
-          onDraftChange({ ...draft, imageIndex });
+          onDraftChange?.({ ...draft, imageIndex });
         }
         return;
       }
       if (event.key === "ArrowLeft") {
+        if (!canNavigatePrevious) {
+          return;
+        }
         event.preventDefault();
         if (!onNavigateLocal(-1)) {
-          onNavigatePage(-1);
+          onNavigatePage?.(-1);
         }
         return;
       }
       if (event.key === "ArrowRight") {
+        if (!canNavigateNext) {
+          return;
+        }
         event.preventDefault();
         if (!onNavigateLocal(1)) {
-          onNavigatePage(1);
+          onNavigatePage?.(1);
         }
         return;
       }
-      if (event.key >= "0" && event.key <= "6") {
+      if (!readOnly && event.key >= "0" && event.key <= "6") {
         event.preventDefault();
-        onRate(Number(event.key));
+        onRate?.(Number(event.key));
         return;
       }
-      if (key === "z" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (!readOnly && key === "z" && !event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
-        onRate(0);
+        onRate?.(0);
         return;
       }
-      if (event.key === "-" || (key === "x" && !event.ctrlKey && !event.metaKey && !event.altKey)) {
+      if (!readOnly && (event.key === "-" || (key === "x" && !event.ctrlKey && !event.metaKey && !event.altKey))) {
         event.preventDefault();
-        onRate(-1);
+        onRate?.(-1);
         return;
       }
-      if (key === "g") {
+      if (!readOnly && key === "g") {
         event.preventDefault();
-        onDraftChange({ ...draft, gender: cycleGender(draft.gender) });
+        onDraftChange?.({ ...draft, gender: cycleGender(draft.gender) });
         return;
       }
-      if (key === "c") {
+      if (!readOnly && key === "c") {
         event.preventDefault();
-        onCycleMulticolor();
+        onCycleMulticolor?.();
         return;
       }
-      if (key === "r") {
+      if (!readOnly && key === "r") {
         event.preventDefault();
-        onRegenerate();
+        onRegenerate?.();
         return;
       }
       if (key === "w") {
@@ -531,7 +543,7 @@ export function V2SingleReviewOverlay({
         );
         return;
       }
-      if (key === "a") {
+      if (!readOnly && key === "a" && onOpenLinkModal) {
         event.preventDefault();
         onOpenLinkModal();
       }
@@ -544,6 +556,9 @@ export function V2SingleReviewOverlay({
     draft,
     generatedPreviewOpen,
     locked,
+    readOnly,
+    canNavigatePrevious,
+    canNavigateNext,
     onBulkComplete,
     onClose,
     onComplete,
@@ -586,10 +601,20 @@ export function V2SingleReviewOverlay({
           <span className="catalog-card-subtitle"> {globalIndex + 1}/{total}</span>
         </div>
         <div className="v2-single-toolbar-actions">
-          <button className="btn btn-small" type="button" onClick={() => (onNavigateLocal(-1) ? undefined : onNavigatePage(-1))}>
+          <button
+            className="btn btn-small"
+            type="button"
+            disabled={!canNavigatePrevious}
+            onClick={() => (onNavigateLocal(-1) ? undefined : onNavigatePage?.(-1))}
+          >
             이전
           </button>
-          <button className="btn btn-small" type="button" onClick={() => (onNavigateLocal(1) ? undefined : onNavigatePage(1))}>
+          <button
+            className="btn btn-small"
+            type="button"
+            disabled={!canNavigateNext}
+            onClick={() => (onNavigateLocal(1) ? undefined : onNavigatePage?.(1))}
+          >
             다음
           </button>
           <button className="btn btn-small" type="button" onClick={onClose}>
@@ -630,7 +655,7 @@ export function V2SingleReviewOverlay({
                   type="button"
                   className={`v2-review-card-image-chip${index === draft.imageIndex ? " v2-review-card-image-chip--active" : ""}`}
                   disabled={locked}
-                  onClick={() => onDraftChange({ ...draft, imageIndex: index })}
+                  onClick={() => onDraftChange?.({ ...draft, imageIndex: index })}
                 >
                   {index + 1}
                 </button>
@@ -641,7 +666,11 @@ export function V2SingleReviewOverlay({
         </section>
 
         <section className="v2-single-detail-pane" aria-label="review controls">
-          <div className="v2-single-row-host">
+          <fieldset
+            className="v2-single-row-host"
+            disabled={readOnly}
+            style={readOnly ? { border: 0, margin: 0, minInlineSize: 0, padding: 0 } : undefined}
+          >
             <V2ReviewRow
               item={item}
               rowIndex={rowIndex}
@@ -652,15 +681,15 @@ export function V2SingleReviewOverlay({
               saveStatus={saveStatus}
               regenerateMessage={regenerateMessage}
               regenerateProgress={regenerateProgress}
-              onDraftChange={onDraftChange}
-              onToggleTag={onToggleTag}
-              onRate={onRate}
+              onDraftChange={onDraftChange ?? (() => undefined)}
+              onToggleTag={onToggleTag ?? (() => undefined)}
+              onRate={onRate ?? (() => undefined)}
               onRegenerate={onRegenerate}
               onComplete={onComplete}
               onOpenLinkModal={onOpenLinkModal}
               regenerating={regenerating}
             />
-          </div>
+          </fieldset>
 
         </section>
 
