@@ -40,6 +40,10 @@ import { ReviewShortcutGuide } from "./ReviewShortcutGuide";
 
 const PAGE_SIZE = 30;
 
+type SingleReviewSession =
+  | { source: "review"; itemId: number }
+  | { source: "non_human"; itemId: number };
+
 const V2_RATING_FLOW: Array<{ question: string; result: string }> = [
   { question: "사람 또는 고정된 사람형 캐릭터가 아닌가요? (고정 외형 없는 플레이어 대리 캐릭터 포함)", result: "-1" },
   { question: "레이팅 가능한 이미지 생성에 실패했나요?", result: "0" },
@@ -109,6 +113,23 @@ function nonHumanEvidenceLabel(code: string): string {
   return code.replace(/_/g, " ").replace(/:/g, ": ");
 }
 
+function nonHumanExistingRatingBadge(rating: number | null): { text: string; className: string; title: string } | null {
+  if (rating === null || rating === undefined) {
+    return null;
+  }
+  if (rating === -1) {
+    return { text: "-1 ☆", className: "review-rating-status review-rating-status--red", title: "기존 평점 -1" };
+  }
+  if (rating === 0) {
+    return { text: "0 ☆", className: "review-rating-status review-rating-status--zero", title: "기존 평점 0" };
+  }
+  return {
+    text: `${rating} ${"★".repeat(rating)}`,
+    className: "review-rating-status review-rating-status--set",
+    title: `기존 평점 ${rating}`,
+  };
+}
+
 interface NonHumanQueueCardProps {
   item: V2ReviewCharacter;
   focused: boolean;
@@ -135,6 +156,7 @@ function NonHumanQueueCard({
   const suggested = item.non_human_suggested_rating;
   const hasSuggested = suggested === -1 || suggested === 3;
   const cardLabel = `${item.display_name || item.character_tag}, 후보 점수 ${item.non_human_candidate_score.toFixed(2)}`;
+  const existingRatingBadge = nonHumanExistingRatingBadge(item.rating);
 
   return (
     <article
@@ -171,6 +193,11 @@ function NonHumanQueueCard({
           <span className="catalog-card-subtitle">{primarySeriesTag ?? "시리즈 없음"}</span>
           <span className="badge">{item.post_count.toLocaleString()} posts</span>
           <span className="badge badge-muted">점수 {item.non_human_candidate_score.toFixed(2)}</span>
+          {existingRatingBadge ? (
+            <span className={existingRatingBadge.className} title={existingRatingBadge.title}>
+              {existingRatingBadge.text}
+            </span>
+          ) : null}
           {hasSuggested ? (
             <span className="badge badge-warning">제안 {suggested}</span>
           ) : (
@@ -252,7 +279,7 @@ export function V2ReviewPanel() {
   const [previewFit, setPreviewFit] = useState(true);
   const [linkingItem, setLinkingItem] = useState<V2ReviewCharacter | null>(null);
   const [pageInput, setPageInput] = useState("1");
-  const [singleModeOpen, setSingleModeOpen] = useState(false);
+  const [singleSession, setSingleSession] = useState<SingleReviewSession | null>(null);
   const pendingSinglePageDirectionRef = useRef<{ direction: 1 | -1; targetSkip: number } | null>(null);
 
   const [panelMode, setPanelMode] = useState<"review" | "non_human">("review");
@@ -260,7 +287,7 @@ export function V2ReviewPanel() {
   const [nhTotal, setNhTotal] = useState(0);
   const [nhSkip, setNhSkip] = useState(0);
   const [nhSearch, setNhSearch] = useState("");
-  const [nhRatingStatus, setNhRatingStatus] = useState<NonHumanRatingFilter>("all");
+  const [nhRatingStatus, setNhRatingStatus] = useState<NonHumanRatingFilter>("unrated");
   const [nhLoading, setNhLoading] = useState(false);
   const [nhError, setNhError] = useState<string | null>(null);
   const [nhActionMessage, setNhActionMessage] = useState<string | null>(null);
@@ -561,18 +588,87 @@ export function V2ReviewPanel() {
   const nhFocusedImage = nhFocusedItem?.preview_image ?? null;
   const nhPreviewSrc = nhFocusedImage ? pendingReviewImageUrl(nhFocusedImage.image_path) : null;
   const nhPreviewAlt = nhFocusedItem ? `${nhFocusedItem.character_tag} preview` : "";
-  const nhFocusedDraft = nhFocusedItem ? drafts[nhFocusedItem.id] ?? createV2DraftForItem(nhFocusedItem) : null;
+
+  // singleSession pins the overlay to one (source, itemId) pair so it never rebinds to
+  // whichever tab/card happens to be live-focused - see corrective patch for the
+  // General Review <-> non-human queue overlay mismatch bug.
+  const singleModeIsNonHuman = singleSession?.source === "non_human";
+  const singleSessionList = singleModeIsNonHuman ? nhItems : items;
+  const singleSessionItem = singleSession
+    ? singleSessionList.find((entry) => entry.id === singleSession.itemId) ?? null
+    : null;
+  const singleModeOpen = singleSessionItem !== null;
+  const singleSessionRowIndex = singleSession
+    ? singleSessionList.findIndex((entry) => entry.id === singleSession.itemId)
+    : -1;
+  const singleModeItem = singleSessionItem;
+  const singleModeDraft = singleSessionItem
+    ? drafts[singleSessionItem.id] ?? createV2DraftForItem(singleSessionItem)
+    : null;
+  const singleModeRowIndex = singleSessionRowIndex;
+  const singleModeGlobalIndex = singleSession
+    ? (singleModeIsNonHuman ? nhSkip : skip) + Math.max(0, singleSessionRowIndex)
+    : 0;
+  const singleModeTotal = singleModeIsNonHuman ? nhTotal : total;
+  const singleModeLocked = singleModeIsNonHuman
+    ? true
+    : singleSessionItem
+      ? submittingId === singleSessionItem.id ||
+        isCharacterRegenerating(singleSessionItem.id) ||
+        savingIds.has(singleSessionItem.id)
+      : false;
+
+  const closeSingleSession = useCallback(() => {
+    if (singleSessionRowIndex >= 0) {
+      if (singleSession?.source === "review") {
+        focusCardFromKeyboardRef.current = true;
+        setFocusIndex(singleSessionRowIndex);
+      } else if (singleSession?.source === "non_human") {
+        setNhFocusIndex(singleSessionRowIndex);
+      }
+    }
+    setSingleSession(null);
+  }, [singleSession, singleSessionRowIndex]);
+
+  useEffect(() => {
+    if (!singleSession || singleSession.source !== "review") {
+      return;
+    }
+    if (loading || pendingSinglePageDirectionRef.current) {
+      return;
+    }
+    if (!items.some((entry) => entry.id === singleSession.itemId)) {
+      setSingleSession(null);
+    }
+  }, [items, loading, singleSession]);
+
+  useEffect(() => {
+    if (!singleSession || singleSession.source !== "non_human") {
+      return;
+    }
+    if (nhLoading) {
+      return;
+    }
+    if (!nhItems.some((entry) => entry.id === singleSession.itemId)) {
+      setSingleSession(null);
+    }
+  }, [nhItems, nhLoading, singleSession]);
 
   const nhNavigateSingleLocal = useCallback(
     (direction: 1 | -1) => {
-      const next = nhFocusIndex + direction;
+      const current = singleSession?.source === "non_human" ? singleSessionRowIndex : nhFocusIndex;
+      const next = current + direction;
       if (next < 0 || next >= nhItems.length) {
         return false;
       }
       setNhFocusIndex(next);
+      const nextItem = nhItems[next];
+      if (nextItem) {
+        setSingleSession({ source: "non_human", itemId: nextItem.id });
+      }
       return true;
     },
-    [nhFocusIndex, nhItems.length],
+    [singleSession, singleSessionRowIndex, nhFocusIndex, nhItems],
   );
 
   const nhConfirmProposed = useCallback(() => {
@@ -635,7 +731,7 @@ export function V2ReviewPanel() {
 
       if (key === "s" && !event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
-        setSingleModeOpen(true);
+        setSingleSession({ source: "non_human", itemId: nhFocusedItem.id });
         return;
       }
 
@@ -736,7 +832,7 @@ export function V2ReviewPanel() {
     if (nextIndex >= 0) {
       focusCardFromKeyboardRef.current = true;
       setFocusIndex(nextIndex);
-      setSingleModeOpen(true);
+      setSingleSession({ source: "review", itemId: items[nextIndex].id });
       return;
     }
     setActionMessage("이동할 pending 항목이 없습니다.");
@@ -745,7 +841,7 @@ export function V2ReviewPanel() {
   useEffect(() => {
     setSkip(0);
     setFocusIndex(0);
-    setSingleModeOpen(false);
+    setSingleSession((current) => (current?.source === "review" ? null : current));
   }, [
     reviewStatus,
     ratingFilter,
@@ -1022,17 +1118,19 @@ export function V2ReviewPanel() {
 
   const navigateSingleLocal = useCallback(
     (direction: 1 | -1) => {
-      const start = focusIndex + direction;
+      const current = singleSession?.source === "review" ? singleSessionRowIndex : focusIndex;
+      const start = current + direction;
       for (let index = start; index >= 0 && index < items.length; index += direction) {
         if (items[index]?.review_status === "pending") {
           focusCardFromKeyboardRef.current = true;
           setFocusIndex(index);
+          setSingleSession({ source: "review", itemId: items[index].id });
           return true;
         }
       }
       return false;
     },
-    [focusIndex, items],
+    [singleSession, singleSessionRowIndex, focusIndex, items],
   );
 
   const navigateSinglePage = useCallback(
@@ -1140,7 +1238,7 @@ export function V2ReviewPanel() {
       setActionMessage("현재 선택된 V2 리뷰 항목이 없습니다.");
       return;
     }
-    setSingleModeOpen(true);
+    setSingleSession({ source: "review", itemId: focusedItem.id });
   }, [focusedItem]);
 
   const multicolorChips = useMemo(
@@ -1544,15 +1642,12 @@ export function V2ReviewPanel() {
   const nhPageCount = Math.max(1, Math.ceil(nhTotal / PAGE_SIZE));
   const nhCurrentPage = Math.floor(nhSkip / PAGE_SIZE) + 1;
 
-  const singleModeIsNonHuman = panelMode === "non_human";
-  const singleModeItem = singleModeIsNonHuman ? nhFocusedItem : focusedItem;
-  const singleModeDraft = singleModeIsNonHuman ? nhFocusedDraft : focusedDraft;
-  const singleModeRowIndex = singleModeIsNonHuman ? nhFocusIndex : focusIndex;
-  const singleModeGlobalIndex = singleModeIsNonHuman ? nhSkip + nhFocusIndex : skip + focusIndex;
-  const singleModeTotal = singleModeIsNonHuman ? nhTotal : total;
-  const singleModeLocked = singleModeIsNonHuman
-    ? true
-    : Boolean(focusedLocked) || (focusedItem ? savingIds.has(focusedItem.id) : false);
+  const switchPanelMode = (mode: "review" | "non_human") => {
+    // Explicit tab switch always drops the pinned overlay session - it belongs to
+    // whichever queue it was opened from, not to the tab the user switches to.
+    setSingleSession(null);
+    setPanelMode(mode);
+  };
 
   return (
     <>
@@ -1562,7 +1657,7 @@ export function V2ReviewPanel() {
           role="tab"
           aria-selected={panelMode === "review"}
           className={`review-mode-tab${panelMode === "review" ? " review-mode-tab--active" : ""}`}
-          onClick={() => setPanelMode("review")}
+          onClick={() => switchPanelMode("review")}
         >
           일반 검수
         </button>
@@ -1571,7 +1666,7 @@ export function V2ReviewPanel() {
           role="tab"
           aria-selected={panelMode === "non_human"}
           className={`review-mode-tab${panelMode === "non_human" ? " review-mode-tab--active" : ""}`}
-          onClick={() => setPanelMode("non_human")}
+          onClick={() => switchPanelMode("non_human")}
         >
           비인간 후보 큐 (fast)
         </button>
@@ -2006,9 +2101,10 @@ export function V2ReviewPanel() {
           regenerating={isCharacterRegenerating(singleModeItem.id)}
           suspended={Boolean(linkingItem)}
           readOnly={singleModeIsNonHuman}
-          canNavigatePrevious={!singleModeIsNonHuman || nhFocusIndex > 0}
-          canNavigateNext={!singleModeIsNonHuman || nhFocusIndex < nhItems.length - 1}
-          onClose={() => setSingleModeOpen(false)}
+          disableNeighborPreload={singleModeIsNonHuman}
+          canNavigatePrevious={!singleModeIsNonHuman || singleModeRowIndex > 0}
+          canNavigateNext={!singleModeIsNonHuman || singleModeRowIndex < nhItems.length - 1}
+          onClose={closeSingleSession}
           onNavigateLocal={singleModeIsNonHuman ? nhNavigateSingleLocal : navigateSingleLocal}
           onNavigatePage={singleModeIsNonHuman ? undefined : navigateSinglePage}
           onDraftChange={singleModeIsNonHuman ? undefined : (next) => updateDraft(singleModeItem.id, next)}

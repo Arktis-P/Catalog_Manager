@@ -42,6 +42,7 @@ interface V2SingleReviewOverlayProps {
   regenerating: boolean;
   suspended?: boolean;
   readOnly?: boolean;
+  disableNeighborPreload?: boolean;
   canNavigatePrevious?: boolean;
   canNavigateNext?: boolean;
   onClose: () => void;
@@ -134,6 +135,7 @@ export function V2SingleReviewOverlay({
   regenerating,
   suspended = false,
   readOnly = false,
+  disableNeighborPreload = false,
   canNavigatePrevious = true,
   canNavigateNext = true,
   onClose,
@@ -363,6 +365,13 @@ export function V2SingleReviewOverlay({
     }
     bumpCache();
 
+    if (disableNeighborPreload) {
+      // Non-human overlay is read-only and its item usually isn't even part of the
+      // General Review "pending" list this preload query targets, so skip it entirely.
+      void ensureReference(item.id, generation, rangeVersion);
+      return;
+    }
+
     let cancelled = false;
     void (async () => {
       const currentRequest = ensureReference(item.id, generation, rangeVersion);
@@ -407,7 +416,7 @@ export function V2SingleReviewOverlay({
     return () => {
       cancelled = true;
     };
-  }, [bumpCache, ensureReference, item, open, preloadFilters]);
+  }, [bumpCache, ensureReference, item, open, preloadFilters, disableNeighborPreload]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
