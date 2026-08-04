@@ -56,6 +56,9 @@ interface V2SingleReviewOverlayProps {
   onComplete?: () => void;
   onBulkComplete?: () => void;
   onOpenLinkModal?: () => void;
+  /** Non-human "stage exclude" (key e) - the one action with no shared-draft equivalent. */
+  onNonHumanExclude?: () => void;
+  onNonHumanBulkApply?: () => void;
 }
 
 function sourceLabel(source: V2ReviewReferenceItem["source"]): string {
@@ -149,6 +152,8 @@ export function V2SingleReviewOverlay({
   onComplete,
   onBulkComplete,
   onOpenLinkModal,
+  onNonHumanExclude,
+  onNonHumanBulkApply,
 }: V2SingleReviewOverlayProps) {
   const [, setCacheVersion] = useState(0);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -366,8 +371,8 @@ export function V2SingleReviewOverlay({
     bumpCache();
 
     if (disableNeighborPreload) {
-      // Non-human overlay is read-only and its item usually isn't even part of the
-      // General Review "pending" list this preload query targets, so skip it entirely.
+      // The non-human item usually isn't even part of the General Review "pending"
+      // list this preload query targets, so skip neighbor preloading entirely.
       void ensureReference(item.id, generation, rangeVersion);
       return;
     }
@@ -443,12 +448,24 @@ export function V2SingleReviewOverlay({
       if (isEditableTarget(event.target)) {
         return;
       }
-      if (!readOnly && event.ctrlKey && event.key === "Enter") {
+      if (event.ctrlKey && event.key === "Enter") {
         event.preventDefault();
-        onBulkComplete?.();
+        if (onNonHumanBulkApply) {
+          onNonHumanBulkApply?.();
+        } else {
+          onBulkComplete?.();
+        }
         return;
       }
       const key = event.key.toLowerCase();
+      // Non-human "stage exclude": wired independently of `readOnly`/`locked` (which
+      // gate draft-editing shortcuts below) because it isn't a draft edit - it's the
+      // non-human queue's own exclude action, staged for the Ctrl+Enter batch apply.
+      if (onNonHumanExclude && key === "e" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        onNonHumanExclude();
+        return;
+      }
       if (locked && !readOnly) {
         const allowed =
           event.key === "ArrowLeft" ||
@@ -526,7 +543,7 @@ export function V2SingleReviewOverlay({
         onCycleMulticolor?.();
         return;
       }
-      if (!readOnly && key === "r") {
+      if (key === "r") {
         event.preventDefault();
         onRegenerate?.();
         return;
@@ -576,6 +593,8 @@ export function V2SingleReviewOverlay({
     onCycleMulticolor,
     onDraftChange,
     onOpenLinkModal,
+    onNonHumanExclude,
+    onNonHumanBulkApply,
     onRate,
     onRegenerate,
     open,

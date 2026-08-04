@@ -40,6 +40,8 @@ import type {
   NonHumanCandidateFilters,
   NonHumanConfirmPayload,
   NonHumanConfirmResponse,
+  NonHumanBulkApplyRequest,
+  NonHumanBulkApplyResponse,
   NonHumanExcludeResponse,
   NonHumanRecalculateSummary,
   NotificationDisplay,
@@ -627,6 +629,12 @@ export const api = {
 
   excludeNonHumanCandidate: (characterId: number) =>
     request<NonHumanExcludeResponse>(`/review/v2/non-human/${characterId}/exclude`, { method: "POST" }),
+
+  bulkApplyNonHumanCandidates: (payload: NonHumanBulkApplyRequest) =>
+    request<NonHumanBulkApplyResponse>("/review/v2/non-human/bulk-apply", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   recalculateNonHumanCandidates: () =>
     request<NonHumanRecalculateSummary>("/review/v2/non-human/recalculate", { method: "POST" }),

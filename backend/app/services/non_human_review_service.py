@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -14,6 +15,9 @@ from app.models.global_character import GlobalCharacter
 from app.models.global_character_review import GlobalCharacterReview
 from app.services.db_write_queue import commit_db_session
 from app.services.review_service import ReviewService
+
+if TYPE_CHECKING:
+    from app.schemas.review import NonHumanBulkApplyItemRequest
 
 # ── 임계값(threshold)은 이 파일 한 곳에서만 관리한다 ─────────────────────
 # 후보 판정과 추천 등급(-1/3) 로직이 여러 서비스에 흩어지지 않도록 중앙화.
@@ -40,7 +44,7 @@ RATING_FILTER_RATED = "rated"
 RATING_FILTER_UNRATED = "unrated"
 RATING_FILTERS = (RATING_FILTER_ALL, RATING_FILTER_RATED, RATING_FILTER_UNRATED)
 
-CONFIRMABLE_RATINGS = (-1, 3)
+CONFIRMABLE_RATINGS = tuple(range(-1, 7))
 
 _NON_HUMAN_KEYWORDS = frozenset(NO_HUMAN_TAGS)
 _TOKEN_SPLIT_RE = re.compile(r"[_,\s]+")
@@ -277,9 +281,18 @@ class NonHumanReviewService:
         )
         return items, total
 
-    def confirm(self, character_id: int, *, rating: int) -> GlobalCharacter:
+    def confirm(
+        self,
+        character_id: int,
+        *,
+        rating: int,
+        cover_image_id: int | None = None,
+        gender: str | None = None,
+        base_prompt: str | None = None,
+        selected_tags: str | None = None,
+    ) -> GlobalCharacter:
         if rating not in CONFIRMABLE_RATINGS:
-            raise ValueError("rating must be -1 or 3 for non-human confirmation")
+            raise ValueError("rating must be between -1 and 6 for non-human confirmation")
 
         character = self.db.query(GlobalCharacter).filter(GlobalCharacter.id == character_id).first()
         if not character:
@@ -290,11 +303,19 @@ class NonHumanReviewService:
         # 변경이 그 커밋 한 번에 함께 반영되어 원자적으로 처리된다.
         character.non_human_review_status = CONFIRMED_STATUS
 
-        return self.review_service.save_v2_review_character(
-            character_id,
-            review_status="completed",
-            rating=rating,
-        )
+        try:
+            return self.review_service.save_v2_review_character(
+                character_id,
+                review_status="completed",
+                cover_image_id=cover_image_id,
+                gender=gender,
+                rating=rating,
+                base_prompt=base_prompt,
+                selected_tags=selected_tags,
+            )
+        except Exception:
+            self.db.rollback()
+            raise
 
     def exclude(self, character_id: int) -> GlobalCharacter:
         character = (
@@ -311,6 +332,44 @@ class NonHumanReviewService:
         commit_db_session(self.db)
         self.db.refresh(character)
         return character
+
+    def bulk_apply(
+        self, items: list[NonHumanBulkApplyItemRequest]
+    ) -> tuple[int, int, list[dict[str, str | int]]]:
+        """Apply independently staged non-human decisions in one request."""
+        applied = 0
+        failed = 0
+        results: list[dict[str, str | int]] = []
+
+        for item in items:
+            try:
+                if item.action == "confirm":
+                    # Schema validation guarantees a V2-compatible rating.
+                    if item.rating is None:
+                        raise ValueError("confirm action requires a rating")
+                    self.confirm(
+                        item.character_id,
+                        rating=item.rating,
+                        cover_image_id=item.cover_image_id,
+                        gender=item.gender,
+                        base_prompt=item.base_prompt,
+                        selected_tags=item.selected_tags,
+                    )
+                else:
+                    self.exclude(item.character_id)
+                applied += 1
+                results.append({"character_id": item.character_id, "status": "applied"})
+            except Exception as exc:
+                # Each action commits independently. Always restore a clean session
+                # and return an item result so an unexpected failure cannot hide
+                # earlier successful commits from the batch client.
+                self.db.rollback()
+                failed += 1
+                results.append(
+                    {"character_id": item.character_id, "status": "failed", "error": str(exc)}
+                )
+
+        return applied, failed, results
 
     @staticmethod
     def _assert_actionable(character: GlobalCharacter) -> None:

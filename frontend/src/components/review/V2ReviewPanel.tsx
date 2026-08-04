@@ -52,6 +52,10 @@ type SingleReviewSession =
   | { source: "review"; itemId: number }
   | { source: "non_human"; itemId: number };
 
+// Rating decisions live in the shared General Review draft. Only candidate exclusion
+// (key e) has no draft equivalent, so it keeps one small mode-specific staged flag.
+type NonHumanOverlayDecision = { action: "exclude" };
+
 const V2_RATING_FLOW: Array<{ question: string; result: string }> = [
   { question: "사람 또는 고정된 사람형 캐릭터가 아닌가요? (고정 외형 없는 플레이어 대리 캐릭터 포함)", result: "-1" },
   { question: "레이팅 가능한 이미지 생성에 실패했나요?", result: "0" },
@@ -311,6 +315,9 @@ export function V2ReviewPanel() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewFit, setPreviewFit] = useState(true);
   const [linkingItem, setLinkingItem] = useState<V2ReviewCharacter | null>(null);
+  // The link modal is shared by both tabs (opened from the general grid, its keyboard
+  // 'a', or the non-human overlay's 'a'); tracks which list to reload once linked.
+  const [linkingItemSource, setLinkingItemSource] = useState<"review" | "non_human">("review");
   const [pageInput, setPageInput] = useState("1");
   const [singleSession, setSingleSession] = useState<SingleReviewSession | null>(null);
   const pendingSinglePageDirectionRef = useRef<{ direction: 1 | -1; targetSkip: number } | null>(null);
@@ -330,6 +337,11 @@ export function V2ReviewPanel() {
   const [nhFailedMessages, setNhFailedMessages] = useState<Record<number, string>>({});
   const [nhPreviewOpen, setNhPreviewOpen] = useState(false);
   const [nhPreviewFit, setNhPreviewFit] = useState(true);
+  // Detail-overlay decisions are deliberately separate from the grid's immediate
+  // quick-review actions. They survive local overlay navigation until batch apply.
+  const [nhOverlayDecisions, setNhOverlayDecisions] = useState<Record<number, NonHumanOverlayDecision>>({});
+  const [nhOverlayFailedMessages, setNhOverlayFailedMessages] = useState<Record<number, string>>({});
+  const [nhOverlayBulkSaving, setNhOverlayBulkSaving] = useState(false);
   const nhItemsRef = useRef<V2ReviewCharacter[]>([]);
   const nhFocusIndexRef = useRef(0);
 
@@ -648,17 +660,21 @@ export function V2ReviewPanel() {
     ? drafts[singleSessionItem.id] ?? createV2DraftForItem(singleSessionItem)
     : null;
   const singleModeRowIndex = singleSessionRowIndex;
+  const singleModeNonHumanDecision =
+    singleModeIsNonHuman && singleSessionItem ? nhOverlayDecisions[singleSessionItem.id] : undefined;
   const singleModeGlobalIndex = singleSession
     ? (singleModeIsNonHuman ? nhSkip : skip) + Math.max(0, singleSessionRowIndex)
     : 0;
   const singleModeTotal = singleModeIsNonHuman ? nhTotal : total;
   const singleModeLocked = singleModeIsNonHuman
-    ? true
+    ? nhOverlayBulkSaving || (singleSessionItem ? isCharacterRegenerating(singleSessionItem.id) : false)
     : singleSessionItem
       ? submittingId === singleSessionItem.id ||
         isCharacterRegenerating(singleSessionItem.id) ||
         savingIds.has(singleSessionItem.id)
       : false;
+
+  const singleModeDisplayDraft = singleModeDraft;
 
   const closeSingleSession = useCallback(() => {
     if (singleSessionRowIndex >= 0) {
@@ -713,17 +729,272 @@ export function V2ReviewPanel() {
     [singleSession, singleSessionRowIndex, nhFocusIndex, nhItems],
   );
 
+  // Shared by the grid's focused-card shortcut and the single-item overlay so both
+  // "accept suggested rating" entry points run the exact same validation/confirm call.
+  const nhConfirmProposedFor = useCallback(
+    (item: V2ReviewCharacter) => {
+      if (nhActingIds.has(item.id)) {
+        return;
+      }
+      const suggested = item.non_human_suggested_rating;
+      if (suggested !== -1 && suggested !== 3) {
+        setNhActionMessage("제안된 레이팅이 없습니다. -1 또는 3을 직접 선택하세요.");
+        return;
+      }
+      void nhConfirm(item, suggested);
+    },
+    [nhActingIds, nhConfirm],
+  );
+
   const nhConfirmProposed = useCallback(() => {
-    if (!nhFocusedItem || nhFocusedActing) {
+    if (!nhFocusedItem) {
       return;
     }
-    const suggested = nhFocusedItem.non_human_suggested_rating;
-    if (suggested !== -1 && suggested !== 3) {
-      setNhActionMessage("제안된 레이팅이 없습니다. -1 또는 3을 직접 선택하세요.");
+    nhConfirmProposedFor(nhFocusedItem);
+  }, [nhFocusedItem, nhConfirmProposedFor]);
+
+  // The only non-human-specific staged action left: 'e' has no draft equivalent,
+  // so exclusion still needs an explicit flag distinct from the shared draft.
+  const stageNonHumanOverlayExclude = useCallback((item: V2ReviewCharacter) => {
+    setNhOverlayDecisions((current) => ({ ...current, [item.id]: { action: "exclude" } }));
+    setNhOverlayFailedMessages((current) => {
+      if (!(item.id in current)) return current;
+      const next = { ...current };
+      delete next[item.id];
+      return next;
+    });
+    setNhActionMessage(`${item.character_tag} 제외를 임시 저장했습니다. Ctrl+Enter로 적용하세요.`);
+  }, []);
+
+  // Rating keys write straight into the shared draft (parity with General), but must
+  // also clear any staged exclude - pressing a rating after 'e' cancels/replaces it.
+  const setNonHumanOverlayRating = useCallback(
+    (item: V2ReviewCharacter, value: number) => {
+      const current = drafts[item.id] ?? createV2DraftForItem(item);
+      updateDraft(item.id, { ...current, rating: toggleRating(current.rating, value) });
+      setNhOverlayDecisions((currentDecisions) => {
+        if (currentDecisions[item.id]?.action !== "exclude") return currentDecisions;
+        const next = { ...currentDecisions };
+        delete next[item.id];
+        return next;
+      });
+      setNhOverlayFailedMessages((current) => {
+        if (!(item.id in current)) return current;
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+    },
+    [drafts],
+  );
+
+  type NonHumanPlanItem =
+    | { kind: "exclude"; item: V2ReviewCharacter }
+    | { kind: "confirm"; item: V2ReviewCharacter; draft: V2CharacterDraft };
+
+  // A staged exclude always wins (it has no draft representation to compare against).
+  // Otherwise a change only counts if the draft actually differs from the item's saved
+  // state. The non-human "confirm" bulk action accepts any V2 rating (-1..6) plus the
+  // full draft payload, so every rated draft goes through it and marks the candidate
+  // decision atomically. Like General Review bulk-save, unrated edits remain staged.
+  const buildNonHumanPlan = useCallback(
+    (pool: V2ReviewCharacter[]): NonHumanPlanItem[] => {
+      const planned: NonHumanPlanItem[] = [];
+      for (const item of pool) {
+        if (nhOverlayDecisions[item.id]?.action === "exclude") {
+          planned.push({ kind: "exclude", item });
+          continue;
+        }
+        const draft = drafts[item.id];
+        if (!draft || !isDraftChanged(item, draft) || draft.rating === null) {
+          continue;
+        }
+        planned.push({ kind: "confirm", item, draft });
+      }
+      return planned;
+    },
+    [nhOverlayDecisions, drafts],
+  );
+
+  // "confirm" carries the complete editable payload (rating/cover image/gender/prompt/
+  // tags) in a single bulk-apply request - the backend applies both the candidate
+  // decision and the V2 save atomically (see NonHumanReviewService.confirm). "exclude"
+  // is status-only; unrated draft edits are deliberately not part of this plan.
+  const runNonHumanPlan = useCallback(async (planned: NonHumanPlanItem[]) => {
+    const appliedIds = new Set<number>();
+    const failedById: Record<number, string> = {};
+
+    const bulkItems = planned.map((entry) => {
+      if (entry.kind === "exclude") {
+        return { character_id: entry.item.id, action: "exclude" as const };
+      }
+      const chips = v2AppearanceTagChips(entry.item);
+      const enabledTags = entry.draft.enabledTags.size > 0 ? entry.draft.enabledTags : defaultEnabledTagKeys(chips);
+      const selectedImage = entry.item.images[entry.draft.imageIndex];
+      return {
+        character_id: entry.item.id,
+        action: "confirm" as const,
+        rating: entry.draft.rating as number,
+        cover_image_id: selectedImage ? selectedImage.id : null,
+        gender: entry.draft.gender,
+        base_prompt: resolveV2FinalPrompt(entry.item, { ...entry.draft, enabledTags }),
+        selected_tags: v2SelectedTagsPayload(entry.item, enabledTags),
+      };
+    });
+
+    if (bulkItems.length > 0) {
+      try {
+        const response = await api.bulkApplyNonHumanCandidates({ items: bulkItems });
+        for (const result of response.results) {
+          if (result.status === "applied") {
+            appliedIds.add(result.character_id);
+          } else {
+            failedById[result.character_id] = result.error || "적용에 실패했습니다.";
+          }
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "임시 변경사항 적용에 실패했습니다.";
+        for (const bulkItem of bulkItems) {
+          failedById[bulkItem.character_id] = message;
+        }
+      }
+    }
+
+    return { appliedIds, failedById };
+  }, []);
+
+  // Ctrl+Enter: batch-applies every staged change across the whole non-human queue
+  // (not just the open item) - matches the existing "batch persistence" behavior.
+  const applyNonHumanOverlayDecisions = useCallback(async () => {
+    if (nhOverlayBulkSaving) {
       return;
     }
-    void nhConfirm(nhFocusedItem, suggested);
-  }, [nhFocusedItem, nhFocusedActing, nhConfirm]);
+    const planned = buildNonHumanPlan(nhItems);
+    if (planned.length === 0) {
+      const hasUnratedDraft = nhItems.some((item) => {
+        const draft = drafts[item.id];
+        return draft && isDraftChanged(item, draft) && draft.rating === null && !nhOverlayDecisions[item.id];
+      });
+      setNhActionMessage(
+        hasUnratedDraft
+          ? "레이팅이 없는 편집 내용은 임시 상태로 유지됩니다. 저장하려면 레이팅을 선택하세요."
+          : "적용할 임시 변경사항이 없습니다.",
+      );
+      return;
+    }
+
+    setNhOverlayBulkSaving(true);
+    setNhError(null);
+    try {
+      const { appliedIds, failedById } = await runNonHumanPlan(planned);
+
+      setNhOverlayDecisions((current) =>
+        Object.fromEntries(Object.entries(current).filter(([characterId]) => !appliedIds.has(Number(characterId)))),
+      );
+      setNhOverlayFailedMessages(failedById);
+      setDrafts((current) => {
+        const next = { ...current };
+        for (const id of appliedIds) {
+          delete next[id];
+        }
+        return next;
+      });
+
+      const currentId = singleSession?.source === "non_human" ? singleSession.itemId : null;
+      const currentIndex = currentId == null ? -1 : nhItems.findIndex((item) => item.id === currentId);
+      const remainingItems = nhItems.filter((item) => !appliedIds.has(item.id));
+      const preferredItem =
+        currentId != null && appliedIds.has(currentId)
+          ? remainingItems[currentIndex] ?? remainingItems[Math.max(0, currentIndex - 1)] ?? null
+          : remainingItems.find((item) => item.id === currentId) ?? remainingItems[0] ?? null;
+
+      setNhItems(remainingItems);
+      setNhTotal((current) => Math.max(0, current - appliedIds.size));
+      if (preferredItem) {
+        setNhFocusIndex(Math.max(0, remainingItems.findIndex((item) => item.id === preferredItem.id)));
+        setSingleSession((current) =>
+          current?.source === "non_human" ? { source: "non_human", itemId: preferredItem.id } : current,
+        );
+      } else if (currentId != null && appliedIds.has(currentId)) {
+        setSingleSession(null);
+      }
+
+      const failedCount = Object.keys(failedById).length;
+      setNhActionMessage(
+        failedCount > 0
+          ? `${appliedIds.size}개 적용, ${failedCount}개 실패했습니다. 실패 항목은 임시 변경으로 유지됩니다.`
+          : `${appliedIds.size}개 변경사항을 적용했습니다.`,
+      );
+      await loadNonHumanQueue(preferredItem?.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "임시 변경사항 적용에 실패했습니다.";
+      setNhError(message);
+    } finally {
+      setNhOverlayBulkSaving(false);
+    }
+  }, [
+    buildNonHumanPlan,
+    drafts,
+    loadNonHumanQueue,
+    nhItems,
+    nhOverlayBulkSaving,
+    nhOverlayDecisions,
+    runNonHumanPlan,
+    singleSession,
+  ]);
+
+  // Bare Enter in the overlay: persists just the open item now (parity with General's
+  // single-item complete), instead of waiting for a Ctrl+Enter batch apply.
+  const completeNonHumanSingleItem = useCallback(
+    async (item: V2ReviewCharacter) => {
+      if (nhOverlayBulkSaving) {
+        return;
+      }
+      const planned = buildNonHumanPlan([item]);
+      if (planned.length === 0) {
+        const draft = drafts[item.id];
+        setNhActionMessage(
+          draft && isDraftChanged(item, draft) && draft.rating === null
+            ? "레이팅을 선택해야 현재 편집 내용을 저장할 수 있습니다."
+            : "변경된 내용이 없습니다.",
+        );
+        return;
+      }
+      setNhOverlayBulkSaving(true);
+      setNhError(null);
+      try {
+        const { appliedIds, failedById } = await runNonHumanPlan(planned);
+        if (appliedIds.has(item.id)) {
+          setNhOverlayDecisions((current) => {
+            if (!(item.id in current)) return current;
+            const next = { ...current };
+            delete next[item.id];
+            return next;
+          });
+          setNhOverlayFailedMessages((current) => {
+            if (!(item.id in current)) return current;
+            const next = { ...current };
+            delete next[item.id];
+            return next;
+          });
+          forgetDraft(item.id);
+          setNhActionMessage(`${item.character_tag} 저장 완료 · 다음 항목으로 이동`);
+          nhAdvance(item.id);
+        } else {
+          const message = failedById[item.id] || "저장에 실패했습니다.";
+          setNhOverlayFailedMessages((current) => ({ ...current, [item.id]: message }));
+          setNhError(message);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "저장에 실패했습니다.";
+        setNhError(message);
+        setNhOverlayFailedMessages((current) => ({ ...current, [item.id]: message }));
+      } finally {
+        setNhOverlayBulkSaving(false);
+      }
+    },
+    [buildNonHumanPlan, drafts, nhAdvance, nhOverlayBulkSaving, runNonHumanPlan],
+  );
 
   useEffect(() => {
     if (!nhFocusedItem || !nhPreviewSrc) {
@@ -988,17 +1259,18 @@ export function V2ReviewPanel() {
 
   const updateDraft = (characterId: number, draft: V2CharacterDraft) => {
     setDrafts((current) => ({ ...current, [characterId]: draft }));
-    const item = itemsRef.current.find((entry) => entry.id === characterId);
+    const item = [...itemsRef.current, ...nhItemsRef.current].find((entry) => entry.id === characterId);
     setDirtyIds((current) =>
       item && !isDraftChanged(item, draft) ? removeFromSet(current, characterId) : addToSet(current, characterId),
     );
     clearFailedMessage(characterId);
   };
 
-  const toggleTag = (characterId: number, tagKey: string) => {
-    const item = items.find((entry) => entry.id === characterId);
-    if (!item) return;
-    const current = drafts[characterId] ?? createV2DraftForItem(item);
+  // Takes the full item (not just its id) because it also serves the non-human
+  // overlay, whose items live in nhItems rather than the general `items` list -
+  // an id-only lookup against `items` silently no-oped for those.
+  const toggleTag = (item: V2ReviewCharacter, tagKey: string) => {
+    const current = drafts[item.id] ?? createV2DraftForItem(item);
     const chips = v2AppearanceTagChips(item);
     const enabled = new Set(current.enabledTags.size > 0 ? current.enabledTags : defaultEnabledTagKeys(chips));
     if (enabled.has(tagKey)) {
@@ -1006,11 +1278,11 @@ export function V2ReviewPanel() {
     } else {
       enabled.add(tagKey);
     }
-    updateDraft(characterId, { ...current, enabledTags: enabled });
+    updateDraft(item.id, { ...current, enabledTags: enabled });
   };
 
   const setRating = (characterId: number, value: number) => {
-    const item = items.find((entry) => entry.id === characterId);
+    const item = [...items, ...nhItems].find((entry) => entry.id === characterId);
     if (!item) return;
     const current = drafts[characterId] ?? createV2DraftForItem(item);
     updateDraft(characterId, { ...current, rating: toggleRating(current.rating, value) });
@@ -1363,24 +1635,33 @@ export function V2ReviewPanel() {
     });
   }, [focusedLocked, previewSrc]);
 
+  // Item-generic so the single-item overlay can cycle multicolor for whichever
+  // candidate it currently shows (General Review focus or a pinned non-human queue
+  // item), not just whatever the grid happens to have focused.
+  const cycleMulticolorForItem = useCallback((item: V2ReviewCharacter, draft: V2CharacterDraft) => {
+    const chips = v2AppearanceTagChips(item).filter((chip) => chip.group === "multi");
+    if (chips.length === 0) {
+      return;
+    }
+    const allChips = v2AppearanceTagChips(item);
+    const enabled = new Set(draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(allChips));
+    const enabledMultiIndexes = chips
+      .map((chip, index) => (enabled.has(chip.key) ? index : -1))
+      .filter((index) => index >= 0);
+    const nextIndex = enabledMultiIndexes.length === 1 ? (enabledMultiIndexes[0] + 1) % chips.length : 0;
+    for (const chip of chips) {
+      enabled.delete(chip.key);
+    }
+    enabled.add(chips[nextIndex].key);
+    updateDraft(item.id, { ...draft, enabledTags: enabled });
+  }, []);
+
   const cycleFocusedMulticolor = useCallback(() => {
     if (!focusedItem || !focusedDraft || focusedLocked || multicolorChips.length === 0) {
       return;
     }
-    const allChips = v2AppearanceTagChips(focusedItem);
-    const enabled = new Set(
-      focusedDraft.enabledTags.size > 0 ? focusedDraft.enabledTags : defaultEnabledTagKeys(allChips),
-    );
-    const enabledMultiIndexes = multicolorChips
-      .map((chip, index) => (enabled.has(chip.key) ? index : -1))
-      .filter((index) => index >= 0);
-    const nextIndex = enabledMultiIndexes.length === 1 ? (enabledMultiIndexes[0] + 1) % multicolorChips.length : 0;
-    for (const chip of multicolorChips) {
-      enabled.delete(chip.key);
-    }
-    enabled.add(multicolorChips[nextIndex].key);
-    updateDraft(focusedItem.id, { ...focusedDraft, enabledTags: enabled });
-  }, [focusedDraft, focusedItem, focusedLocked, multicolorChips]);
+    cycleMulticolorForItem(focusedItem, focusedDraft);
+  }, [cycleMulticolorForItem, focusedDraft, focusedItem, focusedLocked, multicolorChips]);
 
   const selectFocusedImage = useCallback(
     (index: number) => {
@@ -1395,36 +1676,46 @@ export function V2ReviewPanel() {
     [focusedDraft, focusedItem, focusedLocked],
   );
 
+  // Parameterized so the single-item overlay can trigger regeneration for whichever
+  // candidate it currently displays (General Review focus or a pinned non-human queue
+  // item) without duplicating the prompt-resolution/job-start logic.
+  const regenerateItem = useCallback(
+    async (item: V2ReviewCharacter, draft: V2CharacterDraft) => {
+      if (isCharacterRegenerating(item.id)) {
+        // 실행 중 중복 재생성 시도는 무시한다.
+        return;
+      }
+      const chips = v2AppearanceTagChips(item);
+      const enabledTags = draft.enabledTags.size > 0 ? draft.enabledTags : defaultEnabledTagKeys(chips);
+      const finalPrompt = resolveV2FinalPrompt(item, { ...draft, enabledTags });
+      if (!finalPrompt.trim()) {
+        setError("프롬프트가 비어 있어 재생성할 수 없습니다.");
+        return;
+      }
+      setError(null);
+      try {
+        await startV2Regeneration(item.id, { base_prompt: finalPrompt });
+        setPreviewOpen(false);
+        setActionMessage(`${item.character_tag} 재생성 시작`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "재생성에 실패했습니다.";
+        if (message.toLowerCase().includes("already in progress")) {
+          // 409: 백엔드에서 이미 진행 중으로 판단 - 조용히 무시한다.
+          return;
+        }
+        setError(message);
+        setActionMessage(null);
+      }
+    },
+    [isCharacterRegenerating, startV2Regeneration],
+  );
+
   const regenerateFocused = useCallback(async () => {
     if (!focusedItem || !focusedDraft) {
       return;
     }
-    if (isCharacterRegenerating(focusedItem.id)) {
-      // 실행 중 중복 재생성 시도는 무시한다.
-      return;
-    }
-    const chips = v2AppearanceTagChips(focusedItem);
-    const enabledTags = focusedDraft.enabledTags.size > 0 ? focusedDraft.enabledTags : defaultEnabledTagKeys(chips);
-    const finalPrompt = resolveV2FinalPrompt(focusedItem, { ...focusedDraft, enabledTags });
-    if (!finalPrompt.trim()) {
-      setError("프롬프트가 비어 있어 재생성할 수 없습니다.");
-      return;
-    }
-    setError(null);
-    try {
-      await startV2Regeneration(focusedItem.id, { base_prompt: finalPrompt });
-      setPreviewOpen(false);
-      setActionMessage(`${focusedItem.character_tag} 재생성 시작`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "재생성에 실패했습니다.";
-      if (message.toLowerCase().includes("already in progress")) {
-        // 409: 백엔드에서 이미 진행 중으로 판단 - 조용히 무시한다.
-        return;
-      }
-      setError(message);
-      setActionMessage(null);
-    }
-  }, [focusedDraft, focusedItem, isCharacterRegenerating, startV2Regeneration]);
+    await regenerateItem(focusedItem, focusedDraft);
+  }, [focusedDraft, focusedItem, regenerateItem]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -1599,6 +1890,7 @@ export function V2ReviewPanel() {
       }
       if (key === "a") {
         event.preventDefault();
+        setLinkingItemSource("review");
         setLinkingItem(focusedItem);
       }
     };
@@ -1738,18 +2030,32 @@ export function V2ReviewPanel() {
     setPanelMode(mode);
   };
 
-  const singleReviewOverlay = singleModeOpen && singleModeItem && singleModeDraft ? (
+  const singleModeSaveStatus: V2ReviewCardSaveStatus | null = singleModeItem
+    ? singleModeIsNonHuman
+      ? nhOverlayBulkSaving
+        ? { kind: "saving", label: "변경사항 적용 중" }
+        : nhOverlayFailedMessages[singleModeItem.id]
+          ? { kind: "failed", label: "적용 실패", detail: nhOverlayFailedMessages[singleModeItem.id] }
+          : singleModeNonHumanDecision?.action === "exclude"
+            ? { kind: "dirty", label: "임시 저장: 후보 제외" }
+            : singleModeDisplayDraft && isDraftChanged(singleModeItem, singleModeDisplayDraft)
+              ? { kind: "dirty", label: "미저장 변경" }
+              : { kind: "clean", label: "변경 없음" }
+      : getSaveStatus(singleModeItem, v2JobsByCharacter[singleModeItem.id])
+    : null;
+
+  const singleReviewOverlay = singleModeOpen && singleModeItem && singleModeDisplayDraft && singleModeSaveStatus ? (
     <V2SingleReviewOverlay
       open={singleModeOpen}
       item={singleModeItem}
       rowIndex={singleModeRowIndex}
       globalIndex={singleModeGlobalIndex}
       total={singleModeTotal}
-      draft={singleModeDraft}
+      draft={singleModeDisplayDraft}
       thumbSize={thumbSize}
       filters={reviewListFilters}
       locked={singleModeLocked}
-      saveStatus={getSaveStatus(singleModeItem, v2JobsByCharacter[singleModeItem.id])}
+      saveStatus={singleModeSaveStatus}
       regenerateMessage={v2JobsByCharacter[singleModeItem.id]?.message}
       regenerateProgress={
         v2JobsByCharacter[singleModeItem.id] && v2JobsByCharacter[singleModeItem.id].total > 0
@@ -1758,27 +2064,45 @@ export function V2ReviewPanel() {
       }
       regenerating={isCharacterRegenerating(singleModeItem.id)}
       suspended={Boolean(linkingItem)}
-      readOnly={singleModeIsNonHuman}
+      readOnly={false}
       disableNeighborPreload={singleModeIsNonHuman}
       canNavigatePrevious={!singleModeIsNonHuman || singleModeRowIndex > 0}
       canNavigateNext={!singleModeIsNonHuman || singleModeRowIndex < nhItems.length - 1}
       onClose={closeSingleSession}
       onNavigateLocal={singleModeIsNonHuman ? nhNavigateSingleLocal : navigateSingleLocal}
       onNavigatePage={singleModeIsNonHuman ? undefined : navigateSinglePage}
-      onDraftChange={singleModeIsNonHuman ? undefined : (next) => updateDraft(singleModeItem.id, next)}
-      onToggleTag={singleModeIsNonHuman ? undefined : (tagKey) => toggleTag(singleModeItem.id, tagKey)}
-      onRate={singleModeIsNonHuman ? undefined : (value) => setRating(singleModeItem.id, value)}
-      onCycleMulticolor={singleModeIsNonHuman ? undefined : cycleFocusedMulticolor}
-      onRegenerate={singleModeIsNonHuman ? undefined : () => void regenerateFocused()}
-      onComplete={singleModeIsNonHuman ? undefined : () => void completeItem(singleModeItem)}
-      onBulkComplete={singleModeIsNonHuman ? undefined : () => void bulkSaveRatedItems()}
-      onOpenLinkModal={
+      onDraftChange={(next) => updateDraft(singleModeItem.id, next)}
+      onToggleTag={(tagKey) => toggleTag(singleModeItem, tagKey)}
+      onRate={
         singleModeIsNonHuman
-          ? undefined
-          : () => {
-              setLinkingItem(singleModeItem);
-            }
+          ? (value) => setNonHumanOverlayRating(singleModeItem, value)
+          : (value) => setRating(singleModeItem.id, value)
       }
+      onCycleMulticolor={
+        singleModeIsNonHuman
+          ? () => cycleMulticolorForItem(singleModeItem, singleModeDisplayDraft)
+          : cycleFocusedMulticolor
+      }
+      onRegenerate={() => void regenerateItem(singleModeItem, singleModeDisplayDraft)}
+      onComplete={
+        singleModeIsNonHuman
+          ? () => void completeNonHumanSingleItem(singleModeItem)
+          : () => void completeItem(singleModeItem)
+      }
+      onBulkComplete={singleModeIsNonHuman ? undefined : () => void bulkSaveRatedItems()}
+      onNonHumanExclude={
+        singleModeIsNonHuman
+          ? () => {
+              if (nhOverlayBulkSaving) return;
+              stageNonHumanOverlayExclude(singleModeItem);
+            }
+          : undefined
+      }
+      onNonHumanBulkApply={singleModeIsNonHuman ? () => void applyNonHumanOverlayDecisions() : undefined}
+      onOpenLinkModal={() => {
+        setLinkingItemSource(singleModeIsNonHuman ? "non_human" : "review");
+        setLinkingItem(singleModeItem);
+      }}
     />
   ) : null;
 
@@ -1885,16 +2209,15 @@ export function V2ReviewPanel() {
             <summary className="review-shortcut-guide-summary">
               <span className="review-shortcut-guide-title">단축키</span>
               <span className="review-shortcut-guide-hint">
-                Enter 제안 확정 · 3 / - (또는 x) 확정 · e 제외 · s 상세 · ←→ 카드 이동 · Space 확대 · q/w Danbooru
+                s 상세 · 상세 0–6/z/x 레이팅 · g 성별 · c 다중색 · a 부모 연결 · e 후보 제외 · Ctrl+Enter 일괄 적용
               </span>
             </summary>
             <div className="review-shortcut-guide-body">
-              <span>Enter 제안된 레이팅 확정 후 다음으로 이동</span>
-              <span>3 rating 3 확정 후 이동</span>
-              <span>- / x rating -1 확정 후 이동</span>
-              <span>e 제외 후 이동</span>
-              <span>s 선택 카드 상세</span>
-              <span>←→ 카드 이동</span>
+              <span>그리드 Enter/3/x/e는 빠른 즉시 처리, s 상세 팝업은 일반 검수와 같은 편집 기능 사용</span>
+              <span>상세 0–6 · z=0 · -=x=-1 · g 성별 · c 다중색 · a 부모 연결</span>
+              <span>상세 e 후보 제외 임시 지정 · 레이팅을 다시 선택하면 제외 취소</span>
+              <span>상세 Enter 현재 항목 저장 · Ctrl+Enter 레이팅된 임시 변경 일괄 적용</span>
+              <span>r 현재 이미지 재생성 · ←→ 항목 이동</span>
               <span>Space 이미지 확대</span>
               <span>q/w Danbooru 게시물/위키</span>
             </div>
@@ -2191,11 +2514,14 @@ export function V2ReviewPanel() {
                 }
                 onSelect={() => setFocusIndex(rowIndex)}
                 onDraftChange={(next) => updateDraft(item.id, next)}
-                onToggleTag={(tagKey) => toggleTag(item.id, tagKey)}
+                onToggleTag={(tagKey) => toggleTag(item, tagKey)}
                 onRate={(value) => setRating(item.id, value)}
                 onRegenerate={focused ? () => void regenerateFocused() : undefined}
                 onComplete={() => void completeItem(item)}
-                onOpenLinkModal={() => setLinkingItem(item)}
+                onOpenLinkModal={() => {
+                  setLinkingItemSource("review");
+                  setLinkingItem(item);
+                }}
                 regenerating={locked}
               />
             );
@@ -2211,14 +2537,6 @@ export function V2ReviewPanel() {
           fitToScreen={previewFit}
           onToggleFit={() => setPreviewFit((fit) => !fit)}
           onClose={() => setPreviewOpen(false)}
-        />
-      ) : null}
-
-      {linkingItem ? (
-        <CharacterLinkModal
-          character={toLinkableSummary(linkingItem)}
-          onClose={() => setLinkingItem(null)}
-          onLinked={() => void loadReviews(linkingItem.id)}
         />
       ) : null}
 
@@ -2240,6 +2558,19 @@ export function V2ReviewPanel() {
       ) : null}
       </>
       )}
+      {linkingItem ? (
+        <CharacterLinkModal
+          character={toLinkableSummary(linkingItem)}
+          onClose={() => setLinkingItem(null)}
+          onLinked={() => {
+            if (linkingItemSource === "non_human") {
+              void loadNonHumanQueue(linkingItem.id);
+            } else {
+              void loadReviews(linkingItem.id);
+            }
+          }}
+        />
+      ) : null}
       {singleReviewOverlay}
     </>
   );

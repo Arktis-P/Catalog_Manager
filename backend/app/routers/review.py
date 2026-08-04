@@ -24,8 +24,12 @@ from app.schemas.review import (
     GlobalCatalogReviewListResponse,
     GlobalCatalogReviewPurgeUnselectedSelectedRequest,
     GlobalCatalogReviewPurgeUnselectedResponse,
+    NonHumanBulkApplyItemResult,
+    NonHumanBulkApplyRequest,
+    NonHumanBulkApplyResponse,
     NonHumanConfirmRequest,
     NonHumanConfirmResponse,
+    NonHumanExcludeRequest,
     NonHumanExcludeResponse,
     NonHumanRecalculateResponse,
     V2BulkCompleteItemResult,
@@ -379,7 +383,14 @@ def confirm_non_human_candidate(
     service: NonHumanReviewService = Depends(get_non_human_review_service),
 ):
     try:
-        character = service.confirm(character_id, rating=payload.rating)
+        character = service.confirm(
+            character_id,
+            rating=payload.rating,
+            cover_image_id=payload.cover_image_id,
+            gender=payload.gender,
+            base_prompt=payload.base_prompt,
+            selected_tags=payload.selected_tags,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     review = character.review
@@ -391,9 +402,23 @@ def confirm_non_human_candidate(
     )
 
 
+@router.post("/v2/non-human/bulk-apply", response_model=NonHumanBulkApplyResponse)
+def bulk_apply_non_human_candidates(
+    payload: NonHumanBulkApplyRequest,
+    service: NonHumanReviewService = Depends(get_non_human_review_service),
+):
+    applied, failed, results = service.bulk_apply(payload.items)
+    return NonHumanBulkApplyResponse(
+        applied=applied,
+        failed=failed,
+        results=[NonHumanBulkApplyItemResult(**result) for result in results],
+    )
+
+
 @router.post("/v2/non-human/{character_id}/exclude", response_model=NonHumanExcludeResponse)
 def exclude_non_human_candidate(
     character_id: int,
+    payload: NonHumanExcludeRequest | None = None,
     service: NonHumanReviewService = Depends(get_non_human_review_service),
 ):
     try:

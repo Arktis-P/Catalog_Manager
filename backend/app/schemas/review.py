@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class AppearanceReviewItemResponse(BaseModel):
@@ -338,14 +338,11 @@ class V2ReviewCharacterListResponse(BaseModel):
 
 
 class NonHumanConfirmRequest(BaseModel):
-    rating: int
-
-    @field_validator("rating")
-    @classmethod
-    def validate_rating(cls, value: int) -> int:
-        if value not in (-1, 3):
-            raise ValueError("rating must be -1 or 3")
-        return value
+    rating: int = Field(ge=-1, le=6)
+    cover_image_id: int | None = None
+    gender: str | None = None
+    base_prompt: str | None = None
+    selected_tags: str | None = None
 
 
 class NonHumanConfirmResponse(BaseModel):
@@ -359,6 +356,55 @@ class NonHumanExcludeResponse(BaseModel):
     id: int
     non_human_review_status: str
     review_status: str | None = None
+
+
+class NonHumanExcludeRequest(BaseModel):
+    """Empty body schema so exclusion cannot silently accept confirm draft fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class NonHumanBulkApplyItemRequest(BaseModel):
+    character_id: int
+    action: Literal["confirm", "exclude"]
+    rating: int | None = Field(default=None, ge=-1, le=6)
+    cover_image_id: int | None = None
+    gender: str | None = None
+    base_prompt: str | None = None
+    selected_tags: str | None = None
+
+    @model_validator(mode="after")
+    def validate_action_rating(self) -> "NonHumanBulkApplyItemRequest":
+        if self.action == "confirm" and self.rating is None:
+            raise ValueError("confirm action requires a rating")
+        if self.action == "exclude" and any(
+            value is not None
+            for value in (
+                self.rating,
+                self.cover_image_id,
+                self.gender,
+                self.base_prompt,
+                self.selected_tags,
+            )
+        ):
+            raise ValueError("exclude action does not accept confirmation fields")
+        return self
+
+
+class NonHumanBulkApplyRequest(BaseModel):
+    items: list[NonHumanBulkApplyItemRequest] = Field(min_length=1, max_length=100)
+
+
+class NonHumanBulkApplyItemResult(BaseModel):
+    character_id: int
+    status: str
+    error: str | None = None
+
+
+class NonHumanBulkApplyResponse(BaseModel):
+    applied: int
+    failed: int
+    results: list[NonHumanBulkApplyItemResult]
 
 
 class NonHumanRecalculateResponse(BaseModel):

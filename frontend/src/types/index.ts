@@ -725,7 +725,11 @@ export interface NonHumanCandidateFilters {
 }
 
 export interface NonHumanConfirmPayload {
-  rating: -1 | 3;
+  rating: number;
+  cover_image_id?: number | null;
+  gender?: string | null;
+  base_prompt?: string | null;
+  selected_tags?: string | null;
 }
 
 export interface NonHumanConfirmResponse {
@@ -739,6 +743,34 @@ export interface NonHumanExcludeResponse {
   id: number;
   non_human_review_status: string;
   review_status: string | null;
+}
+
+export type NonHumanBulkApplyItem =
+  | {
+      character_id: number;
+      action: "confirm";
+      rating: number;
+      cover_image_id?: number | null;
+      gender?: string | null;
+      base_prompt?: string | null;
+      selected_tags?: string | null;
+    }
+  | { character_id: number; action: "exclude" };
+
+export interface NonHumanBulkApplyRequest {
+  items: NonHumanBulkApplyItem[];
+}
+
+export interface NonHumanBulkApplyResult {
+  character_id: number;
+  status: "applied" | "failed" | string;
+  error?: string | null;
+}
+
+export interface NonHumanBulkApplyResponse {
+  applied: number;
+  failed: number;
+  results: NonHumanBulkApplyResult[];
 }
 
 export interface NonHumanRecalculateSummary {

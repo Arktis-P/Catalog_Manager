@@ -12,9 +12,15 @@ import app.models  # noqa: F401 - register relationships
 from app.database import Base
 from app.models.character_series_link import CharacterSeriesLink
 from app.models.global_character import GlobalCharacter
+from app.models.global_character_image import GlobalCharacterImage
 from app.models.series import Series
 from app.routers import review as review_router
-from app.schemas.review import NonHumanConfirmRequest
+from app.schemas.review import (
+    NonHumanBulkApplyItemRequest,
+    NonHumanBulkApplyRequest,
+    NonHumanConfirmRequest,
+    NonHumanExcludeRequest,
+)
 from app.services.non_human_review_service import (
     CANDIDATE_SCORE_THRESHOLD,
     NonHumanReviewService,
@@ -190,9 +196,204 @@ def test_confirm_non_human_three_uses_v2_persistence_and_marks_confirmed(db: Ses
     assert character.review.rating == 3
 
 
-def test_confirm_rejects_ratings_other_than_minus_one_or_three() -> None:
+def test_confirm_accepts_full_v2_draft_and_rating_five(db: Session) -> None:
+    character = make_character(db, tag="full_draft_no_humans", gender="no_humans")
+    image = GlobalCharacterImage(global_character_id=character.id, image_path="cover.png")
+    db.add(image)
+    db.commit()
+    db.refresh(image)
+    apply_recalculation(character)
+    db.commit()
+
+    response = review_router.confirm_non_human_candidate(
+        character.id,
+        NonHumanConfirmRequest(
+            rating=5,
+            cover_image_id=image.id,
+            gender="1girl",
+            base_prompt="1.2::full draft::, purple hair",
+            selected_tags="purple_hair, glowing_eyes",
+        ),
+        service=NonHumanReviewService(db),
+    )
+
+    assert response.non_human_review_status == "confirmed"
+    assert response.review_status == "completed"
+    assert response.rating == 5
+    db.refresh(character)
+    assert character.gender == "1girl"
+    assert character.base_prompt == "1.2::full draft::, purple hair"
+    assert character.review is not None
+    assert character.review.cover_image_id == image.id
+    assert character.review.rating == 5
+    assert character.review.selected_tags == "purple_hair, glowing_eyes"
+    assert character.review.final_prompt == "1.2::full draft::, purple hair"
+    db.refresh(image)
+    assert image.is_cover is True
+
+
+def test_confirm_rejects_ratings_outside_v2_range() -> None:
     with pytest.raises(ValidationError):
-        NonHumanConfirmRequest(rating=2)
+        NonHumanConfirmRequest(rating=7)
+    with pytest.raises(ValidationError):
+        NonHumanConfirmRequest(rating=-2)
+
+
+def test_bulk_apply_confirms_and_excludes_independently(db: Session) -> None:
+    confirm_character = make_character(db, tag="bulk_no_humans", gender="no_humans")
+    exclude_character = make_character(db, tag="bulk_monster", gender="no_humans")
+    apply_recalculation(confirm_character)
+    apply_recalculation(exclude_character)
+    db.commit()
+
+    response = review_router.bulk_apply_non_human_candidates(
+        NonHumanBulkApplyRequest(
+            items=[
+                NonHumanBulkApplyItemRequest(character_id=confirm_character.id, action="confirm", rating=-1),
+                NonHumanBulkApplyItemRequest(character_id=exclude_character.id, action="exclude"),
+            ]
+        ),
+        service=NonHumanReviewService(db),
+    )
+
+    assert response.applied == 2
+    assert response.failed == 0
+    assert [item.status for item in response.results] == ["applied", "applied"]
+    db.refresh(confirm_character)
+    db.refresh(exclude_character)
+    assert confirm_character.non_human_review_status == "confirmed"
+    assert confirm_character.review is not None and confirm_character.review.rating == -1
+    assert exclude_character.non_human_review_status == "excluded"
+    assert exclude_character.review is None
+
+
+def test_bulk_apply_confirm_persists_v2_draft(db: Session) -> None:
+    character = make_character(db, tag="bulk_full_draft_spirit", gender="no_humans")
+    apply_recalculation(character)
+    db.commit()
+
+    response = review_router.bulk_apply_non_human_candidates(
+        NonHumanBulkApplyRequest(
+            items=[
+                NonHumanBulkApplyItemRequest(
+                    character_id=character.id,
+                    action="confirm",
+                    rating=0,
+                    gender="1boy",
+                    base_prompt="1.2::bulk draft::, silver hair",
+                    selected_tags="silver_hair, glowing_eyes",
+                )
+            ]
+        ),
+        service=NonHumanReviewService(db),
+    )
+
+    assert response.applied == 1
+    assert response.failed == 0
+    db.refresh(character)
+    assert character.non_human_review_status == "confirmed"
+    assert character.gender == "1boy"
+    assert character.base_prompt == "1.2::bulk draft::, silver hair"
+    assert character.review is not None
+    assert character.review.review_status == "completed"
+    assert character.review.rating == 0
+    assert character.review.selected_tags == "silver_hair, glowing_eyes"
+
+
+def test_bulk_apply_validation_rejects_invalid_action_rating_combinations() -> None:
+    with pytest.raises(ValidationError):
+        NonHumanBulkApplyItemRequest(character_id=1, action="confirm")
+    with pytest.raises(ValidationError):
+        NonHumanBulkApplyItemRequest(character_id=1, action="exclude", rating=3)
+    with pytest.raises(ValidationError):
+        NonHumanBulkApplyItemRequest(character_id=1, action="exclude", selected_tags="fur")
+    with pytest.raises(ValidationError):
+        NonHumanExcludeRequest(rating=3)
+    with pytest.raises(ValidationError):
+        NonHumanBulkApplyItemRequest(character_id=1, action="confirm", rating=7)
+    with pytest.raises(ValidationError):
+        NonHumanBulkApplyRequest(items=[])
+
+
+def test_bulk_apply_failure_does_not_block_later_item(db: Session) -> None:
+    invalid_character = make_character(db, tag="bulk_invalid", gender="no_humans")
+    valid_character = make_character(db, tag="bulk_valid", gender="no_humans")
+    apply_recalculation(invalid_character)
+    apply_recalculation(valid_character)
+    db.commit()
+
+    service = NonHumanReviewService(db)
+    service.exclude(invalid_character.id)
+
+    response = review_router.bulk_apply_non_human_candidates(
+        NonHumanBulkApplyRequest(
+            items=[
+                NonHumanBulkApplyItemRequest(character_id=invalid_character.id, action="confirm", rating=-1),
+                NonHumanBulkApplyItemRequest(character_id=valid_character.id, action="confirm", rating=3),
+            ]
+        ),
+        service=service,
+    )
+
+    assert response.applied == 1
+    assert response.failed == 1
+    assert response.results[0].status == "failed"
+    assert response.results[1].status == "applied"
+    db.refresh(valid_character)
+    assert valid_character.non_human_review_status == "confirmed"
+    assert valid_character.review is not None and valid_character.review.rating == 3
+
+
+def test_bulk_apply_unexpected_failure_is_reported_and_later_item_continues(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failed_character = make_character(db, tag="bulk_runtime_failure", gender="no_humans")
+    valid_character = make_character(db, tag="bulk_after_runtime_failure", gender="no_humans")
+    apply_recalculation(failed_character)
+    apply_recalculation(valid_character)
+    db.commit()
+
+    service = NonHumanReviewService(db)
+    original_confirm = service.confirm
+    call_count = 0
+
+    def flaky_confirm(character_id: int, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("simulated database failure")
+        return original_confirm(character_id, **kwargs)
+
+    monkeypatch.setattr(service, "confirm", flaky_confirm)
+
+    applied, failed, results = service.bulk_apply(
+        [
+            NonHumanBulkApplyItemRequest(character_id=failed_character.id, action="confirm", rating=-1),
+            NonHumanBulkApplyItemRequest(character_id=valid_character.id, action="confirm", rating=3),
+        ]
+    )
+
+    assert applied == 1
+    assert failed == 1
+    assert results[0]["status"] == "failed"
+    assert results[0]["error"] == "simulated database failure"
+    assert results[1]["status"] == "applied"
+    db.refresh(valid_character)
+    assert valid_character.non_human_review_status == "confirmed"
+
+
+def test_confirm_rolls_back_confirmed_status_when_v2_save_fails(db: Session) -> None:
+    character = make_character(db, tag="bad_cover_no_humans", gender="no_humans")
+    apply_recalculation(character)
+    db.commit()
+
+    with pytest.raises(ValueError, match="Cover image not found or rejected"):
+        NonHumanReviewService(db).confirm(character.id, rating=5, cover_image_id=999999)
+
+    db.refresh(character)
+    assert character.non_human_review_status == "pending"
+    assert character.review is None
 
 
 def test_exclude_marks_excluded_but_leaves_normal_review_pending(db: Session) -> None:
