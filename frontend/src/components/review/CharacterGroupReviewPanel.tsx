@@ -354,6 +354,7 @@ export function CharacterGroupReviewPanel() {
   // The row a user last interacted with. Space (and the per-row detail button) opens
   // the full image-rich detail overlay for exactly this one parent.
   const [selectedParentId, setSelectedParentId] = useState<number | null>(null);
+  const selectedRowRef = useRef<HTMLDivElement | null>(null);
 
   // Row-level text expansion is independent from the detail overlay: it fetches the
   // same read-only group detail but renders children/suggestions as plain text, with
@@ -410,6 +411,22 @@ export function CharacterGroupReviewPanel() {
   useEffect(() => {
     setSkip(0);
   }, [search, stateFilter, hasImageFilter, reviewStatusFilter, pageSize]);
+
+  useEffect(() => {
+    if (groups.length > 0) {
+      if (selectedParentId == null || !groups.some((g) => g.parent.id === selectedParentId)) {
+        setSelectedParentId(groups[0].parent.id);
+      }
+    } else {
+      setSelectedParentId(null);
+    }
+  }, [groups]);
+
+  useEffect(() => {
+    if (selectedParentId != null && selectedRowRef.current) {
+      selectedRowRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [selectedParentId]);
 
   const loadDetail = useCallback(async (parentId: number) => {
     setDetailLoading(true);
@@ -580,29 +597,36 @@ export function CharacterGroupReviewPanel() {
     }
   };
 
-  const recalculate = async () => {
-    if (!detail) {
-      return;
-    }
-    if (hasStagedActions && !window.confirm("재계산하면 저장하지 않은 임시 편집 내용이 초기화됩니다. 계속할까요?")) {
+  const recalculateParent = async (parentId: number) => {
+    if (detailParentId === parentId && hasStagedActions && !window.confirm("재계산하면 저장하지 않은 임시 편집 내용이 초기화됩니다. 계속할까요?")) {
       return;
     }
     setRecalculating(true);
     setDetailError(null);
     try {
-      const response = await api.recalculateCharacterGroup(detail.parent.id);
-      setDetail(response);
-      setStagedActions({});
-      setManualMembers([]);
+      const response = await api.recalculateCharacterGroup(parentId);
+      if (detailParentId === parentId) {
+        setDetail(response);
+        setStagedActions({});
+        setManualMembers([]);
+      }
       setActionMessage("추천을 다시 계산했습니다.");
       void loadGroups();
-      if (expandedParentId === detail.parent.id) {
-        void loadExpanded(detail.parent.id);
+      if (expandedParentId === parentId) {
+        void loadExpanded(parentId);
       }
     } catch (err) {
       setDetailError(err instanceof Error ? err.message : "재계산에 실패했습니다.");
     } finally {
       setRecalculating(false);
+    }
+  };
+
+  const recalculate = async () => {
+    if (detail) {
+      await recalculateParent(detail.parent.id);
+    } else if (selectedParentId != null) {
+      await recalculateParent(selectedParentId);
     }
   };
 
@@ -660,6 +684,11 @@ export function CharacterGroupReviewPanel() {
     setDetailParentId(null);
   }, []);
 
+  const openAddChildForParent = useCallback((parentId: number) => {
+    openDetail(parentId);
+    setAddChildModalOpen(true);
+  }, [openDetail]);
+
   useEffect(() => {
     const modalOpen = addChildModalOpen || moveChildTarget != null;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -672,58 +701,117 @@ export function CharacterGroupReviewPanel() {
         return;
       }
 
-      // Space opens the single-parent detail overlay for the selected row; it never
-      // opens more than one parent's detail at a time.
-      if ((event.key === " " || event.code === "Space") && !modalOpen) {
-        if (detailParentId == null && selectedParentId != null) {
-          event.preventDefault();
-          openDetail(selectedParentId);
-        }
-        return;
-      }
-
       if (modalOpen) {
         return;
       }
 
-      if (event.key === "Escape" && detail) {
-        event.preventDefault();
-        closeDetail();
+      const key = event.key.toLowerCase();
+
+      // --- Detail Modal Open State ---
+      if (detailParentId != null) {
+        if (event.key === "Escape" && detail) {
+          event.preventDefault();
+          closeDetail();
+          return;
+        }
+
+        // Ctrl + Left / Right in Detail Modal -> Navigate to Previous / Next item in group list
+        if (event.ctrlKey && !event.altKey && !event.metaKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+          event.preventDefault();
+          const currentIndex = groups.findIndex((g) => g.parent.id === detailParentId);
+          if (event.key === "ArrowLeft" && currentIndex > 0) {
+            openDetail(groups[currentIndex - 1].parent.id);
+          } else if (event.key === "ArrowRight" && currentIndex >= 0 && currentIndex < groups.length - 1) {
+            openDetail(groups[currentIndex + 1].parent.id);
+          }
+          return;
+        }
+
+        const selected = entries.find((entry) => entry.key === selectedChildKey);
+        if (event.ctrlKey && !event.altKey && !event.metaKey && event.key === "Enter") {
+          if (hasStagedActions && !applying) {
+            event.preventDefault();
+            void applyStaged();
+          }
+          return;
+        }
+        if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "Enter") {
+          if (selected?.kind === "suggested" && !stagedActions[selected.member.id]) {
+            event.preventDefault();
+            handleAccept(selected.member.id);
+          }
+          return;
+        }
+        if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "r" && detail && !recalculating) {
+          event.preventDefault();
+          void recalculateParent(detail.parent.id);
+          return;
+        }
+        if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "a" && detail) {
+          event.preventDefault();
+          setAddChildModalOpen(true);
+          return;
+        }
+        if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key) && entries.length > 0) {
+          event.preventDefault();
+          const currentIndex = Math.max(0, entries.findIndex((entry) => entry.key === selectedChildKey));
+          const delta = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" ? -childGridColumns : childGridColumns;
+          const nextIndex = Math.max(0, Math.min(entries.length - 1, currentIndex + delta));
+          setSelectedChildKey(entries[nextIndex].key);
+        }
         return;
       }
 
-      const selected = entries.find((entry) => entry.key === selectedChildKey);
-      const key = event.key.toLowerCase();
-      if (event.ctrlKey && !event.altKey && !event.metaKey && event.key === "Enter") {
-        if (hasStagedActions && !applying) {
+      // --- Detail Modal Closed State (Main List Navigation) ---
+      if ((event.key === " " || event.code === "Space") && selectedParentId != null) {
+        event.preventDefault();
+        openDetail(selectedParentId);
+        return;
+      }
+
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "r" && selectedParentId != null && !recalculating) {
+        event.preventDefault();
+        void recalculateParent(selectedParentId);
+        return;
+      }
+
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "a" && selectedParentId != null) {
+        event.preventDefault();
+        openAddChildForParent(selectedParentId);
+        return;
+      }
+
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && groups.length > 0) {
+        if (event.key === "ArrowUp") {
           event.preventDefault();
-          void applyStaged();
+          const currentIndex = groups.findIndex((g) => g.parent.id === selectedParentId);
+          if (currentIndex > 0) {
+            setSelectedParentId(groups[currentIndex - 1].parent.id);
+          } else if (currentIndex < 0) {
+            setSelectedParentId(groups[0].parent.id);
+          }
+          return;
         }
-        return;
-      }
-      if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "Enter") {
-        if (selected?.kind === "suggested" && !stagedActions[selected.member.id]) {
+        if (event.key === "ArrowDown") {
           event.preventDefault();
-          handleAccept(selected.member.id);
+          const currentIndex = groups.findIndex((g) => g.parent.id === selectedParentId);
+          if (currentIndex >= 0 && currentIndex < groups.length - 1) {
+            setSelectedParentId(groups[currentIndex + 1].parent.id);
+          } else if (currentIndex < 0) {
+            setSelectedParentId(groups[0].parent.id);
+          }
+          return;
         }
-        return;
-      }
-      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "r" && detail && !recalculating) {
-        event.preventDefault();
-        void recalculate();
-        return;
-      }
-      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "a" && detail) {
-        event.preventDefault();
-        setAddChildModalOpen(true);
-        return;
-      }
-      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key) && entries.length > 0) {
-        event.preventDefault();
-        const currentIndex = Math.max(0, entries.findIndex((entry) => entry.key === selectedChildKey));
-        const delta = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" ? -childGridColumns : childGridColumns;
-        const nextIndex = Math.max(0, Math.min(entries.length - 1, currentIndex + delta));
-        setSelectedChildKey(entries[nextIndex].key);
+        if (event.key === "ArrowRight" && selectedParentId != null) {
+          event.preventDefault();
+          setExpandedParentId(selectedParentId);
+          return;
+        }
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          setExpandedParentId(null);
+          return;
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown, { capture: true });
@@ -731,18 +819,22 @@ export function CharacterGroupReviewPanel() {
   }, [
     addChildModalOpen,
     moveChildTarget,
+    detailParentId,
+    selectedParentId,
+    detail,
     entries,
     selectedChildKey,
     childGridColumns,
     hasStagedActions,
     applying,
     stagedActions,
-    detail,
     recalculating,
-    detailParentId,
-    selectedParentId,
+    groups,
     openDetail,
     closeDetail,
+    openAddChildForParent,
+    handleAccept,
+    applyStaged,
   ]);
 
   return (
@@ -814,7 +906,7 @@ export function CharacterGroupReviewPanel() {
 
       <details className="review-shortcut-guide">
         <summary className="review-shortcut-guide-summary">
-          단축키: Space 상세보기 열기 · Enter 제안 수락 · Ctrl+Enter 변경 적용 · R 재계산 · A 자식 추가 (상세보기 열려있을 때)
+          단축키: ↑↓ 선택 이동 · ←→ 접기/펼치기 · Space 상세보기 · R 재계산 · A 자식 추가 · (상세 팝업 내) Ctrl+←→ 이전/다음 · Enter 수락 · Ctrl+Enter 적용
         </summary>
       </details>
 
@@ -832,7 +924,11 @@ export function CharacterGroupReviewPanel() {
               const isSelected = group.parent.id === selectedParentId;
               const isExpanded = group.parent.id === expandedParentId;
               return (
-                <div key={group.parent.id} className="character-group-list-row">
+                <div
+                  key={group.parent.id}
+                  ref={isSelected ? selectedRowRef : undefined}
+                  className="character-group-list-row"
+                >
                   <div
                     role="listitem"
                     tabIndex={0}
@@ -861,6 +957,31 @@ export function CharacterGroupReviewPanel() {
                       >
                         {isExpanded ? "접기" : "펼치기"}
                       </button>
+                      {isSelected ? (
+                        <>
+                          <button
+                            className="btn btn-small"
+                            type="button"
+                            disabled={recalculating}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void recalculateParent(group.parent.id);
+                            }}
+                          >
+                            추천 재계산
+                          </button>
+                          <button
+                            className="btn btn-small"
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openAddChildForParent(group.parent.id);
+                            }}
+                          >
+                            자식 수동 추가
+                          </button>
+                        </>
+                      ) : null}
                       <button
                         className="btn btn-small btn-primary"
                         type="button"
