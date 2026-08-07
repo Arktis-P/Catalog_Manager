@@ -366,11 +366,11 @@ def list_character_groups(
         description="Deprecated compatibility parameter; state now controls the result set.",
     ),
     skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=500),
     group_service: CharacterGroupService = Depends(get_group_service),
 ):
-    """부모 캐릭터를 앵커로 하는 병합 그룹 목록. conflict/pending/settled 그룹을
-    대규모 unlinked 후보보다 먼저 정렬한다. 목록 조회 자체는 추천 재계산을 하지
+    """부모 캐릭터를 앵커로 하는 병합 그룹 목록. 가장 포스트 수가 많은 항목 순으로
+    (GlobalCharacter.post_count DESC) 정렬한다. 목록 조회 자체는 추천 재계산을 하지
     않는다 (이미 저장된 suggestion 이력만 집계) - 무거운 전체 재계산은 별도
     유지보수 CLI에서만 수행한다.
 

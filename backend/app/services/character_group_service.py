@@ -586,10 +586,9 @@ class CharacterGroupService:
 
         rows = (
             base_query.order_by(
-                state_rank_col.asc(),
-                pending_count_col.desc(),
                 GlobalCharacter.post_count.desc(),
                 GlobalCharacter.character_tag.asc(),
+                GlobalCharacter.id.asc(),
             )
             .offset(skip)
             .limit(limit)

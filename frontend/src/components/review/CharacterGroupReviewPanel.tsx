@@ -14,7 +14,7 @@ import type {
 } from "../../types";
 import { catalogCoverImageUrl } from "../../utils/reviewImages";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [50, 100, 200, 300];
 
 const STATE_LABELS: Record<CharacterGroupState, string> = {
   conflict: "충돌",
@@ -343,6 +343,7 @@ export function CharacterGroupReviewPanel() {
   const [stateFilter, setStateFilter] = useState<CharacterGroupStateFilter>("all");
   const [reviewStatusFilter, setReviewStatusFilter] = useState<CharacterGroupReviewStatusFilter>("all");
   const [hasImageFilter, setHasImageFilter] = useState("");
+  const [pageSize, setPageSize] = useState(50);
   const [skip, setSkip] = useState(0);
 
   const [groups, setGroups] = useState<CharacterGroupSummary[]>([]);
@@ -391,7 +392,7 @@ export function CharacterGroupReviewPanel() {
         has_image: hasImageFilter ? hasImageFilter === "true" : undefined,
         review_status: reviewStatusFilter,
         skip,
-        limit: PAGE_SIZE,
+        limit: pageSize,
       });
       setGroups(response.items);
       setTotal(response.total);
@@ -400,7 +401,7 @@ export function CharacterGroupReviewPanel() {
     } finally {
       setListLoading(false);
     }
-  }, [search, stateFilter, hasImageFilter, reviewStatusFilter, skip]);
+  }, [search, stateFilter, hasImageFilter, reviewStatusFilter, skip, pageSize]);
 
   useEffect(() => {
     void loadGroups();
@@ -408,7 +409,7 @@ export function CharacterGroupReviewPanel() {
 
   useEffect(() => {
     setSkip(0);
-  }, [search, stateFilter, hasImageFilter, reviewStatusFilter]);
+  }, [search, stateFilter, hasImageFilter, reviewStatusFilter, pageSize]);
 
   const loadDetail = useCallback(async (parentId: number) => {
     setDetailLoading(true);
@@ -795,6 +796,20 @@ export function CharacterGroupReviewPanel() {
             ))}
           </select>
         </div>
+        <div className="field">
+          <label htmlFor="group-page-size">표시 개수</label>
+          <select
+            id="group-page-size"
+            value={pageSize}
+            onChange={(event) => setPageSize(Number(event.target.value))}
+          >
+            {PAGE_SIZE_OPTIONS.map((size) => (
+              <option key={size} value={size}>
+                {size}개씩 보기
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <details className="review-shortcut-guide">
@@ -913,7 +928,7 @@ export function CharacterGroupReviewPanel() {
             className="btn btn-small"
             type="button"
             disabled={skip === 0}
-            onClick={() => setSkip((value) => Math.max(0, value - PAGE_SIZE))}
+            onClick={() => setSkip((value) => Math.max(0, value - pageSize))}
           >
             &lsaquo;
           </button>
@@ -924,11 +939,11 @@ export function CharacterGroupReviewPanel() {
             className="btn btn-small"
             type="button"
             disabled={pageEnd >= total}
-            onClick={() => setSkip((value) => value + PAGE_SIZE)}
+            onClick={() => setSkip((value) => value + pageSize)}
           >
             &rsaquo;
           </button>
-          <button className="btn btn-small" type="button" disabled={pageEnd >= total} onClick={() => setSkip(Math.max(0, (Math.ceil(total / PAGE_SIZE) - 1) * PAGE_SIZE))}>
+          <button className="btn btn-small" type="button" disabled={pageEnd >= total} onClick={() => setSkip(Math.max(0, (Math.ceil(total / pageSize) - 1) * pageSize))}>
             &raquo;
           </button>
         </div>

@@ -571,19 +571,19 @@ def test_list_groups_state_all_returns_unlinked_and_settled_together(db: Session
     )
 
 
-def test_list_groups_state_all_prioritizes_settled_before_unlinked(db: Session) -> None:
-    """The large unlinked pool must not push completed groups off early pages."""
+def test_list_groups_sorts_by_post_count_descending_regardless_of_state(db: Session) -> None:
+    """Post count ordering takes priority over group state (settled vs unlinked)."""
     settled_parent = make_character(db, tag="priority_settled_parent", post_count=1)
     settled_child = make_character(db, tag="priority_settled_child", post_count=1)
     settled_child.parent_character_id = settled_parent.id
-    make_character(db, tag="priority_unlinked_candidate", post_count=999_999)
+    unlinked_candidate = make_character(db, tag="priority_unlinked_candidate", post_count=999_999)
     db.commit()
 
     items, total = CharacterGroupService(db).list_groups(state="all", limit=1)
 
     assert total == 2
-    assert items[0].state == "settled"
-    assert items[0].parent.character.character_tag == "priority_settled_parent"
+    assert items[0].state == "unlinked"
+    assert items[0].parent.character.character_tag == "priority_unlinked_candidate"
 
 
 # ── GET 그룹 상세: 읽기 전용 vs 명시적 재계산 ─────────────────────────
