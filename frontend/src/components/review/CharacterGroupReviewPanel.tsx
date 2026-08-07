@@ -73,6 +73,20 @@ function candidateToMember(candidate: CharacterLinkCandidate): CharacterGroupMem
   };
 }
 
+function memberTextLine(member: CharacterGroupMember): string {
+  const parts = [member.character_tag];
+  if (member.display_name) {
+    parts.push(member.display_name);
+  }
+  parts.push(`posts ${member.post_count.toLocaleString()}`);
+  if (member.review_status === "completed") {
+    parts.push(`완료${typeof member.rating === "number" ? ` ★${member.rating}` : ""}`);
+  } else if (member.image_count > 0) {
+    parts.push(`생성됨 ${member.image_count}`);
+  }
+  return parts.join(" · ");
+}
+
 interface StagedAction {
   op: CharacterGroupActionOp;
   childId: number;
@@ -329,7 +343,6 @@ export function CharacterGroupReviewPanel() {
   const [stateFilter, setStateFilter] = useState<CharacterGroupStateFilter>("all");
   const [reviewStatusFilter, setReviewStatusFilter] = useState<CharacterGroupReviewStatusFilter>("all");
   const [hasImageFilter, setHasImageFilter] = useState("");
-  const [includeUnlinkedCandidates, setIncludeUnlinkedCandidates] = useState(true);
   const [skip, setSkip] = useState(0);
 
   const [groups, setGroups] = useState<CharacterGroupSummary[]>([]);
@@ -337,12 +350,25 @@ export function CharacterGroupReviewPanel() {
   const [listLoading, setListLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
 
+  // The row a user last interacted with. Space (and the per-row detail button) opens
+  // the full image-rich detail overlay for exactly this one parent.
   const [selectedParentId, setSelectedParentId] = useState<number | null>(null);
+
+  // Row-level text expansion is independent from the detail overlay: it fetches the
+  // same read-only group detail but renders children/suggestions as plain text, with
+  // no images and no staged-action controls. Collapsed by default; only one row's
+  // text expands at a time.
+  const [expandedParentId, setExpandedParentId] = useState<number | null>(null);
+  const [expandedDetail, setExpandedDetail] = useState<CharacterGroupDetail | null>(null);
+  const [expandedLoading, setExpandedLoading] = useState(false);
+  const [expandedError, setExpandedError] = useState<string | null>(null);
+
+  // The image-rich/card detail view opens for at most one parent at a time.
+  const [detailParentId, setDetailParentId] = useState<number | null>(null);
   const [detail, setDetail] = useState<CharacterGroupDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [recalculating, setRecalculating] = useState(false);
-  const [recalculatingAll, setRecalculatingAll] = useState(false);
   const [applying, setApplying] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
@@ -364,7 +390,6 @@ export function CharacterGroupReviewPanel() {
         state: stateFilter,
         has_image: hasImageFilter ? hasImageFilter === "true" : undefined,
         review_status: reviewStatusFilter,
-        include_unlinked: includeUnlinkedCandidates,
         skip,
         limit: PAGE_SIZE,
       });
@@ -375,7 +400,7 @@ export function CharacterGroupReviewPanel() {
     } finally {
       setListLoading(false);
     }
-  }, [search, stateFilter, hasImageFilter, reviewStatusFilter, includeUnlinkedCandidates, skip]);
+  }, [search, stateFilter, hasImageFilter, reviewStatusFilter, skip]);
 
   useEffect(() => {
     void loadGroups();
@@ -383,7 +408,7 @@ export function CharacterGroupReviewPanel() {
 
   useEffect(() => {
     setSkip(0);
-  }, [search, stateFilter, hasImageFilter, reviewStatusFilter, includeUnlinkedCandidates]);
+  }, [search, stateFilter, hasImageFilter, reviewStatusFilter]);
 
   const loadDetail = useCallback(async (parentId: number) => {
     setDetailLoading(true);
@@ -399,7 +424,7 @@ export function CharacterGroupReviewPanel() {
   }, []);
 
   useEffect(() => {
-    if (selectedParentId == null) {
+    if (detailParentId == null) {
       setDetail(null);
       return;
     }
@@ -407,8 +432,30 @@ export function CharacterGroupReviewPanel() {
     setManualMembers([]);
     setSelectedChildKey(null);
     setActionMessage(null);
-    void loadDetail(selectedParentId);
-  }, [selectedParentId, loadDetail]);
+    void loadDetail(detailParentId);
+  }, [detailParentId, loadDetail]);
+
+  const loadExpanded = useCallback(async (parentId: number) => {
+    setExpandedLoading(true);
+    setExpandedError(null);
+    try {
+      const response = await api.getCharacterGroup(parentId);
+      setExpandedDetail(response);
+    } catch (err) {
+      setExpandedError(err instanceof Error ? err.message : "그룹 정보를 불러오지 못했습니다.");
+    } finally {
+      setExpandedLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (expandedParentId == null) {
+      setExpandedDetail(null);
+      setExpandedError(null);
+      return;
+    }
+    void loadExpanded(expandedParentId);
+  }, [expandedParentId, loadExpanded]);
 
   const entries: ChildCardEntry[] = useMemo(() => {
     if (!detail) {
@@ -522,6 +569,9 @@ export function CharacterGroupReviewPanel() {
       setManualMembers([]);
       setActionMessage(`${actions.length}건의 변경사항을 적용했습니다.`);
       void loadGroups();
+      if (expandedParentId === detail.parent.id) {
+        void loadExpanded(detail.parent.id);
+      }
     } catch (err) {
       setDetailError(err instanceof Error ? err.message : "변경사항 적용에 실패했습니다.");
     } finally {
@@ -545,24 +595,13 @@ export function CharacterGroupReviewPanel() {
       setManualMembers([]);
       setActionMessage("추천을 다시 계산했습니다.");
       void loadGroups();
+      if (expandedParentId === detail.parent.id) {
+        void loadExpanded(detail.parent.id);
+      }
     } catch (err) {
       setDetailError(err instanceof Error ? err.message : "재계산에 실패했습니다.");
     } finally {
       setRecalculating(false);
-    }
-  };
-
-  const recalculateAll = async () => {
-    setRecalculatingAll(true);
-    setDetailError(null);
-    try {
-      const summary = await api.recalculateAllCharacterGroups();
-      setActionMessage(`전체 추천 재계산 완료: 부모 ${summary.scanned_anchors.toLocaleString()}개, 대기 추천 ${summary.pending_total.toLocaleString()}개`);
-      await Promise.all([loadGroups(), detail ? loadDetail(detail.parent.id) : Promise.resolve()]);
-    } catch (err) {
-      setDetailError(err instanceof Error ? err.message : "전체 추천 재계산에 실패했습니다.");
-    } finally {
-      setRecalculatingAll(false);
     }
   };
 
@@ -607,18 +646,51 @@ export function CharacterGroupReviewPanel() {
   const pageStart = groups.length > 0 ? skip + 1 : 0;
   const pageEnd = skip + groups.length;
 
+  const toggleExpand = useCallback((parentId: number) => {
+    setExpandedParentId((current) => (current === parentId ? null : parentId));
+  }, []);
+
+  const openDetail = useCallback((parentId: number) => {
+    setSelectedParentId(parentId);
+    setDetailParentId(parentId);
+  }, []);
+
+  const closeDetail = useCallback(() => {
+    setDetailParentId(null);
+  }, []);
+
   useEffect(() => {
     const modalOpen = addChildModalOpen || moveChildTarget != null;
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (
         event.repeat ||
-        modalOpen ||
         target?.matches("input, textarea, select, [contenteditable=true]") ||
         target?.closest("[contenteditable=true]")
       ) {
         return;
       }
+
+      // Space opens the single-parent detail overlay for the selected row; it never
+      // opens more than one parent's detail at a time.
+      if ((event.key === " " || event.code === "Space") && !modalOpen) {
+        if (detailParentId == null && selectedParentId != null) {
+          event.preventDefault();
+          openDetail(selectedParentId);
+        }
+        return;
+      }
+
+      if (modalOpen) {
+        return;
+      }
+
+      if (event.key === "Escape" && detail) {
+        event.preventDefault();
+        closeDetail();
+        return;
+      }
+
       const selected = entries.find((entry) => entry.key === selectedChildKey);
       const key = event.key.toLowerCase();
       if (event.ctrlKey && !event.altKey && !event.metaKey && event.key === "Enter") {
@@ -655,14 +727,26 @@ export function CharacterGroupReviewPanel() {
     };
     window.addEventListener("keydown", onKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, [addChildModalOpen, moveChildTarget, entries, selectedChildKey, childGridColumns, hasStagedActions, applying, stagedActions, detail, recalculating]);
+  }, [
+    addChildModalOpen,
+    moveChildTarget,
+    entries,
+    selectedChildKey,
+    childGridColumns,
+    hasStagedActions,
+    applying,
+    stagedActions,
+    detail,
+    recalculating,
+    detailParentId,
+    selectedParentId,
+    openDetail,
+    closeDetail,
+  ]);
 
   return (
     <div className="character-group-review">
       <div className="toolbar character-group-toolbar">
-        <button className="btn btn-small" type="button" disabled={recalculatingAll} onClick={() => void recalculateAll()}>
-          {recalculatingAll ? "전체 재계산 중..." : "전체 추천 재계산"}
-        </button>
         <div className="field">
           <label htmlFor="group-search">검색</label>
           <input
@@ -711,19 +795,12 @@ export function CharacterGroupReviewPanel() {
             ))}
           </select>
         </div>
-        <label className="field" htmlFor="group-include-unlinked">
-          <span>미연결 후보 포함</span>
-          <input
-            id="group-include-unlinked"
-            type="checkbox"
-            checked={includeUnlinkedCandidates}
-            onChange={(event) => setIncludeUnlinkedCandidates(event.target.checked)}
-          />
-        </label>
       </div>
 
       <details className="review-shortcut-guide">
-        <summary className="review-shortcut-guide-summary">단축키: Enter 제안 수락 · Ctrl+Enter 변경 적용 · R 재계산 · A 자식 추가</summary>
+        <summary className="review-shortcut-guide-summary">
+          단축키: Space 상세보기 열기 · Enter 제안 수락 · Ctrl+Enter 변경 적용 · R 재계산 · A 자식 추가 (상세보기 열려있을 때)
+        </summary>
       </details>
 
       {listError ? <div className="error-banner">{listError}</div> : null}
@@ -738,25 +815,92 @@ export function CharacterGroupReviewPanel() {
           <div className="character-group-list" role="list" aria-label="parent/child review groups">
             {groups.map((group) => {
               const isSelected = group.parent.id === selectedParentId;
+              const isExpanded = group.parent.id === expandedParentId;
               return (
-                <button
-                  key={group.parent.id}
-                  type="button"
-                  role="listitem"
-                  aria-current={isSelected}
-                  className={`character-group-list-item${isSelected ? " character-group-list-item--selected" : ""}`}
-                  onClick={() => setSelectedParentId(group.parent.id)}
-                >
-                  <span className={`badge character-group-state-badge character-group-state-badge--${group.state}`}>
-                    {STATE_LABELS[group.state]}
-                  </span>
-                  <span className="character-group-list-tag">{group.parent.character_tag}</span>
-                  {group.parent.display_name ? (
-                    <span className="character-group-list-name">{group.parent.display_name}</span>
+                <div key={group.parent.id} className="character-group-list-row">
+                  <div
+                    role="listitem"
+                    tabIndex={0}
+                    aria-current={isSelected || undefined}
+                    className={`character-group-list-item${isSelected ? " character-group-list-item--selected" : ""}`}
+                    onClick={() => setSelectedParentId(group.parent.id)}
+                  >
+                    <span className={`badge character-group-state-badge character-group-state-badge--${group.state}`}>
+                      {STATE_LABELS[group.state]}
+                    </span>
+                    <span className="character-group-list-tag">{group.parent.character_tag}</span>
+                    {group.parent.display_name ? (
+                      <span className="character-group-list-name">{group.parent.display_name}</span>
+                    ) : null}
+                    <span className="badge badge-muted">자식 {group.child_count}</span>
+                    {group.pending_count > 0 ? <span className="badge badge-warning">대기 {group.pending_count}</span> : null}
+                    <div className="character-group-row-controls">
+                      <button
+                        className="btn btn-small"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedParentId(group.parent.id);
+                          toggleExpand(group.parent.id);
+                        }}
+                      >
+                        {isExpanded ? "접기" : "펼치기"}
+                      </button>
+                      <button
+                        className="btn btn-small btn-primary"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openDetail(group.parent.id);
+                        }}
+                      >
+                        상세보기 (Space)
+                      </button>
+                    </div>
+                  </div>
+                  {isExpanded ? (
+                    <div className="character-group-row-expanded">
+                      {expandedLoading ? (
+                        <p className="empty-state">불러오는 중...</p>
+                      ) : expandedError ? (
+                        <p className="error-banner">{expandedError}</p>
+                      ) : expandedDetail ? (
+                        <>
+                          <div className="character-group-row-expanded-section">
+                            <h4>기존 자식 ({expandedDetail.children.length})</h4>
+                            {expandedDetail.children.length === 0 ? (
+                              <p className="catalog-card-subtitle">없음</p>
+                            ) : (
+                              <ul className="character-group-row-expanded-list">
+                                {expandedDetail.children.map((child) => (
+                                  <li key={child.id}>{memberTextLine(child)}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                          <div className="character-group-row-expanded-section">
+                            <h4>저장된 제안 ({expandedDetail.suggestions.length})</h4>
+                            {expandedDetail.suggestions.length === 0 ? (
+                              <p className="catalog-card-subtitle">없음</p>
+                            ) : (
+                              <ul className="character-group-row-expanded-list">
+                                {expandedDetail.suggestions.map((suggestion) => (
+                                  <li key={suggestion.child.id}>
+                                    {memberTextLine(suggestion.child)}
+                                    {` · match ${Math.round(suggestion.score * 100)}%`}
+                                    {matchReasonLabel(suggestion.reason)
+                                      ? ` · 추천 근거: ${matchReasonLabel(suggestion.reason)}`
+                                      : ""}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
                   ) : null}
-                  <span className="badge badge-muted">자식 {group.child_count}</span>
-                  {group.pending_count > 0 ? <span className="badge badge-warning">대기 {group.pending_count}</span> : null}
-                </button>
+                </div>
               );
             })}
           </div>
@@ -790,90 +934,103 @@ export function CharacterGroupReviewPanel() {
         </div>
       </div>
 
-      <div className="character-group-detail">
-        {selectedParentId == null ? (
-          <div className="empty-state">왼쪽 목록에서 그룹을 선택하세요.</div>
-        ) : detailLoading ? (
-          <div className="empty-state">그룹 상세 불러오는 중...</div>
-        ) : detailError ? (
-          <div className="error-banner">{detailError}</div>
-        ) : detail ? (
-          <>
-            <div className="character-group-detail-header">
-              <span className={`badge character-group-state-badge character-group-state-badge--${detail.state}`}>
-                {STATE_LABELS[detail.state]}
-              </span>
-              {detail.state === "conflict" ? (
-                <span className="badge badge-danger">동일 자식이 여러 부모에 동시에 제안됨 - 신중히 확인하세요</span>
-              ) : null}
-              <div className="character-group-detail-actions">
-                <button className="btn btn-small" type="button" disabled={recalculating} onClick={() => void recalculate()}>
-                  {recalculating ? "재계산 중..." : "추천 재계산"}
-                </button>
-                <button className="btn btn-small" type="button" onClick={() => setAddChildModalOpen(true)}>
-                  자식 수동 추가
-                </button>
-                <button
-                  className="btn btn-small btn-primary"
-                  type="button"
-                  disabled={!hasStagedActions || applying}
-                  onClick={() => void applyStaged()}
-                >
-                  {applying ? "적용 중..." : `변경사항 적용 (${Object.keys(stagedActions).length})`}
-                </button>
+      {detailParentId != null ? (
+        <div className="modal-backdrop modal-backdrop-merge" onClick={closeDetail}>
+          <div className="modal modal-wide" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header-row">
+              <div className="modal-header-copy">
+                <h2 className="modal-title">{detail ? detail.parent.character_tag : "상세보기"}</h2>
+                {detail?.parent.display_name ? <p className="catalog-card-subtitle">{detail.parent.display_name}</p> : null}
               </div>
+              <button className="btn btn-small" type="button" onClick={closeDetail}>
+                Close
+              </button>
             </div>
-
-            <div className="character-group-detail-body">
-              <div className="character-group-parent-card">
-                <div className="character-group-card-image-wrap character-group-parent-image">
-                  {parentImageUrl ? (
-                    <img src={parentImageUrl} alt={detail.parent.character_tag} />
-                  ) : (
-                    <div className="review-image-slot review-image-slot--empty">
-                      <span className="review-image-placeholder">No image</span>
-                    </div>
-                  )}
-                </div>
-                <h3 className="character-group-card-tag">{detail.parent.character_tag}</h3>
-                {detail.parent.display_name ? <p className="catalog-card-subtitle">{detail.parent.display_name}</p> : null}
-                <div className="character-group-card-meta">
-                  <span className="badge badge-muted">posts {detail.parent.post_count.toLocaleString()}</span>
-                  {detail.parent.review_status === "completed" ? (
-                    <span className="badge badge-success">
-                      완료{typeof detail.parent.rating === "number" ? ` ★${detail.parent.rating}` : ""}
+            <div className="modal-body-scroll">
+              {detailLoading ? (
+                <div className="empty-state">그룹 상세 불러오는 중...</div>
+              ) : detailError ? (
+                <div className="error-banner">{detailError}</div>
+              ) : detail ? (
+                <div className="character-group-detail">
+                  <div className="character-group-detail-header">
+                    <span className={`badge character-group-state-badge character-group-state-badge--${detail.state}`}>
+                      {STATE_LABELS[detail.state]}
                     </span>
-                  ) : (
-                    <span className="badge badge-muted">리뷰 대기</span>
-                  )}
-                  <span className="badge badge-muted">자식 {detail.children.length}</span>
-                </div>
-              </div>
+                    {detail.state === "conflict" ? (
+                      <span className="badge badge-danger">동일 자식이 여러 부모에 동시에 제안됨 - 신중히 확인하세요</span>
+                    ) : null}
+                    <div className="character-group-detail-actions">
+                      <button className="btn btn-small" type="button" disabled={recalculating} onClick={() => void recalculate()}>
+                        {recalculating ? "재계산 중..." : "추천 재계산"}
+                      </button>
+                      <button className="btn btn-small" type="button" onClick={() => setAddChildModalOpen(true)}>
+                        자식 수동 추가
+                      </button>
+                      <button
+                        className="btn btn-small btn-primary"
+                        type="button"
+                        disabled={!hasStagedActions || applying}
+                        onClick={() => void applyStaged()}
+                      >
+                        {applying ? "적용 중..." : `변경사항 적용 (${Object.keys(stagedActions).length})`}
+                      </button>
+                    </div>
+                  </div>
 
-              <div ref={childrenGridRef} className="character-group-children-grid">
-                {entries.length === 0 ? (
-                  <div className="empty-state">기존 자식 또는 제안된 후보가 없습니다.</div>
-                ) : (
-                  entries.map((entry) => (
-                    <ChildCard
-                      key={entry.key}
-                      entry={entry}
-                      staged={stagedActions[entry.member.id]}
-                      selected={entry.key === selectedChildKey}
-                      onSelect={() => setSelectedChildKey(entry.key)}
-                      onAccept={() => handleAccept(entry.member.id)}
-                      onReject={() => handleReject(entry.member.id)}
-                      onUnlink={() => handleUnlink(entry.member.id)}
-                      onMove={() => setMoveChildTarget(entry.member)}
-                      onUndo={() => undoAction(entry.member.id)}
-                    />
-                  ))
-                )}
-              </div>
+                  <div className="character-group-detail-body">
+                    <div className="character-group-parent-card">
+                      <div className="character-group-card-image-wrap character-group-parent-image">
+                        {parentImageUrl ? (
+                          <img src={parentImageUrl} alt={detail.parent.character_tag} />
+                        ) : (
+                          <div className="review-image-slot review-image-slot--empty">
+                            <span className="review-image-placeholder">No image</span>
+                          </div>
+                        )}
+                      </div>
+                      <h3 className="character-group-card-tag">{detail.parent.character_tag}</h3>
+                      {detail.parent.display_name ? <p className="catalog-card-subtitle">{detail.parent.display_name}</p> : null}
+                      <div className="character-group-card-meta">
+                        <span className="badge badge-muted">posts {detail.parent.post_count.toLocaleString()}</span>
+                        {detail.parent.review_status === "completed" ? (
+                          <span className="badge badge-success">
+                            완료{typeof detail.parent.rating === "number" ? ` ★${detail.parent.rating}` : ""}
+                          </span>
+                        ) : (
+                          <span className="badge badge-muted">리뷰 대기</span>
+                        )}
+                        <span className="badge badge-muted">자식 {detail.children.length}</span>
+                      </div>
+                    </div>
+
+                    <div ref={childrenGridRef} className="character-group-children-grid">
+                      {entries.length === 0 ? (
+                        <div className="empty-state">기존 자식 또는 제안된 후보가 없습니다.</div>
+                      ) : (
+                        entries.map((entry) => (
+                          <ChildCard
+                            key={entry.key}
+                            entry={entry}
+                            staged={stagedActions[entry.member.id]}
+                            selected={entry.key === selectedChildKey}
+                            onSelect={() => setSelectedChildKey(entry.key)}
+                            onAccept={() => handleAccept(entry.member.id)}
+                            onReject={() => handleReject(entry.member.id)}
+                            onUnlink={() => handleUnlink(entry.member.id)}
+                            onMove={() => setMoveChildTarget(entry.member)}
+                            onUndo={() => undoAction(entry.member.id)}
+                          />
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
-          </>
-        ) : null}
-      </div>
+          </div>
+        </div>
+      ) : null}
 
       {addChildModalOpen && detail ? (
         <CandidateSearchModal

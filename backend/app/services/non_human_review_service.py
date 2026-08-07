@@ -27,7 +27,7 @@ HIGH_CONFIDENCE_SCORE_THRESHOLD = 0.6
 GENDER_NO_HUMANS_SCORE = 0.6
 GENDER_UNKNOWN_SCORE = 0.15
 TAG_KEYWORD_SCORE = 0.5
-FEATURE_TAG_KEYWORD_SCORE = 0.35
+FEATURE_TAG_KEYWORD_SCORE = 0.5
 MISSING_APPEARANCE_SCORE = 0.2
 NO_SERIES_LINK_SCORE = 0.1
 
@@ -47,14 +47,19 @@ RATING_FILTERS = (RATING_FILTER_ALL, RATING_FILTER_RATED, RATING_FILTER_UNRATED)
 CONFIRMABLE_RATINGS = tuple(range(-1, 7))
 
 _NON_HUMAN_KEYWORDS = frozenset(NO_HUMAN_TAGS)
+_NON_HUMAN_NAME_KEYWORDS = frozenset(
+    {"furry", "anthro", "anthropomorphic", "feral", "scalie", "mascot", "pokemon", "digimon"}
+)
 _TOKEN_SPLIT_RE = re.compile(r"[_,\s]+")
 
 
-def _keyword_hits(text: str | None) -> frozenset[str]:
+def _keyword_hits(
+    text: str | None, *, keywords: frozenset[str] = _NON_HUMAN_KEYWORDS
+) -> frozenset[str]:
     if not text:
         return frozenset()
     tokens = {token for token in _TOKEN_SPLIT_RE.split(text.lower()) if token}
-    return frozenset(tokens & _NON_HUMAN_KEYWORDS)
+    return frozenset(tokens & keywords)
 
 
 @dataclass(frozen=True)
@@ -74,23 +79,32 @@ def evaluate_non_human_candidate(character: GlobalCharacter) -> NonHumanEvaluati
     gender = normalize_gender(character.gender)
     evidence: list[str] = []
     score = 0.0
+    has_strong_evidence = False
 
     if gender == "no_humans":
         score += GENDER_NO_HUMANS_SCORE
         evidence.append("gender:no_humans")
+        has_strong_evidence = True
     elif gender is None:
         score += GENDER_UNKNOWN_SCORE
         evidence.append("gender:unknown")
 
-    tag_hits = _keyword_hits(character.character_tag) | _keyword_hits(character.display_name)
+    # Character names such as "monster_hunter_(character)" are not creature
+    # evidence.  Names use only unambiguous classification terms; broader
+    # creature/monster signals remain valid when extracted as related features.
+    tag_hits = _keyword_hits(
+        character.character_tag, keywords=_NON_HUMAN_NAME_KEYWORDS
+    ) | _keyword_hits(character.display_name, keywords=_NON_HUMAN_NAME_KEYWORDS)
     if tag_hits:
         score += TAG_KEYWORD_SCORE
         evidence.append(f"tag_keyword:{','.join(sorted(tag_hits))}")
+        has_strong_evidence = True
 
     feature_hits = _keyword_hits(character.feature_tags)
     if feature_hits:
         score += FEATURE_TAG_KEYWORD_SCORE
         evidence.append(f"feature_keyword:{','.join(sorted(feature_hits))}")
+        has_strong_evidence = True
 
     if gender in ("1girl", "1boy") and not any(
         (character.hair_color, character.eye_color, character.hair_shape, character.multi_color_hair)
@@ -103,7 +117,10 @@ def evaluate_non_human_candidate(character: GlobalCharacter) -> NonHumanEvaluati
         evidence.append("no_series_membership")
 
     score = min(score, 1.0)
-    is_candidate = score >= CANDIDATE_SCORE_THRESHOLD
+    # Missing metadata and absent series membership are only confidence modifiers.
+    # They cannot promote an ordinary humanoid into the non-human queue without
+    # explicit creature/furry/anthro evidence.
+    is_candidate = has_strong_evidence and score >= CANDIDATE_SCORE_THRESHOLD
 
     suggested_rating: int | None = None
     if is_candidate:

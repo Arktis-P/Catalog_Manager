@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -486,10 +488,14 @@ def test_group_detail_orders_children_and_suggestions_by_post_count_then_tag(db:
     ]
 
 
-# ── list_groups: include_unlinked (완전 미연결 후보 노출) ──────────────
+# ── list_groups: 순수 미연결 후보 노출 (state가 유일한 축) ───────────────
+#
+# `include_unlinked` 체크박스는 제거되었다: 어떤 제안 이력에도 전혀 등장한 적
+# 없는 순수 미연결 캐릭터는 이제 항상(플래그 없이) 앵커 후보 풀에 포함되고,
+# `state` 필터만으로 conflict/pending/unlinked/settled를 분류한다.
 
 
-def test_list_groups_include_unlinked_surfaces_pure_candidates(db: Session) -> None:
+def test_list_groups_state_all_surfaces_pure_unlinked_candidates(db: Session) -> None:
     settled_parent = make_character(db, tag="incl_settled_parent")
     settled_child = make_character(db, tag="incl_settled_child")
     settled_child.parent_character_id = settled_parent.id
@@ -502,39 +508,82 @@ def test_list_groups_include_unlinked_surfaces_pure_candidates(db: Session) -> N
 
     service = CharacterGroupService(db)
 
-    default_items, default_total = service.list_groups(limit=100)
-    default_tags = {item.parent.character.character_tag for item in default_items}
-    assert "incl_pure_candidate" not in default_tags
-    assert default_total == 1
-
-    included_items, included_total = service.list_groups(include_unlinked=True, limit=100)
-    tags = {item.parent.character.character_tag for item in included_items}
+    items, total = service.list_groups(state="all", limit=100)
+    tags = {item.parent.character.character_tag for item in items}
     assert "incl_pure_candidate" in tags
     assert "incl_settled_parent" in tags
     # already-linked children must never surface as anchor candidates themselves
     assert "incl_already_child" not in tags
-    assert included_total == 2
+    assert total == 2
 
-    states = {item.parent.character.character_tag: item.state for item in included_items}
+    states = {item.parent.character.character_tag: item.state for item in items}
     assert states["incl_pure_candidate"] == "unlinked"
+    assert states["incl_settled_parent"] == "settled"
 
 
-def test_list_groups_include_unlinked_total_supports_last_page_calculation(db: Session) -> None:
+def test_list_groups_pagination_supports_last_page_for_unlinked_candidates(db: Session) -> None:
     for i in range(5):
         make_character(db, tag=f"unlinked_candidate_{i}", post_count=100 - i)
 
     service = CharacterGroupService(db)
     limit = 2
-    _, total = service.list_groups(include_unlinked=True, skip=0, limit=limit)
+    _, total = service.list_groups(state="unlinked", skip=0, limit=limit)
     assert total == 5
 
     last_page_skip = ((total - 1) // limit) * limit
     last_page_items, last_page_total = service.list_groups(
-        include_unlinked=True, skip=last_page_skip, limit=limit
+        state="unlinked", skip=last_page_skip, limit=limit
     )
 
     assert last_page_total == total
     assert len(last_page_items) == total - last_page_skip
+
+
+def test_list_groups_state_all_returns_unlinked_and_settled_together(db: Session) -> None:
+    """state=all은 unlinked/settled를 포함한 네 그룹을 모두 반환해야 하고,
+    이는 더 이상 존재하지 않는 include_unlinked 체크박스에 좌우되지 않아야
+    한다 (state가 유일하게 결과를 결정하는 축)."""
+    settled_parent = make_character(db, tag="partition_settled_parent")
+    settled_child = make_character(db, tag="partition_settled_child")
+    settled_child.parent_character_id = settled_parent.id
+    db.commit()
+
+    make_character(db, tag="partition_unlinked_candidate")
+
+    service = CharacterGroupService(db)
+
+    all_items, all_total = service.list_groups(state="all", limit=100)
+    all_tags = {item.parent.character.character_tag for item in all_items}
+    assert all_total == 2
+    assert {"partition_settled_parent", "partition_unlinked_candidate"} <= all_tags
+
+    unlinked_items, unlinked_total = service.list_groups(state="unlinked", limit=100)
+    assert unlinked_total == 1
+    assert unlinked_items[0].parent.character.character_tag == "partition_unlinked_candidate"
+
+    settled_items, settled_total = service.list_groups(state="settled", limit=100)
+    assert settled_total == 1
+    assert settled_items[0].parent.character.character_tag == "partition_settled_parent"
+
+    # unlinked/settled는 서로 배타적인 partition이어야 한다.
+    assert {item.parent.character.character_tag for item in unlinked_items}.isdisjoint(
+        {item.parent.character.character_tag for item in settled_items}
+    )
+
+
+def test_list_groups_state_all_prioritizes_settled_before_unlinked(db: Session) -> None:
+    """The large unlinked pool must not push completed groups off early pages."""
+    settled_parent = make_character(db, tag="priority_settled_parent", post_count=1)
+    settled_child = make_character(db, tag="priority_settled_child", post_count=1)
+    settled_child.parent_character_id = settled_parent.id
+    make_character(db, tag="priority_unlinked_candidate", post_count=999_999)
+    db.commit()
+
+    items, total = CharacterGroupService(db).list_groups(state="all", limit=1)
+
+    assert total == 2
+    assert items[0].state == "settled"
+    assert items[0].parent.character.character_tag == "priority_settled_parent"
 
 
 # ── GET 그룹 상세: 읽기 전용 vs 명시적 재계산 ─────────────────────────
@@ -612,6 +661,11 @@ def test_list_groups_filters_by_state(db: Session) -> None:
     add_suggestion(db, parent=conflict_parent_a, child=conflict_child, status="pending")
     add_suggestion(db, parent=conflict_parent_b, child=conflict_child, status="pending")
 
+    # 어떤 제안 이력에도 등장한 적 없는 순수 미연결 후보: unlinked/all에만 잡혀야
+    # 하고, 제안 이력이 있는(rejected/pending 자식 포함) 유령 후보들은 계속
+    # 제외되어야 한다.
+    pure_unlinked_candidate = make_character(db, tag="filter_pure_unlinked_candidate")
+
     service = CharacterGroupService(db)
 
     conflict_items, conflict_total = service.list_groups(state="conflict", limit=100)
@@ -626,20 +680,21 @@ def test_list_groups_filters_by_state(db: Session) -> None:
     assert pending_items[0].parent.character.character_tag == "filter_pending_parent"
 
     unlinked_items, unlinked_total = service.list_groups(state="unlinked", limit=100)
-    assert unlinked_total == 0
-    assert unlinked_items == []
+    assert unlinked_total == 1
+    assert unlinked_items[0].parent.character.character_tag == "filter_pure_unlinked_candidate"
 
     settled_items, settled_total = service.list_groups(state="settled", limit=100)
     assert settled_total == 1
     assert settled_items[0].parent.character.character_tag == "filter_settled_parent"
 
     all_items, all_total = service.list_groups(state="all", limit=100)
-    assert all_total == 4
+    assert all_total == 5
     assert {item.parent.character.character_tag for item in all_items} == {
         "filter_conflict_parent_a",
         "filter_conflict_parent_b",
         "filter_pending_parent",
         "filter_settled_parent",
+        "filter_pure_unlinked_candidate",
     }
 
 
@@ -835,22 +890,23 @@ def test_recalculate_all_batched_is_idempotent(db: Session) -> None:
     assert first_summary.pending_total == second_summary.pending_total
 
 
-def test_recalculate_all_character_groups_endpoint_returns_compact_counts(db: Session) -> None:
-    parent = make_character(db, tag="endpoint_parent_widget")
-    child = make_character(db, tag="endpoint_parent_widget_(variant)")
+def test_recalculate_all_character_groups_endpoint_rejects_without_invoking_service(db: Session) -> None:
+    """전체 재계산 엔드포인트는 비활성화되어 있어야 한다: 우발적 UI 클릭이나
+    직접 호출 모두 즉시 거부되어야 하며, 서비스 계층
+    (CharacterGroupService.recalculate_all_batched)은 절대 호출되지 않아야
+    하고 어떤 데이터도 변경되어서는 안 된다."""
+    parent = make_character(db, tag="endpoint_disabled_parent")
+    child = make_character(db, tag="endpoint_disabled_parent_(variant)")
 
-    response = character_catalog_router.recalculate_all_character_groups(
-        limit_per_anchor=30,
-        group_service=CharacterGroupService(db),
-    )
+    with patch.object(CharacterGroupService, "recalculate_all_batched") as mocked:
+        with pytest.raises(HTTPException) as exc_info:
+            character_catalog_router.recalculate_all_character_groups(limit_per_anchor=30)
+        mocked.assert_not_called()
 
-    assert response.scanned_anchors == 2
-    assert response.pending_total >= 1
+    assert exc_info.value.status_code == 403
 
-    suggestion = (
-        db.query(CharacterLinkSuggestion)
-        .filter_by(parent_character_id=parent.id, child_character_id=child.id)
-        .first()
-    )
-    assert suggestion is not None
-    assert suggestion.status == "pending"
+    assert db.query(CharacterLinkSuggestion).count() == 0
+    db.refresh(parent)
+    db.refresh(child)
+    assert parent.parent_character_id is None
+    assert child.parent_character_id is None

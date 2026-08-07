@@ -4617,9 +4617,16 @@ button,
 .character-group-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 260px;
+  gap: 6px;
+  max-height: 65vh;
   overflow-y: auto;
+}
+
+.character-group-list-row {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
 }
 
 .character-group-list-item {
@@ -4655,6 +4662,45 @@ button,
 .character-group-list-name {
   color: var(--text-muted);
   font-size: 0.8rem;
+}
+
+.character-group-row-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.character-group-row-expanded {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 8px 10px 10px 14px;
+  margin: 0 4px 2px;
+  border-left: 2px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.character-group-row-expanded-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  flex: 1 1 260px;
+}
+
+.character-group-row-expanded-section h4 {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.character-group-row-expanded-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .character-group-state-badge--conflict {

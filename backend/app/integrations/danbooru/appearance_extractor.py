@@ -94,11 +94,21 @@ NO_HUMAN_TAGS = (
     "no_humans",
     "creature",
     "creatures",
-    "animal",
-    "animals",
     "monster",
     "monsters",
+    "furry",
+    "anthro",
+    "anthropomorphic",
+    "feral",
+    "scalie",
+    "mascot",
+    "pokemon",
+    "digimon",
 )
+
+# A strong non-human related tag must not be hidden by the much more frequent
+# 1girl/1boy tags that commonly accompany anthro and furry characters.
+NON_HUMAN_RELATED_TAG_MIN_FREQUENCY = 0.25
 
 ALLOWED_GENDER_VALUES = frozenset({"1girl", "1boy", "no_humans"})
 
@@ -128,7 +138,21 @@ def load_hair_style_candidates() -> frozenset[str]:
 
 def load_feature_tag_candidates() -> frozenset[str]:
     file_tags = set(_load_tag_dictionary("feature_tags.txt"))
-    file_tags.update({"demon_horns", "pointy_ears", "fang", "mole", "freckles"})
+    file_tags.update(
+        {
+            "demon_horns",
+            "pointy_ears",
+            "fang",
+            "mole",
+            "freckles",
+            "furry",
+            "anthro",
+            "creature",
+            "mascot",
+            "pokemon",
+            "digimon",
+        }
+    )
     return frozenset(file_tags)
 
 
@@ -265,7 +289,7 @@ def extract_gender(related: list[RelatedTag]) -> str | None:
     boy_score = by_name.get(BOY_TAG, 0.0)
     human_score = max(girl_score, boy_score)
 
-    if no_human_score > human_score:
+    if no_human_score >= NON_HUMAN_RELATED_TAG_MIN_FREQUENCY or no_human_score > human_score:
         return "no_humans"
     if girl_score >= boy_score and girl_score > 0:
         return "1girl"

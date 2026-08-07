@@ -74,6 +74,26 @@ def test_extract_gender_human_wins_when_higher_than_nonhuman():
     assert extract_gender(related) == "1girl"
 
 
+def test_extract_gender_strong_furry_related_tag_overrides_more_frequent_human_tag():
+    related = [RelatedTag("1girl", 0.8), RelatedTag("furry", 0.3)]
+    assert extract_gender(related) == "no_humans"
+
+
+def test_extract_gender_low_nonhuman_related_tag_does_not_override_human_tag():
+    related = [RelatedTag("1girl", 0.8), RelatedTag("furry", 0.1)]
+    assert extract_gender(related) == "1girl"
+
+
+def test_extract_gender_animal_ears_and_tail_do_not_override_human_tag():
+    related = [
+        RelatedTag("1girl", 0.8),
+        RelatedTag("animal_ears", 0.7),
+        RelatedTag("cat_ears", 0.6),
+        RelatedTag("tail", 0.5),
+    ]
+    assert extract_gender(related) == "1girl"
+
+
 def test_extract_gender_ignores_other_girl_tags():
     related = [RelatedTag("multiple_girls", 0.5), RelatedTag("1boy", 0.3)]
     assert extract_gender(related) == "1boy"

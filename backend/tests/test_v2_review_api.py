@@ -146,6 +146,35 @@ def test_v2_review_list_filters_and_returns_preview_metadata(db: Session) -> Non
     assert item["first_post_at"] == "2020-01-02T03:04:05"
 
 
+def test_v2_review_list_partitions_by_persisted_non_human_candidate_score(db: Session) -> None:
+    human = make_character(db, tag="ordinary_human")
+    candidate = make_character(db, tag="furry_candidate")
+    excluded = make_character(db, tag="excluded_false_positive")
+    candidate.non_human_candidate_score = 0.5
+    excluded.non_human_candidate_score = 0.9
+    excluded.non_human_review_status = "excluded"
+    db.commit()
+
+    service = ReviewService(db)
+    common = dict(
+        review_status=None, rating=None, quality_status=None, identity_status=None,
+        generation_status=None, gender=None, series_id=None, multicolor=None,
+        prompt_modified=None, search=None, skip=0, limit=30, service=service,
+    )
+
+    all_response = review_router.list_v2_review_characters(non_human="all", **common)
+    human_response = review_router.list_v2_review_characters(non_human="human", **common)
+    candidate_response = review_router.list_v2_review_characters(non_human="non_human", **common)
+
+    assert {item.character_tag for item in all_response.items} == {
+        "ordinary_human", "furry_candidate", "excluded_false_positive"
+    }
+    assert [item.character_tag for item in human_response.items] == [
+        "excluded_false_positive", "ordinary_human"
+    ]
+    assert [item.character_tag for item in candidate_response.items] == ["furry_candidate"]
+
+
 def test_v2_review_completed_recent_filters_completed_and_orders_by_review_updated_at(db: Session) -> None:
     make_character(
         db,

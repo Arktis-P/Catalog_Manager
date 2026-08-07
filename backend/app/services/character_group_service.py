@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import case, exists, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.character_link_suggestion import CharacterLinkSuggestion
@@ -27,8 +27,9 @@ GROUP_STATE_ALL = "all"
 _GROUP_STATE_ORDER = {
     GROUP_STATE_CONFLICT: 0,
     GROUP_STATE_PENDING: 1,
-    GROUP_STATE_UNLINKED: 2,
-    GROUP_STATE_SETTLED: 3,
+    # Keep established groups ahead of the much larger unlinked pool.
+    GROUP_STATE_SETTLED: 2,
+    GROUP_STATE_UNLINKED: 3,
 }
 GROUP_STATE_FILTERS = (
     GROUP_STATE_CONFLICT,
@@ -432,20 +433,28 @@ class CharacterGroupService:
         limit: int = 50,
     ) -> tuple[list[GroupSummary], int]:
         """DB 레벨에서 정렬/페이지네이션을 수행한다. 전체 앵커를 파이썬으로
-        로드/정렬하지 않고, 상태 우선순위(conflict > pending > unlinked >
-        settled) 계산과 LIMIT/OFFSET을 모두 SQL에 위임한 뒤, 결과 페이지에
+        로드/정렬하지 않고, 상태 우선순위(conflict > pending > settled >
+        unlinked) 계산과 LIMIT/OFFSET을 모두 SQL에 위임한 뒤, 결과 페이지에
         대해서만 미리보기(preview)를 조회한다.
 
         `state`/`has_image`/`review_status`는 부모(앵커) 카드 기준 필터로,
         모두 EXISTS/서브쿼리를 통해 DB 레벨에서 적용된다 (카탈로그 전체를
         파이썬으로 materialize하지 않음).
 
-        기본적으로 앵커 후보는 이미 자식이 있거나 pending 제안이 있는
-        캐릭터로 제한된다. `include_unlinked=True`이면 자식/부모 관계가
-        전혀 없는(parent_character_id IS NULL) 캐릭터도 잠재적 부모 후보로
-        포함해, 화면에서 완전히 새로운 그룹을 만들 항목을 찾아 추가할 수 있게
-        한다 - 이 확장도 SQL WHERE 절에서만 이뤄지며 카탈로그를 파이썬으로
-        로드하지 않는다."""
+        `state`가 결과를 결정하는 유일한 축이다: `all`은 conflict/pending/
+        unlinked/settled 네 그룹을 모두 포함하고, `unlinked`는 그중 미연결
+        그룹만, `settled`는 완료 그룹만 반환한다. 앵커 후보 풀에는 기존
+        자식/제안 이력이 있는 캐릭터뿐 아니라, 어떤 CharacterLinkSuggestion
+        이력에도 전혀 등장한 적 없는(부모로도 자식으로도 한 번도 제안된 적
+        없는) 순수 미연결 캐릭터도 항상 포함된다 - 그래야 `unlinked`/`all`
+        조회에서 새 그룹을 시작할 후보가 드러난다. 단, 제안 테이블에 이미
+        (거부/대체 이력만이라도) 등장한 캐릭터는 이 확장 풀에서 제외해,
+        추천 엔진이 이미 한 번 훑은 자식 후보들이 유령 미연결 항목으로
+        중복 노출되어 conflict/pending/settled 결과를 페이지에서 밀어내는
+        일(과거 `include_unlinked` 체크박스가 유발하던 플러딩)을 막는다.
+
+        `include_unlinked`는 하위 호환을 위해 시그니처만 남아 있으며 더 이상
+        결과에 영향을 주지 않는다 (위 확장 풀이 항상 적용된다)."""
         child_counts_sq = (
             self.db.query(
                 GlobalCharacter.parent_character_id.label("parent_id"),
@@ -503,15 +512,25 @@ class CharacterGroupService:
             else_=_GROUP_STATE_ORDER[GROUP_STATE_SETTLED],
         )
 
+        # 어떤 상태로든(pending/accepted/rejected/superseded) 제안 테이블에 부모 또는
+        # 자식으로 한 번이라도 등장한 캐릭터는 "순수 미연결" 확장 풀에서 제외한다.
+        # 그렇지 않으면 recalculate_group이 훑고 지나간(그리고 거부/대체된) 수많은
+        # 자식 후보들이 각자 자기 자신을 앵커로 하는 유령 미연결 그룹으로 노출되어
+        # conflict/pending/settled 결과를 페이지 밖으로 밀어낸다.
+        untouched_by_suggestions = and_(
+            ~GlobalCharacter.id.in_(self.db.query(CharacterLinkSuggestion.parent_character_id)),
+            ~GlobalCharacter.id.in_(self.db.query(CharacterLinkSuggestion.child_character_id)),
+        )
         anchor_conditions = [
             GlobalCharacter.id.in_(self.db.query(child_counts_sq.c.parent_id)),
             GlobalCharacter.id.in_(self.db.query(suggestion_parents_sq.c.parent_id)),
-        ]
-        if include_unlinked:
             # 이미 다른 캐릭터의 자식인 경우는 제외한다(1단계 깊이 제약상 자식은
-            # 앵커가 될 수 없음) - parent_character_id가 없는 캐릭터만 잠재적
-            # 부모 후보로 노출한다.
-            anchor_conditions.append(GlobalCharacter.parent_character_id.is_(None))
+            # 앵커가 될 수 없음) - parent_character_id가 없고, 제안 이력이 전혀
+            # 없는 캐릭터만 잠재적 부모 후보(순수 미연결 후보)로 노출한다. `state`
+            # 필터가 이 확장 풀을 conflict/pending/unlinked/settled로 정확히
+            # 분류하므로, 이 조건은 `state` 값과 무관하게 항상 적용된다.
+            and_(GlobalCharacter.parent_character_id.is_(None), untouched_by_suggestions),
+        ]
 
         base_query = (
             self.db.query(

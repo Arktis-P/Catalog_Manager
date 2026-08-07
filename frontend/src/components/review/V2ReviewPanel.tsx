@@ -19,6 +19,7 @@ import type {
   V2ReviewFilters,
   V2ReviewStats,
   V2ReviewStatus,
+  V2NonHumanFilter,
   NonHumanRatingFilter,
 } from "../../types";
 import { cycleGender, defaultEnabledTagKeys, genderChipClass, genderChipLabel } from "../../utils/reviewPrompt";
@@ -291,6 +292,7 @@ export function V2ReviewPanel() {
   const [identityStatus, setIdentityStatus] = useState("");
   const [generationStatus, setGenerationStatus] = useState("");
   const [genderFilter, setGenderFilter] = useState("");
+  const [nonHumanFilter, setNonHumanFilter] = useState<V2NonHumanFilter>("all");
   const [seriesId, setSeriesId] = useState<number | "">("");
   const [multicolorFilter, setMulticolorFilter] = useState("");
   const [promptModifiedOnly, setPromptModifiedOnly] = useState(false);
@@ -322,7 +324,9 @@ export function V2ReviewPanel() {
   const [singleSession, setSingleSession] = useState<SingleReviewSession | null>(null);
   const pendingSinglePageDirectionRef = useRef<{ direction: 1 | -1; targetSkip: number } | null>(null);
 
-  const [panelMode, setPanelMode] = useState<"review" | "non_human">("review");
+  // Non-human candidates now share the general V2 list through a filter.
+  // Keep the legacy queue code unreachable until it can be removed independently.
+  const [panelMode] = useState<"review" | "non_human">("review");
   const [nhItems, setNhItems] = useState<V2ReviewCharacter[]>([]);
   const [nhTotal, setNhTotal] = useState(0);
   const [nhSkip, setNhSkip] = useState(0);
@@ -446,6 +450,7 @@ export function V2ReviewPanel() {
         identity_status: identityStatus || undefined,
         generation_status: generationStatus || undefined,
         gender: genderFilter || undefined,
+        non_human: nonHumanFilter === "all" ? undefined : nonHumanFilter,
         series_id: seriesId || undefined,
         multicolor: multicolorFilter || undefined,
         prompt_modified: promptModifiedOnly ? true : undefined,
@@ -492,6 +497,7 @@ export function V2ReviewPanel() {
     identityStatus,
     generationStatus,
     genderFilter,
+    nonHumanFilter,
     seriesId,
     multicolorFilter,
     promptModifiedOnly,
@@ -1209,6 +1215,7 @@ export function V2ReviewPanel() {
     identityStatus,
     generationStatus,
     genderFilter,
+    nonHumanFilter,
     seriesId,
     multicolorFilter,
     promptModifiedOnly,
@@ -1458,6 +1465,7 @@ export function V2ReviewPanel() {
       identity_status: identityStatus || undefined,
       generation_status: generationStatus || undefined,
       gender: genderFilter || undefined,
+      non_human: nonHumanFilter === "all" ? undefined : nonHumanFilter,
       series_id: seriesId || undefined,
       multicolor: multicolorFilter || undefined,
       prompt_modified: promptModifiedOnly ? true : undefined,
@@ -1470,6 +1478,7 @@ export function V2ReviewPanel() {
       identityStatus,
       generationStatus,
       genderFilter,
+      nonHumanFilter,
       seriesId,
       multicolorFilter,
       promptModifiedOnly,
@@ -1990,6 +1999,7 @@ export function V2ReviewPanel() {
     identityStatus ? `재현 ${identityStatus}` : null,
     generationStatus ? `생성 ${generationStatus}` : null,
     genderFilter ? `성별 ${genderFilter}` : null,
+    nonHumanFilter !== "all" ? `분류 ${nonHumanFilter === "human" ? "인간" : "비인간"}` : null,
     seriesId ? `시리즈 #${seriesId}` : null,
     multicolorFilter ? `multicolor ${multicolorFilter}` : null,
     promptModifiedOnly ? "프롬프트 수정됨" : null,
@@ -2022,13 +2032,6 @@ export function V2ReviewPanel() {
 
   const nhPageCount = Math.max(1, Math.ceil(nhTotal / PAGE_SIZE));
   const nhCurrentPage = Math.floor(nhSkip / PAGE_SIZE) + 1;
-
-  const switchPanelMode = (mode: "review" | "non_human") => {
-    // Explicit tab switch always drops the pinned overlay session - it belongs to
-    // whichever queue it was opened from, not to the tab the user switches to.
-    setSingleSession(null);
-    setPanelMode(mode);
-  };
 
   const singleModeSaveStatus: V2ReviewCardSaveStatus | null = singleModeItem
     ? singleModeIsNonHuman
@@ -2108,27 +2111,6 @@ export function V2ReviewPanel() {
 
   return (
     <>
-      <div className="review-mode-tabs" role="tablist" aria-label="V2 검수 서브 모드">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={panelMode === "review"}
-          className={`review-mode-tab${panelMode === "review" ? " review-mode-tab--active" : ""}`}
-          onClick={() => switchPanelMode("review")}
-        >
-          일반 검수
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={panelMode === "non_human"}
-          className={`review-mode-tab${panelMode === "non_human" ? " review-mode-tab--active" : ""}`}
-          onClick={() => switchPanelMode("non_human")}
-        >
-          비인간 후보 큐 (fast)
-        </button>
-      </div>
-
       {panelMode === "non_human" ? (
         <>
           <div className="toolbar review-toolbar v2-non-human-toolbar">
@@ -2310,6 +2292,18 @@ export function V2ReviewPanel() {
       ) : (
       <>
       <div className="toolbar review-toolbar">
+        <div className="field">
+          <label htmlFor="v2-review-human-type">분류</label>
+          <select
+            id="v2-review-human-type"
+            value={nonHumanFilter}
+            onChange={(event) => setNonHumanFilter(event.target.value as V2NonHumanFilter)}
+          >
+            <option value="all">전체</option>
+            <option value="human">인간</option>
+            <option value="non_human">비인간</option>
+          </select>
+        </div>
         <div className="field">
           <label htmlFor="v2-review-status">리뷰 상태</label>
           <select

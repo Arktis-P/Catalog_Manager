@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import and_, exists, func, not_, or_, select
 from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 
 from app.config import settings
@@ -496,6 +496,7 @@ class ReviewService:
         identity_status: str | None = None,
         generation_status: str | None = None,
         gender: str | None = None,
+        non_human: str | None = None,
         series_id: int | None = None,
         multicolor: str | None = None,
         prompt_modified: bool | None = None,
@@ -503,6 +504,9 @@ class ReviewService:
         skip: int = 0,
         limit: int = 30,
     ) -> tuple[list[GlobalCharacter], int]:
+        if non_human not in (None, "all", "human", "non_human"):
+            raise ValueError("non_human must be one of all, human, non_human")
+
         query = (
             self.db.query(GlobalCharacter)
             .outerjoin(GlobalCharacterReview, GlobalCharacterReview.global_character_id == GlobalCharacter.id)
@@ -572,6 +576,17 @@ class ReviewService:
                     GlobalCharacter.gender == normalized_gender,
                 )
             )
+        is_non_human = and_(
+            GlobalCharacter.non_human_review_status != "excluded",
+            or_(
+                GlobalCharacter.non_human_candidate_score >= 0.5,
+                GlobalCharacter.non_human_review_status == "confirmed",
+            ),
+        )
+        if non_human == "non_human":
+            query = query.filter(is_non_human)
+        elif non_human == "human":
+            query = query.filter(not_(is_non_human))
         if series_id is not None:
             query = query.join(
                 CharacterSeriesLink,

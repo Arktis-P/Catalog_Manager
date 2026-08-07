@@ -362,21 +362,21 @@ def list_character_groups(
     review_status: str = Query(default="all", pattern="^(pending|completed|all)$"),
     include_unlinked: bool = Query(
         default=False,
-        description="자식/제안이 전혀 없는 캐릭터도 잠재적 부모 후보로 포함할지 여부",
+        deprecated=True,
+        description="Deprecated compatibility parameter; state now controls the result set.",
     ),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     group_service: CharacterGroupService = Depends(get_group_service),
 ):
-    """부모 캐릭터를 앵커로 하는 병합 그룹 목록. conflict/pending/unlinked 그룹이
-    settled(완료) 그룹보다 먼저 정렬된다. 목록 조회 자체는 추천 재계산을 하지
+    """부모 캐릭터를 앵커로 하는 병합 그룹 목록. conflict/pending/settled 그룹을
+    대규모 unlinked 후보보다 먼저 정렬한다. 목록 조회 자체는 추천 재계산을 하지
     않는다 (이미 저장된 suggestion 이력만 집계) - 무거운 전체 재계산은 별도
     유지보수 CLI에서만 수행한다.
 
     state/has_image/review_status는 부모(앵커) 카드 기준 서버 사이드 필터이며,
-    DB 레벨 페이지네이션/총계를 그대로 유지한다. include_unlinked=True이면
-    자식/제안이 전혀 없는 캐릭터도 잠재적 부모 후보로 노출해 화면에서 새로운
-    그룹을 만들 항목을 찾아 추가할 수 있다."""
+    DB 레벨 페이지네이션/총계를 그대로 유지한다. 미연결 후보도 state 축에
+    포함되므로 include_unlinked는 하위 호환용으로만 받고 결과에는 영향이 없다."""
     items, total = group_service.list_groups(
         search=search,
         state=state,
@@ -395,19 +395,16 @@ def list_character_groups(
 @router.post("/character-groups/recalculate-all", response_model=CharacterGroupRecalculateAllResponse)
 def recalculate_all_character_groups(
     limit_per_anchor: int = Query(default=30, ge=1, le=200),
-    group_service: CharacterGroupService = Depends(get_group_service),
 ):
-    """카탈로그 전체의 최상위(부모 없음) 캐릭터를 앵커로 그룹 제안을 동기적으로
-    재계산한다. keyset 배치로 순회해 카탈로그 전체를 한 번에 메모리에 올리지
-    않으며, 배치마다 커밋한다. 이미 확정/거부된 제안 이력과 기존
-    parent_character_id 관계는 절대 건드리지 않는다."""
-    summary = group_service.recalculate_all_batched(limit_per_anchor=limit_per_anchor)
-    return CharacterGroupRecalculateAllResponse(
-        scanned_anchors=summary.scanned_anchors,
-        pending_total=summary.pending_total,
-        accepted_total=summary.accepted_total,
-        rejected_total=summary.rejected_total,
-        superseded_total=summary.superseded_total,
+    """이 엔드포인트는 비활성화되어 있다. 카탈로그 전체 재계산은 무거운 배치
+    작업이라 API를 통한 우발적 실행이나 직접 호출을 막기 위해 요청을 즉시
+    거부하며, 서비스 계층(CharacterGroupService.recalculate_all_batched)은
+    절대 호출하지 않는다. 전체 재계산이 필요하면
+    scripts/v2_recalculate_character_link_suggestions.py 유지보수 CLI를
+    사용해야 한다."""
+    raise HTTPException(
+        status_code=403,
+        detail="Whole-dataset character group recalculation is disabled via this endpoint. Use the maintenance CLI instead.",
     )
 
 

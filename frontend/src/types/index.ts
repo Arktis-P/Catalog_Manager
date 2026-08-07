@@ -797,6 +797,7 @@ export interface V2ReviewReferenceImagesResponse {
 }
 
 export type V2ReviewStatus = "pending" | "in_progress" | "completed" | "completed_recent";
+export type V2NonHumanFilter = "all" | "human" | "non_human";
 
 export interface V2ReviewFilters {
   review_status?: V2ReviewStatus;
@@ -805,6 +806,7 @@ export interface V2ReviewFilters {
   identity_status?: string;
   generation_status?: string;
   gender?: string;
+  non_human?: V2NonHumanFilter;
   series_id?: number;
   multicolor?: string;
   prompt_modified?: boolean;

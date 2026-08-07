@@ -108,7 +108,7 @@ def test_human_gender_record_can_qualify_via_non_human_evidence(db: Session) -> 
 
     character = make_character(
         db,
-        tag="forest_monster_girl",
+        tag="official_mascot_character",
         gender="1girl",
         hair_color="green_hair",
         eye_color="green_eyes",
@@ -122,6 +122,68 @@ def test_human_gender_record_can_qualify_via_non_human_evidence(db: Session) -> 
     assert character.non_human_suggested_rating == 3
     evidence = json.loads(character.non_human_evidence)
     assert any(entry.startswith("tag_keyword:") for entry in evidence)
+
+
+def test_human_gender_record_can_qualify_via_furry_feature_evidence(db: Session) -> None:
+    character = make_character(
+        db,
+        tag="animal_companion",
+        gender="1girl",
+        hair_color="brown_hair",
+        feature_tags="furry, anthro",
+    )
+
+    apply_recalculation(character)
+    db.commit()
+
+    assert character.non_human_candidate_score >= CANDIDATE_SCORE_THRESHOLD
+    assert character.non_human_suggested_rating == 3
+    assert "feature_keyword:anthro,furry" in json.loads(character.non_human_evidence)
+
+
+def test_human_gender_record_can_qualify_via_creature_feature_evidence(db: Session) -> None:
+    character = make_character(
+        db,
+        tag="mascot_character",
+        gender="1boy",
+        hair_color="brown_hair",
+        feature_tags="creature",
+    )
+
+    apply_recalculation(character)
+    db.commit()
+
+    assert character.non_human_candidate_score >= CANDIDATE_SCORE_THRESHOLD
+    assert "feature_keyword:creature" in json.loads(character.non_human_evidence)
+
+
+def test_animal_ears_tail_and_missing_metadata_do_not_create_candidate(db: Session) -> None:
+    human_with_animal_features = make_character(
+        db,
+        tag="ordinary_humanoid",
+        gender="1girl",
+        feature_tags="animal_ears, cat_ears, tail, horns, wings",
+    )
+    unknown_with_missing_metadata = make_character(db, tag="unknown_humanoid", gender=None)
+    human_with_monster_in_name = make_character(
+        db,
+        tag="monster_hunter_(character)",
+        gender="1girl",
+        hair_color="brown_hair",
+        feature_tags="horns, wings",
+    )
+
+    for character in (
+        human_with_animal_features,
+        unknown_with_missing_metadata,
+        human_with_monster_in_name,
+    ):
+        apply_recalculation(character)
+    db.commit()
+
+    assert human_with_animal_features.non_human_candidate_score < CANDIDATE_SCORE_THRESHOLD
+    assert unknown_with_missing_metadata.non_human_candidate_score < CANDIDATE_SCORE_THRESHOLD
+    assert human_with_monster_in_name.non_human_candidate_score < CANDIDATE_SCORE_THRESHOLD
 
 
 def test_ordinary_human_character_is_not_a_candidate(db: Session) -> None:
@@ -580,18 +642,18 @@ def test_recalculate_endpoint_skips_decided_and_scopes_by_character_tag(db: Sess
 def test_list_candidates_orders_by_post_count_desc_then_tag_asc_and_paginates(db: Session) -> None:
     """정렬은 non_human_candidate_score가 아니라 post_count DESC, character_tag
     ASC 순서를 엄격히 따른다. mid/low는 post_count가 같아 tag 오름차순으로
-    tie-break되어야 한다 ("low_monster_girl" < "mid_monster_boy")."""
+    tie-break되어야 한다 ("low_mascot_girl" < "mid_furry_boy")."""
     series = Series(series_tag="linked_series", display_name="Linked", post_count=10)
     db.add(series)
     db.commit()
 
     high = make_character(db, tag="high_priority_spirit", gender="no_humans", post_count=300)
     mid = make_character(
-        db, tag="mid_monster_boy", gender="1girl", hair_color="black_hair", post_count=200
+        db, tag="mid_furry_boy", gender="1girl", hair_color="black_hair", post_count=200
     )
     low = make_character(
         db,
-        tag="low_monster_girl",
+        tag="low_mascot_girl",
         gender="1girl",
         hair_color="black_hair",
         series=series,

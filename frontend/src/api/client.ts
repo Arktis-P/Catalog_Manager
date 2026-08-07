@@ -322,7 +322,6 @@ export const api = {
       state?: CharacterGroupStateFilter;
       has_image?: boolean;
       review_status?: CharacterGroupReviewStatusFilter;
-      include_unlinked?: boolean;
       skip?: number;
       limit?: number;
     } = {},

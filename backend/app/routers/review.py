@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -208,6 +210,7 @@ def list_v2_review_characters(
     identity_status: str | None = None,
     generation_status: str | None = None,
     gender: str | None = None,
+    non_human: Literal["all", "human", "non_human"] | None = None,
     series_id: int | None = Query(default=None, ge=1),
     multicolor: str | None = Query(default=None, pattern="^(has|suggested)$"),
     prompt_modified: bool | None = None,
@@ -224,6 +227,7 @@ def list_v2_review_characters(
             identity_status=identity_status,
             generation_status=generation_status,
             gender=gender,
+            non_human=non_human,
             series_id=series_id,
             multicolor=multicolor,
             prompt_modified=prompt_modified,
