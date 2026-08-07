@@ -14,6 +14,7 @@ import type {
 } from "../../types";
 import { catalogCoverImageUrl } from "../../utils/reviewImages";
 import { cycleGender, genderChipClass, genderChipLabel } from "../../utils/reviewPrompt";
+import { danbooruPostsUrl, danbooruWikiUrl, openExternal } from "../../utils/danbooruLinks";
 import { ReviewRatingStars } from "./ReviewRatingStars";
 
 const PAGE_SIZE_OPTIONS = [50, 100, 200, 300];
@@ -831,6 +832,8 @@ export function CharacterGroupReviewPanel() {
         }
 
         const selected = entries.find((entry) => entry.key === selectedChildKey);
+        const selectedMember = selected?.member;
+
         if (event.ctrlKey && !event.altKey && !event.metaKey && event.key === "Enter") {
           if (hasStagedActions && !applying) {
             event.preventDefault();
@@ -845,11 +848,52 @@ export function CharacterGroupReviewPanel() {
           }
           return;
         }
-        if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "r" && detail && !recalculating) {
-          event.preventDefault();
-          void recalculateParent(detail.parent.id);
-          return;
+
+        if (selectedMember && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          if (event.key >= "0" && event.key <= "6") {
+            event.preventDefault();
+            stageRating(selectedMember.id, Number(event.key));
+            return;
+          }
+          if (key === "z") {
+            event.preventDefault();
+            stageRating(selectedMember.id, 0);
+            return;
+          }
+          if (event.key === "-" || key === "x") {
+            event.preventDefault();
+            stageRating(selectedMember.id, -1);
+            return;
+          }
+          if (key === "g" && detail) {
+            event.preventDefault();
+            const parentStaged = stagedMemberEdits[detail.parent.id];
+            const parentEffectiveGender = resolveGender(detail.parent, null, parentStaged);
+            const childStaged = stagedMemberEdits[selectedMember.id];
+            const effectiveGender = resolveGender(selectedMember, parentEffectiveGender, childStaged);
+            stageGender(selectedMember.id, effectiveGender);
+            return;
+          }
+          if (key === "q" && detail) {
+            event.preventDefault();
+            openExternal(danbooruPostsUrl(selectedMember.character_tag, detail.parent.character_tag));
+            return;
+          }
+          if (key === "w") {
+            event.preventDefault();
+            openExternal(danbooruWikiUrl(selectedMember.character_tag));
+            return;
+          }
+          if (key === "r") {
+            event.preventDefault();
+            void api
+              .regenerateV2Character(selectedMember.id, {})
+              .then(() => setActionMessage(`${selectedMember.character_tag} V2 이미지 재생성을 요청했습니다.`))
+              .catch((err: unknown) => setActionMessage(err instanceof Error ? err.message : "재생성에 실패했습니다."));
+            return;
+          }
         }
+
         if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "a" && detail) {
           event.preventDefault();
           setAddChildModalOpen(true);
