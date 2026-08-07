@@ -282,6 +282,7 @@ export interface CharacterGroupMember {
   post_count: number;
   review_status: string | null;
   rating: number | null;
+  gender?: string | null;
   image_count: number;
   preview_image_path: string | null;
   is_cover_preview: boolean;

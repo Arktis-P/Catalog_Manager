@@ -225,6 +225,7 @@ class CharacterGroupMemberResponse(BaseModel):
     post_count: int
     review_status: str | None = None
     rating: int | None = None
+    gender: str | None = None
     image_count: int = 0
     # cover 이미지가 있으면 그 경로, 없으면 가장 최근 생성된 이미지 경로(cover-or-latest).
     preview_image_path: str | None = None
@@ -239,6 +240,7 @@ class CharacterGroupMemberResponse(BaseModel):
             post_count=preview.character.post_count,
             review_status=preview.review_status,
             rating=preview.rating,
+            gender=preview.gender,
             image_count=preview.image_count,
             preview_image_path=preview.preview_image_path,
             is_cover_preview=preview.is_cover_preview,

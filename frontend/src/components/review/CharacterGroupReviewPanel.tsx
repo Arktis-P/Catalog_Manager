@@ -13,6 +13,8 @@ import type {
   CharacterLinkCandidate,
 } from "../../types";
 import { catalogCoverImageUrl } from "../../utils/reviewImages";
+import { cycleGender, genderChipClass, genderChipLabel } from "../../utils/reviewPrompt";
+import { ReviewRatingStars } from "./ReviewRatingStars";
 
 const PAGE_SIZE_OPTIONS = [50, 100, 200, 300];
 
@@ -237,6 +239,9 @@ function CandidateSearchModal({ title, description, fetchCandidates, onSelect, o
 interface ChildCardProps {
   entry: ChildCardEntry;
   staged?: StagedAction;
+  stagedEdit?: { rating?: number | null; gender?: string | null };
+  parentRating?: number | null;
+  parentGender?: string | null;
   selected: boolean;
   onSelect: () => void;
   onAccept: () => void;
@@ -244,15 +249,55 @@ interface ChildCardProps {
   onUnlink: () => void;
   onMove: () => void;
   onUndo: () => void;
+  onRate: (rating: number) => void;
+  onCycleGender: (currentGender: string | null | undefined) => void;
 }
 
-function ChildCard({ entry, staged, selected, onSelect, onAccept, onReject, onUnlink, onMove, onUndo }: ChildCardProps) {
+function resolveRating(member: CharacterGroupMember, parentRating?: number | null, stagedEdit?: { rating?: number | null }): number | null {
+  if (stagedEdit?.rating !== undefined) {
+    return stagedEdit.rating;
+  }
+  if (member.rating !== null && member.rating !== undefined) {
+    return member.rating;
+  }
+  return parentRating ?? null;
+}
+
+function resolveGender(member: CharacterGroupMember, parentGender?: string | null, stagedEdit?: { gender?: string | null }): string | null {
+  if (stagedEdit?.gender !== undefined) {
+    return stagedEdit.gender;
+  }
+  if (member.gender !== null && member.gender !== undefined) {
+    return member.gender;
+  }
+  return parentGender ?? null;
+}
+
+function ChildCard({
+  entry,
+  staged,
+  stagedEdit,
+  parentRating,
+  parentGender,
+  selected,
+  onSelect,
+  onAccept,
+  onReject,
+  onUnlink,
+  onMove,
+  onUndo,
+  onRate,
+  onCycleGender,
+}: ChildCardProps) {
   const { member } = entry;
   const withStop = (handler: () => void) => (event: ReactMouseEvent) => {
     event.stopPropagation();
     handler();
   };
   const imageUrl = catalogCoverImageUrl(member.preview_image_path, 320);
+  const effectiveRating = resolveRating(member, parentRating, stagedEdit);
+  const effectiveGender = resolveGender(member, parentGender, stagedEdit);
+
   const stagedLabel =
     staged?.op === "accept" || staged?.op === "add"
       ? "추가 대기"
@@ -291,16 +336,14 @@ function ChildCard({ entry, staged, selected, onSelect, onAccept, onReject, onUn
         <h4 className="character-group-card-tag">{member.character_tag}</h4>
         {member.display_name ? <p className="catalog-card-subtitle">{member.display_name}</p> : null}
         <div className="character-group-card-meta">
+          <button
+            type="button"
+            className={genderChipClass(effectiveGender)}
+            onClick={withStop(() => onCycleGender(effectiveGender))}
+          >
+            {genderChipLabel(effectiveGender)}
+          </button>
           <span className="badge badge-muted">posts {member.post_count.toLocaleString()}</span>
-          {member.review_status === "completed" ? (
-            <span className="badge badge-success">
-              완료{typeof member.rating === "number" ? ` ★${member.rating}` : ""}
-            </span>
-          ) : member.image_count > 0 ? (
-            <span className="badge badge-muted">생성됨 {member.image_count}</span>
-          ) : (
-            <span className="badge badge-muted">미생성</span>
-          )}
           {entry.kind === "suggested" && typeof entry.score === "number" ? (
             <span className="badge badge-muted">match {Math.round(entry.score * 100)}%</span>
           ) : null}
@@ -308,6 +351,7 @@ function ChildCard({ entry, staged, selected, onSelect, onAccept, onReject, onUn
         {entry.kind === "suggested" && matchReasonLabel(entry.reason) ? (
           <p className="character-group-card-reason">추천 근거: {matchReasonLabel(entry.reason)}</p>
         ) : null}
+        <ReviewRatingStars rating={effectiveRating} onRate={onRate} />
         <div className="character-group-card-actions">
           {staged ? (
             <button className="btn btn-small" type="button" onClick={withStop(onUndo)}>
@@ -375,6 +419,7 @@ export function CharacterGroupReviewPanel() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const [stagedActions, setStagedActions] = useState<Record<number, StagedAction>>({});
+  const [stagedMemberEdits, setStagedMemberEdits] = useState<Record<number, { rating?: number | null; gender?: string | null }>>({});
   const [manualMembers, setManualMembers] = useState<CharacterGroupMember[]>([]);
 
   const [addChildModalOpen, setAddChildModalOpen] = useState(false);
@@ -447,6 +492,7 @@ export function CharacterGroupReviewPanel() {
       return;
     }
     setStagedActions({});
+    setStagedMemberEdits({});
     setManualMembers([]);
     setSelectedChildKey(null);
     setActionMessage(null);
@@ -567,7 +613,29 @@ export function CharacterGroupReviewPanel() {
     stageAction(member.id, { op: "add", childId: member.id });
   };
 
-  const hasStagedActions = Object.keys(stagedActions).length > 0;
+  const stageRating = (memberId: number, rating: number) => {
+    setStagedMemberEdits((current) => ({
+      ...current,
+      [memberId]: {
+        ...current[memberId],
+        rating,
+      },
+    }));
+  };
+
+  const stageGender = (memberId: number, currentGender: string | null | undefined) => {
+    const nextGender = cycleGender(currentGender);
+    setStagedMemberEdits((current) => ({
+      ...current,
+      [memberId]: {
+        ...current[memberId],
+        gender: nextGender,
+      },
+    }));
+  };
+
+  const hasStagedActions = Object.keys(stagedActions).length > 0 || Object.keys(stagedMemberEdits).length > 0;
+  const stagedCount = Object.keys(stagedActions).length + Object.keys(stagedMemberEdits).length;
 
   const applyStaged = async () => {
     if (!detail || !hasStagedActions) {
@@ -576,16 +644,51 @@ export function CharacterGroupReviewPanel() {
     setApplying(true);
     setDetailError(null);
     try {
-      const actions: CharacterGroupAction[] = Object.values(stagedActions).map((action) => ({
-        op: action.op,
-        child_id: action.childId,
-        new_parent_id: action.op === "move" ? action.newParentId ?? null : undefined,
-      }));
-      const response = await api.applyCharacterGroupActions(detail.parent.id, actions);
+      if (Object.keys(stagedActions).length > 0) {
+        const actions: CharacterGroupAction[] = Object.values(stagedActions).map((action) => ({
+          op: action.op,
+          child_id: action.childId,
+          new_parent_id: action.op === "move" ? action.newParentId ?? null : undefined,
+        }));
+        await api.applyCharacterGroupActions(detail.parent.id, actions);
+      }
+
+      const parentEffectiveRating = resolveRating(detail.parent, null, stagedMemberEdits[detail.parent.id]);
+      const parentEffectiveGender = resolveGender(detail.parent, null, stagedMemberEdits[detail.parent.id]);
+
+      const savesToPerform = new Map<number, { rating?: number | null; gender?: string | null }>();
+
+      for (const [idStr, edit] of Object.entries(stagedMemberEdits)) {
+        savesToPerform.set(Number(idStr), edit);
+      }
+
+      for (const staged of Object.values(stagedActions)) {
+        if (staged.op === "accept" || staged.op === "add") {
+          const childId = staged.childId;
+          if (!savesToPerform.has(childId)) {
+            const childMember = entries.find((e) => e.member.id === childId)?.member;
+            if (childMember) {
+              const r = resolveRating(childMember, parentEffectiveRating);
+              const g = resolveGender(childMember, parentEffectiveGender);
+              savesToPerform.set(childId, { rating: r, gender: g });
+            }
+          }
+        }
+      }
+
+      for (const [memberId, edit] of savesToPerform.entries()) {
+        await api.saveV2ReviewCharacter(memberId, {
+          rating: edit.rating,
+          gender: edit.gender,
+        });
+      }
+
+      const response = await api.getCharacterGroup(detail.parent.id);
       setDetail(response);
       setStagedActions({});
+      setStagedMemberEdits({});
       setManualMembers([]);
-      setActionMessage(`${actions.length}건의 변경사항을 적용했습니다.`);
+      setActionMessage("변경사항을 적용했습니다.");
       void loadGroups();
       if (expandedParentId === detail.parent.id) {
         void loadExpanded(detail.parent.id);
@@ -1109,57 +1212,73 @@ export function CharacterGroupReviewPanel() {
                         disabled={!hasStagedActions || applying}
                         onClick={() => void applyStaged()}
                       >
-                        {applying ? "적용 중..." : `변경사항 적용 (${Object.keys(stagedActions).length})`}
+                        {applying ? "적용 중..." : `변경사항 적용 (${stagedCount})`}
                       </button>
                     </div>
                   </div>
 
                   <div className="character-group-detail-body">
-                    <div className="character-group-parent-card">
-                      <div className="character-group-card-image-wrap character-group-parent-image">
-                        {parentImageUrl ? (
-                          <img src={parentImageUrl} alt={detail.parent.character_tag} />
-                        ) : (
-                          <div className="review-image-slot review-image-slot--empty">
-                            <span className="review-image-placeholder">No image</span>
-                          </div>
-                        )}
-                      </div>
-                      <h3 className="character-group-card-tag">{detail.parent.character_tag}</h3>
-                      {detail.parent.display_name ? <p className="catalog-card-subtitle">{detail.parent.display_name}</p> : null}
-                      <div className="character-group-card-meta">
-                        <span className="badge badge-muted">posts {detail.parent.post_count.toLocaleString()}</span>
-                        {detail.parent.review_status === "completed" ? (
-                          <span className="badge badge-success">
-                            완료{typeof detail.parent.rating === "number" ? ` ★${detail.parent.rating}` : ""}
-                          </span>
-                        ) : (
-                          <span className="badge badge-muted">리뷰 대기</span>
-                        )}
-                        <span className="badge badge-muted">자식 {detail.children.length}</span>
-                      </div>
-                    </div>
+                    {(() => {
+                      const parentStaged = stagedMemberEdits[detail.parent.id];
+                      const parentEffectiveRating = resolveRating(detail.parent, null, parentStaged);
+                      const parentEffectiveGender = resolveGender(detail.parent, null, parentStaged);
 
-                    <div ref={childrenGridRef} className="character-group-children-grid">
-                      {entries.length === 0 ? (
-                        <div className="empty-state">기존 자식 또는 제안된 후보가 없습니다.</div>
-                      ) : (
-                        entries.map((entry) => (
-                          <ChildCard
-                            key={entry.key}
-                            entry={entry}
-                            staged={stagedActions[entry.member.id]}
-                            selected={entry.key === selectedChildKey}
-                            onSelect={() => setSelectedChildKey(entry.key)}
-                            onAccept={() => handleAccept(entry.member.id)}
-                            onReject={() => handleReject(entry.member.id)}
-                            onUnlink={() => handleUnlink(entry.member.id)}
-                            onMove={() => setMoveChildTarget(entry.member)}
-                            onUndo={() => undoAction(entry.member.id)}
-                          />
-                        ))
-                      )}
-                    </div>
+                      return (
+                        <>
+                          <div className="character-group-parent-card">
+                            <div className="character-group-card-image-wrap character-group-parent-image">
+                              {parentImageUrl ? (
+                                <img src={parentImageUrl} alt={detail.parent.character_tag} />
+                              ) : (
+                                <div className="review-image-slot review-image-slot--empty">
+                                  <span className="review-image-placeholder">No image</span>
+                                </div>
+                              )}
+                            </div>
+                            <h3 className="character-group-card-tag">{detail.parent.character_tag}</h3>
+                            {detail.parent.display_name ? <p className="catalog-card-subtitle">{detail.parent.display_name}</p> : null}
+                            <div className="character-group-card-meta">
+                              <button
+                                type="button"
+                                className={genderChipClass(parentEffectiveGender)}
+                                onClick={() => stageGender(detail.parent.id, parentEffectiveGender)}
+                              >
+                                {genderChipLabel(parentEffectiveGender)}
+                              </button>
+                              <span className="badge badge-muted">posts {detail.parent.post_count.toLocaleString()}</span>
+                              <span className="badge badge-muted">자식 {detail.children.length}</span>
+                            </div>
+                            <ReviewRatingStars rating={parentEffectiveRating} onRate={(r) => stageRating(detail.parent.id, r)} />
+                          </div>
+
+                          <div ref={childrenGridRef} className="character-group-children-grid">
+                            {entries.length === 0 ? (
+                              <div className="empty-state">기존 자식 또는 제안된 후보가 없습니다.</div>
+                            ) : (
+                              entries.map((entry) => (
+                                <ChildCard
+                                  key={entry.key}
+                                  entry={entry}
+                                  staged={stagedActions[entry.member.id]}
+                                  stagedEdit={stagedMemberEdits[entry.member.id]}
+                                  parentRating={parentEffectiveRating}
+                                  parentGender={parentEffectiveGender}
+                                  selected={entry.key === selectedChildKey}
+                                  onSelect={() => setSelectedChildKey(entry.key)}
+                                  onAccept={() => handleAccept(entry.member.id)}
+                                  onReject={() => handleReject(entry.member.id)}
+                                  onUnlink={() => handleUnlink(entry.member.id)}
+                                  onMove={() => setMoveChildTarget(entry.member)}
+                                  onUndo={() => undoAction(entry.member.id)}
+                                  onRate={(r) => stageRating(entry.member.id, r)}
+                                  onCycleGender={(curG) => stageGender(entry.member.id, curG)}
+                                />
+                              ))
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               ) : null}
