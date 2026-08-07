@@ -16,7 +16,7 @@ import { catalogCoverImageUrl } from "../../utils/reviewImages";
 import { cycleGender, genderChipClass, genderChipLabel } from "../../utils/reviewPrompt";
 import { danbooruPostsUrl, danbooruWikiUrl, openExternal } from "../../utils/danbooruLinks";
 import { useGenerationJobs } from "../../context/GenerationJobContext";
-import { ReviewRatingStars } from "./ReviewRatingStars";
+import { ReviewRatingStars, toggleRating } from "./ReviewRatingStars";
 
 const PAGE_SIZE_OPTIONS = [50, 100, 200, 300];
 
@@ -698,13 +698,61 @@ export function CharacterGroupReviewPanel() {
   };
 
   const stageRating = (memberId: number, rating: number) => {
-    setStagedMemberEdits((current) => ({
-      ...current,
-      [memberId]: {
-        ...current[memberId],
-        rating,
-      },
-    }));
+    setStagedMemberEdits((current) => {
+      const existingEdit = current[memberId];
+      const childEntry = entries.find((e) => e.member.id === memberId);
+      const isStagedAccept = stagedActions[memberId]?.op === "accept" || stagedActions[memberId]?.op === "add";
+      const parentStaged = current[detail?.parent.id ?? -1];
+      const parentEffectiveRating = detail ? resolveRating(detail.parent, null, parentStaged) : null;
+
+      const currentRating = existingEdit?.rating !== undefined
+        ? existingEdit.rating
+        : (detail?.parent.id === memberId
+            ? detail.parent.rating
+            : (childEntry
+                ? (childEntry.kind === "suggested" && !isStagedAccept
+                    ? resolveRating(childEntry.member, null)
+                    : resolveRating(childEntry.member, parentEffectiveRating))
+                : null));
+
+      const nextRating = toggleRating(currentRating ?? null, rating);
+      return {
+        ...current,
+        [memberId]: {
+          ...current[memberId],
+          rating: nextRating,
+        },
+      };
+    });
+
+    setStagedCompletes((current) => {
+      if (!current.has(memberId)) return current;
+      const memberObj = detail?.parent.id === memberId ? detail.parent : entries.find((e) => e.member.id === memberId)?.member;
+      if (!memberObj) return current;
+
+      const existingEdit = stagedMemberEdits[memberId];
+      const childEntry = entries.find((e) => e.member.id === memberId);
+      const isStagedAccept = stagedActions[memberId]?.op === "accept" || stagedActions[memberId]?.op === "add";
+      const parentStaged = stagedMemberEdits[detail?.parent.id ?? -1];
+      const parentEffectiveRating = detail ? resolveRating(detail.parent, null, parentStaged) : null;
+      const currentRating = existingEdit?.rating !== undefined
+        ? existingEdit.rating
+        : (detail?.parent.id === memberId
+            ? detail.parent.rating
+            : (childEntry
+                ? (childEntry.kind === "suggested" && !isStagedAccept
+                    ? resolveRating(childEntry.member, null)
+                    : resolveRating(childEntry.member, parentEffectiveRating))
+                : null));
+      const nextRating = toggleRating(currentRating ?? null, rating);
+
+      if (!canStageComplete(memberObj, nextRating)) {
+        const next = new Set(current);
+        next.delete(memberId);
+        return next;
+      }
+      return current;
+    });
   };
 
   const stageGender = (memberId: number, currentGender: string | null | undefined) => {

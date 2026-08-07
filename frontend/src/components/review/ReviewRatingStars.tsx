@@ -23,7 +23,7 @@ export function ReviewRatingStars({ rating, onRate }: ReviewRatingStarsProps) {
     <div className="review-rating-stars">
       <button
         type="button"
-        className={`review-star review-star--red${rating === -1 ? " review-star--active" : ""}`}
+        className={`review-star${rating === -1 ? " review-star--red review-star--active" : " review-star--unset"}`}
         onClick={() => onRate(-1)}
         aria-label="rating -1"
         title={rating === -1 ? "rating -1 (다시 누르면 해제)" : "rating -1"}
