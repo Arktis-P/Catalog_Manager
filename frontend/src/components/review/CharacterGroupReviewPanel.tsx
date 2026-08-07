@@ -15,6 +15,7 @@ import type {
 import { catalogCoverImageUrl } from "../../utils/reviewImages";
 import { cycleGender, genderChipClass, genderChipLabel } from "../../utils/reviewPrompt";
 import { danbooruPostsUrl, danbooruWikiUrl, openExternal } from "../../utils/danbooruLinks";
+import { useGenerationJobs } from "../../context/GenerationJobContext";
 import { ReviewRatingStars } from "./ReviewRatingStars";
 
 const PAGE_SIZE_OPTIONS = [50, 100, 200, 300];
@@ -243,6 +244,8 @@ interface ChildCardProps {
   stagedEdit?: { rating?: number | null; gender?: string | null };
   parentRating?: number | null;
   parentGender?: string | null;
+  isCompleteStaged?: boolean;
+  isRegenerating?: boolean;
   selected: boolean;
   onSelect: () => void;
   onAccept: () => void;
@@ -252,6 +255,7 @@ interface ChildCardProps {
   onUndo: () => void;
   onRate: (rating: number) => void;
   onCycleGender: (currentGender: string | null | undefined) => void;
+  onToggleComplete: () => void;
 }
 
 function resolveRating(member: CharacterGroupMember, parentRating?: number | null, stagedEdit?: { rating?: number | null }): number | null {
@@ -280,6 +284,8 @@ function ChildCard({
   stagedEdit,
   parentRating,
   parentGender,
+  isCompleteStaged,
+  isRegenerating,
   selected,
   onSelect,
   onAccept,
@@ -289,6 +295,7 @@ function ChildCard({
   onUndo,
   onRate,
   onCycleGender,
+  onToggleComplete,
 }: ChildCardProps) {
   const { member } = entry;
   const withStop = (handler: () => void) => (event: ReactMouseEvent) => {
@@ -315,11 +322,16 @@ function ChildCard({
 
   return (
     <article
-      className={`character-group-card character-group-card--${entry.kind}${cardStateClass}${selected ? " character-group-card--selected" : ""}`}
+      className={`character-group-card character-group-card--${entry.kind}${cardStateClass}${selected ? " character-group-card--selected" : ""}${isRegenerating ? " character-group-card--locked" : ""}`}
       data-child-card-key={entry.key}
       aria-current={selected || undefined}
       onClick={onSelect}
     >
+      {isRegenerating ? (
+        <div className="v2-review-card-regenerate-banner">
+          <span>재생성 중...</span>
+        </div>
+      ) : null}
       <div className="character-group-card-image-wrap">
         {imageUrl ? (
           <img src={imageUrl} alt={member.character_tag} loading="lazy" />
@@ -333,6 +345,7 @@ function ChildCard({
         <div className="character-group-card-name-row">
           <span className={`badge character-group-card-kind character-group-card-kind--${entry.kind}`}>{kindLabel}</span>
           {stagedLabel ? <span className="badge badge-warning">{stagedLabel}</span> : null}
+          {isCompleteStaged ? <span className="badge badge-success">완료 대기</span> : null}
         </div>
         <h4 className="character-group-card-tag">{member.character_tag}</h4>
         {member.display_name ? <p className="catalog-card-subtitle">{member.display_name}</p> : null}
@@ -340,6 +353,7 @@ function ChildCard({
           <button
             type="button"
             className={genderChipClass(effectiveGender)}
+            disabled={isRegenerating}
             onClick={withStop(() => onCycleGender(effectiveGender))}
           >
             {genderChipLabel(effectiveGender)}
@@ -354,26 +368,40 @@ function ChildCard({
         ) : null}
         <ReviewRatingStars rating={effectiveRating} onRate={onRate} />
         <div className="character-group-card-actions">
-          {staged ? (
-            <button className="btn btn-small" type="button" onClick={withStop(onUndo)}>
-              되돌리기
+          {isCompleteStaged ? (
+            <button className="btn btn-small btn-success" type="button" disabled={isRegenerating} onClick={withStop(onToggleComplete)}>
+              완료대기 (취소)
             </button>
+          ) : staged ? (
+            <>
+              <button className="btn btn-small" type="button" disabled={isRegenerating} onClick={withStop(onUndo)}>
+                되돌리기
+              </button>
+              {(staged.op === "accept" || staged.op === "add") && (
+                <button className="btn btn-small" type="button" disabled={isRegenerating} onClick={withStop(onToggleComplete)}>
+                  완료대기
+                </button>
+              )}
+            </>
           ) : entry.kind === "suggested" ? (
             <>
-              <button className="btn btn-small btn-primary" type="button" onClick={withStop(onAccept)}>
+              <button className="btn btn-small btn-primary" type="button" disabled={isRegenerating} onClick={withStop(onAccept)}>
                 수락
               </button>
-              <button className="btn btn-small" type="button" onClick={withStop(onReject)}>
+              <button className="btn btn-small" type="button" disabled={isRegenerating} onClick={withStop(onReject)}>
                 거부
               </button>
             </>
           ) : entry.kind === "existing" ? (
             <>
-              <button className="btn btn-small" type="button" onClick={withStop(onUnlink)}>
+              <button className="btn btn-small" type="button" disabled={isRegenerating} onClick={withStop(onUnlink)}>
                 연결 해제
               </button>
-              <button className="btn btn-small" type="button" onClick={withStop(onMove)}>
+              <button className="btn btn-small" type="button" disabled={isRegenerating} onClick={withStop(onMove)}>
                 다른 부모로 이동
+              </button>
+              <button className="btn btn-small" type="button" disabled={isRegenerating} onClick={withStop(onToggleComplete)}>
+                완료대기
               </button>
             </>
           ) : null}
@@ -419,9 +447,21 @@ export function CharacterGroupReviewPanel() {
   const [applying, setApplying] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
+  const { v2Jobs, startV2Regeneration } = useGenerationJobs();
+  const processedV2JobIdsRef = useRef<Set<string>>(new Set());
+
   const [stagedActions, setStagedActions] = useState<Record<number, StagedAction>>({});
   const [stagedMemberEdits, setStagedMemberEdits] = useState<Record<number, { rating?: number | null; gender?: string | null }>>({});
+  const [stagedCompletes, setStagedCompletes] = useState<Set<number>>(new Set());
   const [manualMembers, setManualMembers] = useState<CharacterGroupMember[]>([]);
+
+  const isCharacterRegenerating = useCallback(
+    (characterId: number) => {
+      const job = v2Jobs.find((j) => j.kind === "regenerate" && j.character_id === characterId);
+      return Boolean(job && (job.status === "queued" || job.status === "running" || job.status === "paused"));
+    },
+    [v2Jobs],
+  );
 
   const [addChildModalOpen, setAddChildModalOpen] = useState(false);
   const [moveChildTarget, setMoveChildTarget] = useState<CharacterGroupMember | null>(null);
@@ -494,11 +534,30 @@ export function CharacterGroupReviewPanel() {
     }
     setStagedActions({});
     setStagedMemberEdits({});
+    setStagedCompletes(new Set());
     setManualMembers([]);
     setSelectedChildKey(null);
     setActionMessage(null);
     void loadDetail(detailParentId);
   }, [detailParentId, loadDetail]);
+
+  useEffect(() => {
+    if (!detail) return;
+    for (const job of v2Jobs) {
+      if (job.kind === "regenerate" && !processedV2JobIdsRef.current.has(job.job_id)) {
+        if (job.status === "completed" || job.status === "failed") {
+          processedV2JobIdsRef.current.add(job.job_id);
+          if (job.status === "completed") {
+            setActionMessage(`${job.current_character_tag ?? "캐릭터"} 이미지 재생성 완료`);
+            void loadDetail(detail.parent.id);
+            void loadGroups();
+          } else if (job.status === "failed") {
+            setActionMessage(`${job.current_character_tag ?? "캐릭터"} 재생성 실패: ${job.last_failure_reason || job.message || ""}`);
+          }
+        }
+      }
+    }
+  }, [v2Jobs, detail, loadDetail, loadGroups]);
 
   const loadExpanded = useCallback(async (parentId: number) => {
     setExpandedLoading(true);
@@ -592,10 +651,27 @@ export function CharacterGroupReviewPanel() {
       delete next[childId];
       return next;
     });
+    setStagedCompletes((current) => {
+      if (!current.has(childId)) return current;
+      const next = new Set(current);
+      next.delete(childId);
+      return next;
+    });
     setManualMembers((current) => current.filter((member) => member.id !== childId));
   };
 
-  const handleAccept = (childId: number) => stageAction(childId, { op: "accept", childId });
+  const handleAccept = (childId: number) => {
+    stageAction(childId, { op: "accept", childId });
+    if (detail) {
+      const parentStaged = stagedMemberEdits[detail.parent.id];
+      const parentEffectiveRating = resolveRating(detail.parent, null, parentStaged);
+      const childMember = entries.find((e) => e.member.id === childId)?.member;
+      if (childMember && childMember.rating == null && parentEffectiveRating != null && stagedMemberEdits[childId]?.rating === undefined) {
+        stageRating(childId, parentEffectiveRating);
+      }
+    }
+  };
+
   const handleReject = (childId: number) => stageAction(childId, { op: "reject", childId });
   const handleUnlink = (childId: number) => stageAction(childId, { op: "unlink", childId });
 
@@ -612,6 +688,13 @@ export function CharacterGroupReviewPanel() {
     const member = candidateToMember(candidate);
     setManualMembers((current) => (current.some((entry) => entry.id === member.id) ? current : [...current, member]));
     stageAction(member.id, { op: "add", childId: member.id });
+    if (detail) {
+      const parentStaged = stagedMemberEdits[detail.parent.id];
+      const parentEffectiveRating = resolveRating(detail.parent, null, parentStaged);
+      if (member.rating == null && parentEffectiveRating != null && stagedMemberEdits[member.id]?.rating === undefined) {
+        stageRating(member.id, parentEffectiveRating);
+      }
+    }
   };
 
   const stageRating = (memberId: number, rating: number) => {
@@ -635,8 +718,46 @@ export function CharacterGroupReviewPanel() {
     }));
   };
 
-  const hasStagedActions = Object.keys(stagedActions).length > 0 || Object.keys(stagedMemberEdits).length > 0;
-  const stagedCount = Object.keys(stagedActions).length + Object.keys(stagedMemberEdits).length;
+  const canStageComplete = (member: CharacterGroupMember, effectiveRating: number | null): boolean => {
+    if (effectiveRating === null || effectiveRating === undefined) {
+      return false;
+    }
+    if (member.image_count > 0) {
+      return true;
+    }
+    return effectiveRating === 0 || effectiveRating === -1;
+  };
+
+  const toggleStageComplete = (memberId: number, member: CharacterGroupMember, effectiveRating: number | null) => {
+    if (stagedCompletes.has(memberId)) {
+      setStagedCompletes((current) => {
+        const next = new Set(current);
+        next.delete(memberId);
+        return next;
+      });
+      return;
+    }
+    if (!canStageComplete(member, effectiveRating)) {
+      if (effectiveRating === null) {
+        setActionMessage("별점 정보가 없으면 완료대기로 전환할 수 없습니다.");
+      } else if (member.image_count === 0 && effectiveRating !== 0 && effectiveRating !== -1) {
+        setActionMessage("이미지가 없는 항목은 0성 또는 -1성 별점일 때만 완료대기가 가능합니다.");
+      } else {
+        setActionMessage("완료대기 전환 조건에 맞지 않습니다.");
+      }
+      return;
+    }
+    setStagedCompletes((current) => new Set(current).add(memberId));
+  };
+
+  const hasStagedActions =
+    Object.keys(stagedActions).length > 0 ||
+    Object.keys(stagedMemberEdits).length > 0 ||
+    stagedCompletes.size > 0;
+  const stagedCount =
+    Object.keys(stagedActions).length +
+    Object.keys(stagedMemberEdits).length +
+    stagedCompletes.size;
 
   const applyStaged = async () => {
     if (!detail || !hasStagedActions) {
@@ -677,6 +798,20 @@ export function CharacterGroupReviewPanel() {
         }
       }
 
+      // 1) Complete items in stagedCompletes via api.completeV2ReviewCharacter
+      for (const memberId of stagedCompletes) {
+        const edit = savesToPerform.get(memberId) ?? {};
+        await api.completeV2ReviewCharacter(memberId, {
+          rating: edit.rating ?? null,
+          gender: edit.gender ?? null,
+          cover_image_id: null,
+          base_prompt: null,
+          selected_tags: null,
+        });
+        savesToPerform.delete(memberId);
+      }
+
+      // 2) Save remaining staged attribute edits via api.saveV2ReviewCharacter
       for (const [memberId, edit] of savesToPerform.entries()) {
         await api.saveV2ReviewCharacter(memberId, {
           rating: edit.rating,
@@ -688,6 +823,7 @@ export function CharacterGroupReviewPanel() {
       setDetail(response);
       setStagedActions({});
       setStagedMemberEdits({});
+      setStagedCompletes(new Set());
       setManualMembers([]);
       setActionMessage("변경사항을 적용했습니다.");
       void loadGroups();
@@ -842,11 +978,24 @@ export function CharacterGroupReviewPanel() {
           return;
         }
         if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "Enter") {
-          if (selected?.kind === "suggested" && !stagedActions[selected.member.id]) {
-            event.preventDefault();
-            handleAccept(selected.member.id);
+          if (selected) {
+            if (selected.kind === "suggested" && !stagedActions[selected.member.id]) {
+              event.preventDefault();
+              handleAccept(selected.member.id);
+              return;
+            }
+            if (detail) {
+              event.preventDefault();
+              const parentStaged = stagedMemberEdits[detail.parent.id];
+              const parentEffectiveRating = resolveRating(detail.parent, null, parentStaged);
+              const childStaged = stagedMemberEdits[selected.member.id];
+              const effectiveRating = selected.kind === "suggested" && !stagedActions[selected.member.id]
+                ? resolveRating(selected.member, null, childStaged)
+                : resolveRating(selected.member, parentEffectiveRating, childStaged);
+              toggleStageComplete(selected.member.id, selected.member, effectiveRating);
+              return;
+            }
           }
-          return;
         }
 
         if (selectedMember && !event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -886,9 +1035,8 @@ export function CharacterGroupReviewPanel() {
           }
           if (key === "r") {
             event.preventDefault();
-            void api
-              .regenerateV2Character(selectedMember.id, {})
-              .then(() => setActionMessage(`${selectedMember.character_tag} V2 이미지 재생성을 요청했습니다.`))
+            void startV2Regeneration(selectedMember.id, {})
+              .then(() => setActionMessage(`${selectedMember.character_tag} V2 이미지 재생성을 시작했습니다.`))
               .catch((err: unknown) => setActionMessage(err instanceof Error ? err.message : "재생성에 실패했습니다."));
             return;
           }
@@ -1278,6 +1426,11 @@ export function CharacterGroupReviewPanel() {
                                   <span className="review-image-placeholder">No image</span>
                                 </div>
                               )}
+                              {isCharacterRegenerating(detail.parent.id) ? (
+                                <div className="v2-review-card-regenerate-banner">
+                                  <span>재생성 중...</span>
+                                </div>
+                              ) : null}
                             </div>
                             <h3 className="character-group-card-tag">{detail.parent.character_tag}</h3>
                             {detail.parent.display_name ? <p className="catalog-card-subtitle">{detail.parent.display_name}</p> : null}
@@ -1285,6 +1438,7 @@ export function CharacterGroupReviewPanel() {
                               <button
                                 type="button"
                                 className={genderChipClass(parentEffectiveGender)}
+                                disabled={isCharacterRegenerating(detail.parent.id)}
                                 onClick={() => stageGender(detail.parent.id, parentEffectiveGender)}
                               >
                                 {genderChipLabel(parentEffectiveGender)}
@@ -1299,25 +1453,41 @@ export function CharacterGroupReviewPanel() {
                             {entries.length === 0 ? (
                               <div className="empty-state">기존 자식 또는 제안된 후보가 없습니다.</div>
                             ) : (
-                              entries.map((entry) => (
-                                <ChildCard
-                                  key={entry.key}
-                                  entry={entry}
-                                  staged={stagedActions[entry.member.id]}
-                                  stagedEdit={stagedMemberEdits[entry.member.id]}
-                                  parentRating={parentEffectiveRating}
-                                  parentGender={parentEffectiveGender}
-                                  selected={entry.key === selectedChildKey}
-                                  onSelect={() => setSelectedChildKey(entry.key)}
-                                  onAccept={() => handleAccept(entry.member.id)}
-                                  onReject={() => handleReject(entry.member.id)}
-                                  onUnlink={() => handleUnlink(entry.member.id)}
-                                  onMove={() => setMoveChildTarget(entry.member)}
-                                  onUndo={() => undoAction(entry.member.id)}
-                                  onRate={(r) => stageRating(entry.member.id, r)}
-                                  onCycleGender={(curG) => stageGender(entry.member.id, curG)}
-                                />
-                              ))
+                              entries.map((entry) => {
+                                const isStagedAccept = stagedActions[entry.member.id]?.op === "accept" || stagedActions[entry.member.id]?.op === "add";
+                                const childStaged = stagedMemberEdits[entry.member.id];
+
+                                // For raw (unstaged) suggestions, do NOT inherit parent rating!
+                                const effectiveRating = entry.kind === "suggested" && !isStagedAccept
+                                  ? resolveRating(entry.member, null, childStaged)
+                                  : resolveRating(entry.member, parentEffectiveRating, childStaged);
+
+                                const isCompleteStaged = stagedCompletes.has(entry.member.id);
+                                const isRegenerating = isCharacterRegenerating(entry.member.id);
+
+                                return (
+                                  <ChildCard
+                                    key={entry.key}
+                                    entry={entry}
+                                    staged={stagedActions[entry.member.id]}
+                                    stagedEdit={stagedMemberEdits[entry.member.id]}
+                                    parentRating={entry.kind === "suggested" && !isStagedAccept ? null : parentEffectiveRating}
+                                    parentGender={parentEffectiveGender}
+                                    isCompleteStaged={isCompleteStaged}
+                                    isRegenerating={isRegenerating}
+                                    selected={entry.key === selectedChildKey}
+                                    onSelect={() => setSelectedChildKey(entry.key)}
+                                    onAccept={() => handleAccept(entry.member.id)}
+                                    onReject={() => handleReject(entry.member.id)}
+                                    onUnlink={() => handleUnlink(entry.member.id)}
+                                    onMove={() => setMoveChildTarget(entry.member)}
+                                    onUndo={() => undoAction(entry.member.id)}
+                                    onRate={(r) => stageRating(entry.member.id, r)}
+                                    onCycleGender={(curG) => stageGender(entry.member.id, curG)}
+                                    onToggleComplete={() => toggleStageComplete(entry.member.id, entry.member, effectiveRating)}
+                                  />
+                                );
+                              })
                             )}
                           </div>
                         </>
