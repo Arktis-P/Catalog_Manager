@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { waitForBackend } from "../api/client";
 
 interface BackendGateProps {
@@ -8,15 +8,19 @@ interface BackendGateProps {
 type GateState = "connecting" | "ready" | "error";
 
 const HEALTH_CHECK_INTERVAL_MS = 10_000;
+const HEALTH_CHECK_TIMEOUT_MS = 5_000;
+const MAX_CONSECUTIVE_FAILURES = 3;
 
 export function BackendGate({ children }: BackendGateProps) {
   const [gateState, setGateState] = useState<GateState>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  const consecutiveFailuresRef = useRef(0);
 
   // 초기 연결 (재시도 포함)
   useEffect(() => {
     let cancelled = false;
+    consecutiveFailuresRef.current = 0;
     setGateState("connecting");
     setError(null);
 
@@ -36,18 +40,22 @@ export function BackendGate({ children }: BackendGateProps) {
     };
   }, [retryKey]);
 
-  // 연결 완료 후 주기적 헬스체크 — 백엔드 다운 시 즉시 재연결 화면으로 전환
+  // 연결 완료 후 주기적 헬스체크 — 3회 연속 실패 시에만 재연결 화면으로 전환
   useEffect(() => {
     if (gateState !== "ready") return;
 
     const check = async () => {
       try {
         const res = await fetch("/api/health", {
-          signal: AbortSignal.timeout(3000),
+          signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
         });
         if (!res.ok) throw new Error("not ok");
+        consecutiveFailuresRef.current = 0;
       } catch {
-        setRetryKey((k) => k + 1);
+        consecutiveFailuresRef.current += 1;
+        if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_FAILURES) {
+          setRetryKey((k) => k + 1);
+        }
       }
     };
 

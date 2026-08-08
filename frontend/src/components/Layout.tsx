@@ -11,7 +11,7 @@ function BackendStatusDot() {
     let mounted = true;
     const check = async () => {
       try {
-        const res = await fetch("/api/health", { signal: AbortSignal.timeout(2000) });
+        const res = await fetch("/api/health", { signal: AbortSignal.timeout(5000) });
         if (mounted) setAlive(res.ok);
       } catch {
         if (mounted) setAlive(false);
