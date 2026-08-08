@@ -3581,6 +3581,13 @@ button,
   cursor: not-allowed;
 }
 
+.v2-review-card-add-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
 .review-checkbox-field {
   display: flex;
   align-items: center;

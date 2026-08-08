@@ -9,6 +9,8 @@ const MULTI_COLOR_PROMPT_TAGS = new Set([
   "grey_streaks",
   "white_streaks",
   "brown_streaks",
+  "purple_streaks",
+  "pink_streaks",
   "gradient_hair",
   "colored_inner_hair",
   "multicolored_hair",
@@ -16,52 +18,91 @@ const MULTI_COLOR_PROMPT_TAGS = new Set([
 ]);
 
 export const EXTRA_HAIR_COLORS = [
-  "aqua_hair",
-  "black_hair",
-  "blonde_hair",
-  "blue_hair",
-  "brown_hair",
-  "green_hair",
-  "grey_hair",
-  "light_brown_hair",
-  "orange_hair",
-  "pink_hair",
-  "platinum_blonde_hair",
-  "purple_hair",
-  "red_hair",
-  "silver_hair",
   "white_hair",
+  "grey_hair",
+  "black_hair",
+  "dark_brown_hair",
+  "brown_hair",
+  "light_brown_hair",
+  "red_hair",
+  "orange_hair",
+  "blonde_hair",
+  "green_hair",
+  "aqua_hair",
+  "light_blue_hair",
+  "blue_hair",
+  "dark_blue_hair",
+  "purple_hair",
+  "dark_purple_hair",
+  "pink_hair",
 ];
 
 export const EXTRA_EYE_COLORS = [
-  "aqua_eyes",
-  "amber_eyes",
-  "black_eyes",
-  "blue_eyes",
-  "brown_eyes",
-  "green_eyes",
-  "grey_eyes",
-  "heterochromia",
-  "orange_eyes",
-  "pink_eyes",
-  "purple_eyes",
-  "red_eyes",
   "white_eyes",
+  "grey_eyes",
+  "black_eyes",
+  "brown_eyes",
+  "red_eyes",
+  "orange_eyes",
   "yellow_eyes",
+  "green_eyes",
+  "aqua_eyes",
+  "blue_eyes",
+  "purple_eyes",
+  "pink_eyes",
+  "heterochromia",
 ];
 
 export const STREAK_COLORS = [
+  "white_streaks",
+  "grey_streaks",
+  "black_streaks",
+  "brown_streaks",
   "red_streaks",
   "orange_streaks",
   "blonde_streaks",
   "green_streaks",
   "aqua_streaks",
   "blue_streaks",
-  "black_streaks",
-  "grey_streaks",
-  "white_streaks",
-  "brown_streaks",
+  "purple_streaks",
+  "pink_streaks",
 ];
+
+export const MULTICOLOR_HAIR_PATTERN_KEYS = new Set([
+  "multi:multicolored_hair",
+  "multi:two-tone_hair",
+  "multi:gradient_hair",
+  "multi:colored_inner_hair",
+  "multi:streaked_hair",
+]);
+
+export function hasMulticolorHairTag(enabledKeys: Set<string>): boolean {
+  for (const key of enabledKeys) {
+    if (MULTICOLOR_HAIR_PATTERN_KEYS.has(key)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function normalizeHairTags(enabledKeys: Set<string>): Set<string> {
+  if (hasMulticolorHairTag(enabledKeys)) {
+    return enabledKeys;
+  }
+  const result = new Set<string>();
+  let hairCount = 0;
+  for (const key of enabledKeys) {
+    if (key.startsWith("hair:")) {
+      if (hairCount === 0) {
+        result.add(key);
+        hairCount += 1;
+      }
+    } else {
+      result.add(key);
+    }
+  }
+  return result;
+}
 
 // 자주 쓰는 멀티컬러 머리 옵션. 캐릭터에 태그가 없어도 항상 선택 버튼으로 노출한다.
 // key는 appearanceTagChips의 multi 그룹과 동일한 형식이라 두 버튼이 자동 동기화된다.
