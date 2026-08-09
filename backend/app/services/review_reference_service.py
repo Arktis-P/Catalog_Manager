@@ -12,7 +12,7 @@ from app.integrations.danbooru.client import DanbooruClient
 from app.models.global_character import GlobalCharacter
 
 MAX_REFERENCE_IMAGES = 5
-FAVORITE_FALLBACK_LIMIT = 20
+FAVORITE_FALLBACK_LIMIT = 100
 USABLE_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
 ALLOWED_DANBOORU_IMAGE_HOSTS = {"danbooru.donmai.us", "cdn.donmai.us"}
 
@@ -130,8 +130,6 @@ class ReviewReferenceService:
             return posts
         except Exception as exc:
             raise ReviewReferenceUpstreamError(f"Failed to fetch Danbooru wiki samples: {exc}") from exc
-
-FAVORITE_FALLBACK_LIMIT = 100
 
     def fetch_favorite_posts(self, tag: str) -> list[dict]:
         try:
