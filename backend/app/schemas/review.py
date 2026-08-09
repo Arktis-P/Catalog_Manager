@@ -420,6 +420,7 @@ class V2ReviewReferenceImageItemResponse(BaseModel):
     preview_url: str
     post_url: str
     source: Literal["wiki_sample", "favorite"]
+    tags: list[str] = Field(default_factory=list)
 
 
 class V2ReviewReferenceImagesResponse(BaseModel):

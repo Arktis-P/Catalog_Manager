@@ -126,7 +126,7 @@ def test_reference_images_prioritize_wiki_then_fill_with_favorites(db: Session) 
         (70, "favorite"),
         (80, "favorite"),
     ]
-    assert client.list_post_tags[-1] == "hakurei_reimu order:favcount"
+    assert client.list_post_tags[-1] == "hakurei_reimu solo order:favcount"
 
 
 def test_reference_images_normalize_protocol_relative_urls(db: Session) -> None:

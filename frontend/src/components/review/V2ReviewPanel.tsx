@@ -1155,7 +1155,7 @@ export function V2ReviewPanel() {
       if (key === "q") {
         event.preventDefault();
         window.open(
-          `https://danbooru.donmai.us/posts?tags=${encodeURIComponent(nhFocusedItem.character_tag)}`,
+          `https://danbooru.donmai.us/posts?tags=${encodeURIComponent(`${nhFocusedItem.character_tag} solo`.trim())}`,
           "_blank",
           "noopener,noreferrer",
         );
@@ -1895,7 +1895,7 @@ export function V2ReviewPanel() {
         event.preventDefault();
         window.open(
           `https://danbooru.donmai.us/posts?tags=${encodeURIComponent(
-            `${focusedItem.character_tag} ${focusedItem.series_tags[0] ?? ""}`.trim(),
+            `${focusedItem.character_tag} solo`.trim(),
           )}`,
           "_blank",
           "noopener,noreferrer",

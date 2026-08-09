@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -36,6 +36,7 @@ class ReviewReferenceItem:
     preview_url: str
     post_url: str
     source: Literal["wiki_sample", "favorite"]
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -130,12 +131,21 @@ class ReviewReferenceService:
         except Exception as exc:
             raise ReviewReferenceUpstreamError(f"Failed to fetch Danbooru wiki samples: {exc}") from exc
 
+FAVORITE_FALLBACK_LIMIT = 100
+
     def fetch_favorite_posts(self, tag: str) -> list[dict]:
         try:
-            return self.client.list_posts(
-                tags=f"{tag} order:favcount",
+            posts = self.client.list_posts(
+                tags=f"{tag} solo",
                 limit=FAVORITE_FALLBACK_LIMIT,
             )
+            if not posts:
+                posts = self.client.list_posts(
+                    tags=f"{tag}",
+                    limit=FAVORITE_FALLBACK_LIMIT,
+                )
+            posts.sort(key=lambda p: int(p.get("fav_count") or 0), reverse=True)
+            return posts
         except Exception as exc:
             raise ReviewReferenceUpstreamError(f"Failed to fetch Danbooru favorite posts: {exc}") from exc
 
@@ -199,10 +209,13 @@ class ReviewReferenceService:
         if not thumbnail_url or not preview_url:
             return None
 
+        raw_tags = str(post.get("tag_string") or "").split()
+
         return ReviewReferenceItem(
             post_id=post_id,
             thumbnail_url=thumbnail_url,
             preview_url=preview_url,
             post_url=f"{settings.danbooru_base_url}/posts/{post_id}",
             source=source,
+            tags=raw_tags,
         )

@@ -789,6 +789,7 @@ export interface V2ReviewReferenceItem {
   preview_url: string;
   post_url: string;
   source: V2ReviewReferenceImageSource;
+  tags?: string[];
 }
 
 export interface V2ReviewReferenceImagesResponse {
