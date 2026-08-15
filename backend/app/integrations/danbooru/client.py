@@ -37,6 +37,20 @@ class DanbooruClient:
                 "Set input/danbooru.env or input/danbooru_api_key.txt (see input/danbooru.env.example)."
             )
 
+    @staticmethod
+    def _proxy_mapping() -> dict[str, str] | None:
+        if not settings.app_proxy_enabled:
+            return None
+        if settings.app_proxy_host not in {"127.0.0.1", "localhost", "::1"}:
+            raise ValueError(
+                "CATALOGUE_APP_PROXY_HOST must be loopback so Danbooru proxying stays app-scoped"
+            )
+        if not 1 <= settings.app_proxy_port <= 65535:
+            raise ValueError("CATALOGUE_APP_PROXY_PORT must be between 1 and 65535")
+
+        proxy_url = f"socks5h://{settings.app_proxy_host}:{settings.app_proxy_port}"
+        return {"http": proxy_url, "https": proxy_url}
+
     @property
     def client(self) -> Danbooru:
         if self._client is None:
@@ -44,6 +58,7 @@ class DanbooruClient:
                 site_name="danbooru",
                 username=self.username,
                 api_key=self.api_key,
+                proxies=self._proxy_mapping(),
             )
         return self._client
 
