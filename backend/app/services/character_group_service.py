@@ -53,6 +53,7 @@ class GroupMemberPreview:
     character: GlobalCharacter
     review_status: str | None
     rating: int | None
+    gender: str | None
     image_count: int
     preview_image_path: str | None
     is_cover_preview: bool
@@ -262,10 +263,12 @@ class CharacterGroupService:
         for character_id, character in char_map.items():
             review = review_map.get(character_id)
             preview_path = cover_map.get(character_id) or latest_map.get(character_id)
+            gender_val = (review.gender if review and review.gender else character.gender)
             previews[character_id] = GroupMemberPreview(
                 character=character,
                 review_status=review.review_status if review else None,
                 rating=review.rating if review else None,
+                gender=gender_val,
                 image_count=image_count_map.get(character_id, 0),
                 preview_image_path=preview_path,
                 is_cover_preview=character_id in cover_map,

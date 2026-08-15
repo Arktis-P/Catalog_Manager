@@ -8,6 +8,7 @@ import {
   defaultEnabledTagKeys,
   genderChipClass,
   genderChipLabel,
+  normalizeHairTags,
   stripHairSuffix,
 } from "../../utils/reviewPrompt";
 import { LazyReviewImage } from "./LazyReviewImage";
@@ -80,7 +81,7 @@ function enabledTagsFromSelectedTags(selectedTags: string | null, chips: V2Appea
       enabled.add(chip.key);
     }
   }
-  return enabled.size > 0 ? enabled : null;
+  return enabled.size > 0 ? normalizeHairTags(enabled) : null;
 }
 
 function enabledTagsFromPrompt(basePrompt: string | null, chips: V2AppearanceChip[]): Set<string> | null {
@@ -96,7 +97,7 @@ function enabledTagsFromPrompt(basePrompt: string | null, chips: V2AppearanceChi
       enabled.add(chip.key);
     }
   }
-  return enabled.size > 0 ? enabled : null;
+  return enabled.size > 0 ? normalizeHairTags(enabled) : null;
 }
 
 export function createV2DraftForItem(character: V2ReviewCharacter): V2CharacterDraft {
@@ -397,47 +398,6 @@ export function V2ReviewRow({
               {chip.group === "multi" ? stripHairSuffix(chip.label) : chip.label}
             </button>
           ))}
-          <select
-            className="review-tag-select"
-            value=""
-            disabled={locked}
-            aria-label="색상 추가"
-            onChange={(event) => {
-              const key = event.target.value;
-              if (key) {
-                onToggleTag(key);
-              }
-            }}
-          >
-            <option value="">+ 색상 추가</option>
-            {extraHairOptions.length > 0 ? (
-              <optgroup label="머리색">
-                {extraHairOptions.map((chip) => (
-                  <option key={chip.key} value={chip.key}>
-                    {chip.label}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
-            {extraEyeOptions.length > 0 ? (
-              <optgroup label="눈색">
-                {extraEyeOptions.map((chip) => (
-                  <option key={chip.key} value={chip.key}>
-                    {chip.label}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
-            {extraStreakOptions.length > 0 ? (
-              <optgroup label="스트릭">
-                {extraStreakOptions.map((chip) => (
-                  <option key={chip.key} value={chip.key}>
-                    {stripHairSuffix(chip.label)}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
-          </select>
           {suggestedChips.map((chip) => (
             <button
               key={chip.key}
@@ -450,6 +410,68 @@ export function V2ReviewRow({
               추천: {stripHairSuffix(chip.label)}
             </button>
           ))}
+        </div>
+
+        <div className="v2-review-card-add-tags-row">
+          <select
+            className="review-tag-select"
+            value=""
+            disabled={locked}
+            aria-label="머리색 추가"
+            onChange={(event) => {
+              const key = event.target.value;
+              if (key) {
+                onToggleTag(key);
+              }
+            }}
+          >
+            <option value="">+ 머리색 추가</option>
+            {extraHairOptions.map((chip) => (
+              <option key={chip.key} value={chip.key}>
+                {chip.label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            className="review-tag-select"
+            value=""
+            disabled={locked}
+            aria-label="streaks 색 추가"
+            onChange={(event) => {
+              const key = event.target.value;
+              if (key) {
+                onToggleTag(key);
+              }
+            }}
+          >
+            <option value="">+ streaks 색 추가</option>
+            {extraStreakOptions.map((chip) => (
+              <option key={chip.key} value={chip.key}>
+                {stripHairSuffix(chip.label)}
+              </option>
+            ))}
+          </select>
+
+          <select
+            className="review-tag-select"
+            value=""
+            disabled={locked}
+            aria-label="눈색 추가"
+            onChange={(event) => {
+              const key = event.target.value;
+              if (key) {
+                onToggleTag(key);
+              }
+            }}
+          >
+            <option value="">+ 눈색 추가</option>
+            {extraEyeOptions.map((chip) => (
+              <option key={chip.key} value={chip.key}>
+                {chip.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="catalog-review-prompt-field">

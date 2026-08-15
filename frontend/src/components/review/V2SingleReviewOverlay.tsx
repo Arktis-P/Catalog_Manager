@@ -6,7 +6,14 @@ import type {
   V2ReviewReferenceItem,
   V2ReviewReferenceImagesResponse,
 } from "../../types";
-import { cycleGender } from "../../utils/reviewPrompt";
+import {
+  EXTRA_EYE_COLORS,
+  EXTRA_HAIR_COLORS,
+  STREAK_COLORS,
+  cycleGender,
+  normalizeHairTags,
+  tagToPromptText,
+} from "../../utils/reviewPrompt";
 import { pendingReviewImageUrl, referenceReviewImageUrl } from "../../utils/reviewImages";
 import {
   identityDotTitle,
@@ -118,6 +125,249 @@ function ReferenceSlot({
   return (
     <div className="v2-single-reference-slot v2-single-reference-slot--empty">
       <span>{loading ? "Loading" : error ? "Error" : "Empty"}</span>
+    </div>
+  );
+}
+
+const HAIR_COLOR_TAG_SET = new Set(EXTRA_HAIR_COLORS);
+const EYE_COLOR_TAG_SET = new Set(EXTRA_EYE_COLORS);
+const MULTI_HAIR_TAG_SET = new Set([
+  "multicolored",
+  "multicolored_hair",
+  "gradient",
+  "gradient_hair",
+  "two-tone",
+  "two-tone_hair",
+  "two_tone_hair",
+  "colored_inner",
+  "colored_inner_hair",
+  "streaked",
+  "streaked_hair",
+  ...STREAK_COLORS,
+]);
+const GENDER_TAG_SET = new Set(["1girl", "1boy", "no_humans", "2girls", "3girls", "4girls", "6+girls", "multiple_girls"]);
+
+function normalizeTagKey(tag: string, category: "gender" | "hair" | "multi" | "eyes"): string {
+  const clean = tag.trim().toLowerCase();
+  if (category === "gender") {
+    if (clean.includes("1girl")) return "1girl";
+    if (clean.includes("1boy")) return "1boy";
+    if (clean.includes("no_humans")) return "no_humans";
+    return clean;
+  }
+  if (category === "hair") {
+    if (clean.endsWith("_hair")) return clean;
+    if (HAIR_COLOR_TAG_SET.has(`${clean}_hair`)) return `${clean}_hair`;
+    return clean;
+  }
+  if (category === "eyes") {
+    if (clean.endsWith("_eyes")) return clean;
+    if (EYE_COLOR_TAG_SET.has(`${clean}_eyes`)) return `${clean}_eyes`;
+    return clean;
+  }
+  if (category === "multi") {
+    if (clean === "multicolored") return "multicolored_hair";
+    if (clean === "gradient") return "gradient_hair";
+    if (clean === "two-tone" || clean === "two_tone") return "two-tone_hair";
+    if (clean === "colored_inner") return "colored_inner_hair";
+    if (clean === "streaked") return "streaked_hair";
+    return clean;
+  }
+  return clean;
+}
+
+function findCommonTagForCategory(
+  references: V2ReviewReferenceItem[],
+  category: "gender" | "hair" | "multi" | "eyes",
+): string | null {
+  if (references.length === 0) return null;
+
+  const counts: Record<string, number> = {};
+
+  for (const ref of references) {
+    if (!ref.tags || ref.tags.length === 0) continue;
+    const seenInImage = new Set<string>();
+
+    for (const rawTag of ref.tags) {
+      const tag = rawTag.trim().toLowerCase();
+      let matched: string | null = null;
+
+      if (category === "gender") {
+        if (GENDER_TAG_SET.has(tag) || tag === "1girl" || tag === "1boy" || tag === "no_humans") {
+          matched = normalizeTagKey(tag, "gender");
+        }
+      } else if (category === "hair") {
+        const norm = normalizeTagKey(tag, "hair");
+        if (HAIR_COLOR_TAG_SET.has(norm) && !MULTI_HAIR_TAG_SET.has(norm)) {
+          matched = norm;
+        }
+      } else if (category === "multi") {
+        const norm = normalizeTagKey(tag, "multi");
+        if (MULTI_HAIR_TAG_SET.has(norm) || norm.endsWith("_streaks")) {
+          matched = norm;
+        }
+      } else if (category === "eyes") {
+        const norm = normalizeTagKey(tag, "eyes");
+        if (EYE_COLOR_TAG_SET.has(norm)) {
+          matched = norm;
+        }
+      }
+
+      if (matched && !seenInImage.has(matched)) {
+        seenInImage.add(matched);
+        counts[matched] = (counts[matched] || 0) + 1;
+      }
+    }
+  }
+
+  let bestTag: string | null = null;
+  let maxCount = 0;
+
+  for (const [tag, count] of Object.entries(counts)) {
+    if (count >= 2 && count > maxCount) {
+      maxCount = count;
+      bestTag = tag;
+    }
+  }
+
+  return bestTag;
+}
+
+interface ReferenceTagComparisonProps {
+  references: V2ReviewReferenceItem[];
+  draft: V2CharacterDraft;
+  readOnly?: boolean;
+  onDraftChange?: (draft: V2CharacterDraft) => void;
+}
+
+function ReferenceTagComparison({
+  references,
+  draft,
+  readOnly,
+  onDraftChange,
+}: ReferenceTagComparisonProps) {
+  const commonGender = useMemo(() => findCommonTagForCategory(references, "gender"), [references]);
+  const commonHair = useMemo(() => findCommonTagForCategory(references, "hair"), [references]);
+  const commonMulti = useMemo(() => findCommonTagForCategory(references, "multi"), [references]);
+  const commonEyes = useMemo(() => findCommonTagForCategory(references, "eyes"), [references]);
+
+  const genderMatch = commonGender !== null && draft.gender === commonGender;
+  const genderDot = commonGender === null ? "reject" : genderMatch ? "pass" : "warning";
+
+  const hairKey = commonHair ? `hair:${commonHair}` : null;
+  const hairMatch = hairKey !== null && draft.enabledTags.has(hairKey);
+  const hairDot = commonHair === null ? "reject" : hairMatch ? "pass" : "warning";
+
+  const multiKey = commonMulti ? `multi:${commonMulti}` : null;
+  const multiMatch = multiKey !== null && draft.enabledTags.has(multiKey);
+  const multiDot = commonMulti === null ? "reject" : multiMatch ? "pass" : "warning";
+
+  const eyeKey = commonEyes ? `eyes:${commonEyes}` : null;
+  const eyeMatch = eyeKey !== null && draft.enabledTags.has(eyeKey);
+  const eyeDot = commonEyes === null ? "reject" : eyeMatch ? "pass" : "warning";
+
+  const dotTitle = (catName: string, common: string | null, status: "pass" | "warning" | "reject") => {
+    if (status === "reject") return `${catName}: 공통 태그 없음 (5개 이미지 중 2개 미만)`;
+    if (status === "warning") return `${catName}: 공통 태그(${tagToPromptText(common!)})가 현재 태그와 다름`;
+    return `${catName}: 공통 태그(${tagToPromptText(common!)})와 현재 태그 일치`;
+  };
+
+  const handleApplyTag = (category: "gender" | "hair" | "multi" | "eyes", tagValue: string | null) => {
+    if (!tagValue || readOnly || !onDraftChange) return;
+
+    if (category === "gender") {
+      onDraftChange({ ...draft, gender: tagValue });
+      return;
+    }
+
+    const key = `${category}:${tagValue}`;
+    const nextEnabled = new Set(draft.enabledTags);
+    if (nextEnabled.has(key)) {
+      nextEnabled.delete(key);
+    } else {
+      nextEnabled.add(key);
+    }
+    const finalEnabled = category === "hair" ? normalizeHairTags(nextEnabled) : nextEnabled;
+    onDraftChange({ ...draft, enabledTags: finalEnabled });
+  };
+
+  return (
+    <div className="v2-reference-tag-comparison">
+      <div className="v2-reference-tag-header">
+        <strong className="v2-reference-tag-title">레퍼런스 태그 비교</strong>
+        <div className="v2-reference-status-dots" aria-label="태그 비교 상태">
+          <span className={statusDotClass(genderDot)} title={dotTitle("성별", commonGender, genderDot)} />
+          <span className={statusDotClass(hairDot)} title={dotTitle("머리색", commonHair, hairDot)} />
+          <span className={statusDotClass(multiDot)} title={dotTitle("멀티머리색", commonMulti, multiDot)} />
+          <span className={statusDotClass(eyeDot)} title={dotTitle("눈색", commonEyes, eyeDot)} />
+        </div>
+      </div>
+
+      <div className="v2-reference-tag-grid">
+        <div className="v2-reference-tag-row">
+          <span className="v2-reference-tag-label">성별:</span>
+          {commonGender ? (
+            <button
+              type="button"
+              className={`v2-reference-tag-chip ${genderMatch ? "v2-reference-tag-chip--active" : ""}`}
+              disabled={readOnly}
+              onClick={() => handleApplyTag("gender", commonGender)}
+            >
+              {commonGender}
+            </button>
+          ) : (
+            <span className="v2-reference-tag-none">태그 없음</span>
+          )}
+        </div>
+
+        <div className="v2-reference-tag-row">
+          <span className="v2-reference-tag-label">머리색:</span>
+          {commonHair ? (
+            <button
+              type="button"
+              className={`v2-reference-tag-chip ${hairMatch ? "v2-reference-tag-chip--active" : ""}`}
+              disabled={readOnly}
+              onClick={() => handleApplyTag("hair", commonHair)}
+            >
+              {tagToPromptText(commonHair)}
+            </button>
+          ) : (
+            <span className="v2-reference-tag-none">태그 없음</span>
+          )}
+        </div>
+
+        <div className="v2-reference-tag-row">
+          <span className="v2-reference-tag-label">멀티 머리색:</span>
+          {commonMulti ? (
+            <button
+              type="button"
+              className={`v2-reference-tag-chip ${multiMatch ? "v2-reference-tag-chip--active" : ""}`}
+              disabled={readOnly}
+              onClick={() => handleApplyTag("multi", commonMulti)}
+            >
+              {tagToPromptText(commonMulti)}
+            </button>
+          ) : (
+            <span className="v2-reference-tag-none">태그 없음</span>
+          )}
+        </div>
+
+        <div className="v2-reference-tag-row">
+          <span className="v2-reference-tag-label">눈색:</span>
+          {commonEyes ? (
+            <button
+              type="button"
+              className={`v2-reference-tag-chip ${eyeMatch ? "v2-reference-tag-chip--active" : ""}`}
+              disabled={readOnly}
+              onClick={() => handleApplyTag("eyes", commonEyes)}
+            >
+              {tagToPromptText(commonEyes)}
+            </button>
+          ) : (
+            <span className="v2-reference-tag-none">태그 없음</span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -562,7 +812,7 @@ export function V2SingleReviewOverlay({
         event.preventDefault();
         window.open(
           `https://danbooru.donmai.us/posts?tags=${encodeURIComponent(
-            `${item.character_tag} ${item.series_tags[0] ?? ""}`.trim(),
+            `${item.character_tag} solo`.trim(),
           )}`,
           "_blank",
           "noopener,noreferrer",
@@ -719,6 +969,12 @@ export function V2SingleReviewOverlay({
             />
           </fieldset>
 
+          <ReferenceTagComparison
+            references={activeReferences}
+            draft={draft}
+            readOnly={readOnly}
+            onDraftChange={onDraftChange}
+          />
         </section>
 
         <div className="v2-single-reference-panel">

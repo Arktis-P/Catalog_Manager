@@ -102,6 +102,7 @@ export async function waitForBackend(
     try {
       const response = await fetch(`${API_BASE}/health`, {
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(5000),
       });
       if (response.ok) {
         return;

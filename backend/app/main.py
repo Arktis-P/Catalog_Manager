@@ -102,7 +102,7 @@ def serve_appicon():
 
 
 @app.get("/api/health")
-def health_check():
+async def health_check():
     gui_dist = settings.frontend_dist_dir
     gui_ready = bool(gui_dist and gui_dist.exists() and (gui_dist / "index.html").exists())
     return {

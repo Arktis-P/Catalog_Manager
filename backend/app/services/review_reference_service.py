@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -12,7 +12,7 @@ from app.integrations.danbooru.client import DanbooruClient
 from app.models.global_character import GlobalCharacter
 
 MAX_REFERENCE_IMAGES = 5
-FAVORITE_FALLBACK_LIMIT = 20
+FAVORITE_FALLBACK_LIMIT = 100
 USABLE_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
 ALLOWED_DANBOORU_IMAGE_HOSTS = {"danbooru.donmai.us", "cdn.donmai.us"}
 
@@ -36,6 +36,7 @@ class ReviewReferenceItem:
     preview_url: str
     post_url: str
     source: Literal["wiki_sample", "favorite"]
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -132,10 +133,17 @@ class ReviewReferenceService:
 
     def fetch_favorite_posts(self, tag: str) -> list[dict]:
         try:
-            return self.client.list_posts(
-                tags=f"{tag} order:favcount",
+            posts = self.client.list_posts(
+                tags=f"{tag} solo",
                 limit=FAVORITE_FALLBACK_LIMIT,
             )
+            if not posts:
+                posts = self.client.list_posts(
+                    tags=f"{tag}",
+                    limit=FAVORITE_FALLBACK_LIMIT,
+                )
+            posts.sort(key=lambda p: int(p.get("fav_count") or 0), reverse=True)
+            return posts
         except Exception as exc:
             raise ReviewReferenceUpstreamError(f"Failed to fetch Danbooru favorite posts: {exc}") from exc
 
@@ -199,10 +207,13 @@ class ReviewReferenceService:
         if not thumbnail_url or not preview_url:
             return None
 
+        raw_tags = str(post.get("tag_string") or "").split()
+
         return ReviewReferenceItem(
             post_id=post_id,
             thumbnail_url=thumbnail_url,
             preview_url=preview_url,
             post_url=f"{settings.danbooru_base_url}/posts/{post_id}",
             source=source,
+            tags=raw_tags,
         )

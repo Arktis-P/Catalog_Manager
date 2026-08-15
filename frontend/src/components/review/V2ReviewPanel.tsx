@@ -22,7 +22,14 @@ import type {
   V2NonHumanFilter,
   NonHumanRatingFilter,
 } from "../../types";
-import { cycleGender, defaultEnabledTagKeys, genderChipClass, genderChipLabel } from "../../utils/reviewPrompt";
+import {
+  cycleGender,
+  defaultEnabledTagKeys,
+  genderChipClass,
+  genderChipLabel,
+  hasMulticolorHairTag,
+  normalizeHairTags,
+} from "../../utils/reviewPrompt";
 import { pendingReviewImageUrl } from "../../utils/reviewImages";
 import { LazyReviewImage } from "./LazyReviewImage";
 import {
@@ -1148,7 +1155,7 @@ export function V2ReviewPanel() {
       if (key === "q") {
         event.preventDefault();
         window.open(
-          `https://danbooru.donmai.us/posts?tags=${encodeURIComponent(nhFocusedItem.character_tag)}`,
+          `https://danbooru.donmai.us/posts?tags=${encodeURIComponent(`${nhFocusedItem.character_tag} solo`.trim())}`,
           "_blank",
           "noopener,noreferrer",
         );
@@ -1283,9 +1290,17 @@ export function V2ReviewPanel() {
     if (enabled.has(tagKey)) {
       enabled.delete(tagKey);
     } else {
+      if (tagKey.startsWith("hair:") && !hasMulticolorHairTag(enabled)) {
+        for (const key of Array.from(enabled)) {
+          if (key.startsWith("hair:")) {
+            enabled.delete(key);
+          }
+        }
+      }
       enabled.add(tagKey);
     }
-    updateDraft(item.id, { ...current, enabledTags: enabled });
+    const nextEnabled = normalizeHairTags(enabled);
+    updateDraft(item.id, { ...current, enabledTags: nextEnabled });
   };
 
   const setRating = (characterId: number, value: number) => {
@@ -1880,7 +1895,7 @@ export function V2ReviewPanel() {
         event.preventDefault();
         window.open(
           `https://danbooru.donmai.us/posts?tags=${encodeURIComponent(
-            `${focusedItem.character_tag} ${focusedItem.series_tags[0] ?? ""}`.trim(),
+            `${focusedItem.character_tag} solo`.trim(),
           )}`,
           "_blank",
           "noopener,noreferrer",

@@ -126,7 +126,7 @@ def test_reference_images_prioritize_wiki_then_fill_with_favorites(db: Session) 
         (70, "favorite"),
         (80, "favorite"),
     ]
-    assert client.list_post_tags[-1] == "hakurei_reimu order:favcount"
+    assert client.list_post_tags[-1] == "hakurei_reimu solo"
 
 
 def test_reference_images_normalize_protocol_relative_urls(db: Session) -> None:
@@ -213,3 +213,18 @@ def test_reference_images_router_character_not_found(db: Session) -> None:
         review_router.get_v2_review_reference_images(999, service=ReviewReferenceService(db))
 
     assert exc_info.value.status_code == 404
+
+
+def test_fetch_favorite_posts_sorts_by_fav_count(db: Session) -> None:
+    post1 = make_post(1)
+    post1["fav_count"] = 10
+    post2 = make_post(2)
+    post2["fav_count"] = 500
+    post3 = make_post(3)
+    post3["fav_count"] = 250
+
+    client = FakeDanbooruClient(favorite_posts=[post1, post2, post3])
+    service = ReviewReferenceService(db, client=client)
+    result = service.fetch_favorite_posts("test_tag")
+
+    assert [p["id"] for p in result] == [2, 3, 1]
