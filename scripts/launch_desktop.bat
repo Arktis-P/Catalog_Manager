@@ -15,6 +15,8 @@ if not exist "%FRONTEND_DIR%\node_modules" (
 )
 
 echo Starting Catalogue Manager desktop app...
+pushd "%PROJECT_ROOT%"
 "%VENV_PYTHON%" -m desktop.app_launcher
 set "EXIT_CODE=%ERRORLEVEL%"
+popd
 exit /b %EXIT_CODE%
