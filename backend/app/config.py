@@ -39,8 +39,12 @@ class Settings(BaseSettings):
     danbooru_character_wiki_collect: bool = True
     danbooru_character_legacy_fallback: bool = True
     danbooru_character_pattern_supplement: bool = True
-    danbooru_proxy_enabled: bool = False
-    danbooru_proxy_url: str = ""
+
+    # App-scoped proxy. Only the Danbooru/Pybooru client consumes these backend
+    # settings; unrelated backend HTTP clients remain on the normal network path.
+    app_proxy_enabled: bool = False
+    app_proxy_host: str = "127.0.0.1"
+    app_proxy_port: int = 1080
 
     def model_post_init(self, __context) -> None:
         if not self.database_url:
