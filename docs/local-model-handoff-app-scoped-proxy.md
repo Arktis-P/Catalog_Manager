@@ -3,7 +3,15 @@
 ## 상위 작업자용 요약
 
 브랜치: `gpt/app-scoped-proxy`
-기준: `codex/review-workflow-acceleration` (`ef83d9eb720762a689f4518599533ab517c320cb`)
+현재 HEAD(merge 직후): `0ea0bc1bfa6adda8efd73b4813059fcd88eaa564`
+
+통합 상태:
+
+- 프록시 구현 기준: `codex/review-workflow-acceleration` (`ef83d9eb720762a689f4518599533ab517c320cb`)
+- 최신 리뷰 작업: `agent/review-workflow-acceleration-plan` (`4dbc4cfc088b7555147c6481f6c11bc67c072d6f`)
+- 위 agent 브랜치를 PR #3으로 `gpt/app-scoped-proxy`에 merge 완료
+- GitHub mergeability 확인 후 clean merge 되었고, agent 브랜치는 현재 `gpt/app-scoped-proxy`의 조상이다.
+- merge 후 역비교 결과 agent 변경은 전부 포함되어 있고 app-scoped proxy 변경도 그대로 유지된다.
 
 이미 구현된 범위:
 
@@ -15,27 +23,18 @@
 - `requests[socks]` 의존성 추가
 - direct/proxy IP 국가 + Danbooru HTTP를 한 번에 비교하는 `scripts\test_app_proxy.bat` 추가
 - 관련 단위 테스트 추가
+- 최신 리뷰의 `ReviewReferenceService`도 공용 `DanbooruClient`를 사용하므로 동일한 app-scoped proxy 경로를 사용한다.
+- 최신 리뷰 UI의 Danbooru 링크는 Catalogue Manager 전용 브라우저의 `window.open`을 사용하므로 브라우저 proxy 적용 범위에 포함된다.
 
-로컬 작업의 목적은 **재설계가 아니라 Windows 실환경 검증**이다. 테스트가 통과하면 코드 수정하지 않는다.
+로컬 작업의 목적은 **재설계가 아니라 merge 후 Windows 실환경 검증**이다. 테스트가 통과하면 코드 수정하지 않는다.
 
 ---
 
-## Worker A — 정적/단위 검증
+## Worker A — 정적/단위/merge 회귀 검증
 
 **권장 모델:** 사용 가능한 가장 저가형 Claude. Haiku급이 있으면 우선.  
 **쓰기 권한:** 없음.  
-**저장소 전체 탐색 금지.** 아래 파일만 읽는다.
-
-읽을 파일:
-
-- `desktop/network_config.py`
-- `desktop/socks_bridge.py`
-- `desktop/app_launcher.py`
-- `desktop/proxy_probe.py`
-- `backend/app/config.py`
-- `backend/app/integrations/danbooru/client.py`
-- `scripts/launch_desktop.bat`
-- 새 테스트 4개
+**저장소 전체 탐색 금지.** 실패한 경우에만 관련 파일을 읽는다.
 
 실행:
 
@@ -48,17 +47,33 @@ scripts\setup.bat
   desktop\socks_bridge.py ^
   desktop\app_launcher.py ^
   desktop\proxy_probe.py ^
-  backend\app\integrations\danbooru\client.py
+  backend\app\integrations\danbooru\client.py ^
+  backend\app\services\review_reference_service.py
 
 .venv\Scripts\python.exe -m pytest ^
+  desktop\tests\test_launcher.py ^
   desktop\tests\test_network_config.py ^
   desktop\tests\test_socks_bridge.py ^
   desktop\tests\test_app_launcher.py -q
 
 pushd backend
-..\.venv\Scripts\python.exe -m pytest tests\test_danbooru_proxy.py -q
+..\.venv\Scripts\python.exe -m pytest ^
+  tests\test_danbooru_proxy.py ^
+  tests\test_review_reference_service.py -q
+popd
+
+pushd frontend
+npm run build
 popd
 ```
+
+PASS 기준:
+
+- Python compile 전체 성공
+- 기존 desktop launcher + 새 proxy 테스트 성공
+- Danbooru proxy 테스트 성공
+- merge된 review reference service 테스트 성공
+- frontend TypeScript/build 성공
 
 보고 형식은 이것만 사용:
 
@@ -66,8 +81,9 @@ popd
 WORKER_A
 compile: PASS|FAIL
 pytest_desktop: PASS|FAIL (<passed>/<failed>)
-pytest_backend_proxy: PASS|FAIL (<passed>/<failed>)
-first_failure: <없으면 NONE, 있으면 첫 실패 traceback 핵심 15줄 이내>
+pytest_backend_proxy_review: PASS|FAIL (<passed>/<failed>)
+frontend_build: PASS|FAIL
+first_failure: <없으면 NONE, 있으면 첫 실패 traceback/build 오류 핵심 15줄 이내>
 changed_files: NONE
 ```
 
@@ -127,7 +143,7 @@ popd
 
 PASS 기준: `verified_via: pybooru` 결과가 출력되고 연결 오류가 없음.
 
-### B3. 데스크톱 앱 브라우저 확인
+### B3. 데스크톱 앱 + merge된 ReviewReference 경로 확인
 
 ```bat
 scripts\launch_desktop.bat
@@ -145,6 +161,8 @@ PASS 기준:
 
 - Catalogue Manager 전용 브라우저 CommandLine에 `--proxy-server=socks5://127.0.0.1:<port>` 존재
 - 앱 UI `127.0.0.1` 정상 표시
+- 리뷰 화면 정상 진입
+- 리뷰 reference image(Danbooru wiki/favorite) 로딩 정상
 - 앱 내부 Danbooru Posts/Wiki 링크 정상 접속
 - 일반 브라우저/다른 앱의 네트워크는 기존 상태 유지
 
@@ -158,8 +176,9 @@ proxy_country: <code>
 danbooru_http: <status>
 pybooru: PASS|FAIL
 desktop_ui: PASS|FAIL
+review_reference: PASS|FAIL
 app_browser_proxy_flag: PASS|FAIL
-system_network_changed: NO|UNKNOWN
+normal_browser_unchanged: PASS|FAIL
 first_failure: <없으면 NONE, 있으면 핵심 로그 15줄 이내>
 changed_files: NONE
 ```
@@ -178,14 +197,15 @@ PASS면 종료. 추가 조사 금지.
 - 시작/브라우저 실패: `desktop/app_launcher.py`, `scripts/launch_desktop.bat`
 - SOCKS handshake/auth 실패: `desktop/socks_bridge.py`, `desktop/network_config.py`
 - Pybooru proxy 실패: `backend/app/config.py`, `backend/app/integrations/danbooru/client.py`, `backend/requirements.txt`
+- merge된 reference 경로 실패: `backend/app/services/review_reference_service.py` 또는 해당 frontend review 파일 중 실제 traceback/build 오류가 지목한 파일 1개
 - probe만 실패: `desktop/proxy_probe.py`
 - 해당 실패를 재현하는 테스트 파일 1개
 
 금지:
 
-- frontend/backend 다른 기능 탐색
+- 무관한 frontend/backend 기능 탐색
 - DB 변경
-- 기존 Review/Generation/Collector 수정
+- 기존 Review/Generation/Collector의 대규모 리팩터링
 - 시스템 VPN/Windows proxy 설정 변경
 - `--dangerously-skip-permissions`, `bypassPermissions`
 - commit/push/PR
@@ -215,11 +235,13 @@ remaining_issue: NONE|<1문장>
 
 Worker A/B가 PASS면 추가 구현 없이 완료 처리한다.
 
-Worker C가 발생했을 때만 상위 작업자가 해당 diff를 검수하고, 다음 네 조건을 다시 확인한다.
+Worker C가 발생했을 때만 상위 작업자가 해당 diff를 검수하고, 다음 조건을 다시 확인한다.
 
 1. Windows 시스템 네트워크 설정을 건드리는 코드가 없음
 2. Pybooru 이외 backend HTTP client에 global proxy 환경변수를 주입하지 않음
 3. browser proxy는 Catalogue Manager 전용 Chrome/Edge process argument에만 존재
 4. `input/network.env`가 추적되지 않음
+5. merge된 `ReviewReferenceService`가 여전히 공용 `DanbooruClient` 경로를 사용함
+6. frontend build와 review reference 테스트가 유지됨
 
 최종 보고는 테스트 결과와 실제 proxy 국가만 남기고, 서비스 username/password는 절대 출력하지 않는다.
