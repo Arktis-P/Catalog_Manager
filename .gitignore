@@ -12,6 +12,7 @@ Scripts/
 !.env.example
 input/danbooru.env
 input/danbooru_api_key.txt
+input/network.env
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
