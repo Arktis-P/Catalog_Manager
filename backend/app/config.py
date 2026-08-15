@@ -7,6 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ENV_FILES = (
     PROJECT_ROOT / ".env",
     PROJECT_ROOT / "input" / "danbooru.env",
+    PROJECT_ROOT / "input" / "network.env",
 )
 
 
@@ -38,6 +39,8 @@ class Settings(BaseSettings):
     danbooru_character_wiki_collect: bool = True
     danbooru_character_legacy_fallback: bool = True
     danbooru_character_pattern_supplement: bool = True
+    danbooru_proxy_enabled: bool = False
+    danbooru_proxy_url: str = ""
 
     def model_post_init(self, __context) -> None:
         if not self.database_url:
