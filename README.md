@@ -46,9 +46,10 @@ Catalogue_Manager\.venv\Scripts\python.exe
 scripts\launch_desktop.bat
 ```
 
-- `.venv` Python으로 `desktop\launcher.py` 실행
-- 백엔드(FastAPI) + Chrome/Edge 앱 창을 함께 띄움
-- 창을 닫으면 백엔드도 함께 종료
+- `.venv` Python으로 `desktop.app_launcher` 실행
+- 백엔드(FastAPI) + Catalogue Manager 전용 Chrome/Edge 앱 창을 함께 띄움
+- 앱 전용 프록시가 켜져 있으면 로컬 SOCKS5 브리지를 함께 시작/종료
+- 창을 닫으면 백엔드와 앱이 시작한 SOCKS5 브리지도 함께 종료
 
 ### 빈 화면 / 백엔드만 죽은 경우 (원클릭 복구)
 
@@ -68,6 +69,7 @@ scripts\launch_app.bat
 - 백엔드: `http://127.0.0.1:8000`
 - 프론트엔드: `http://127.0.0.1:5173`
 - 코드 수정 후 바로 반영할 때 사용
+- 앱 전용 프록시 자동 시작/브라우저 프록시 적용은 `launch_desktop.bat` 경로에서만 수행
 
 ### 프로덕션 GUI (빌드된 프론트엔드)
 
@@ -79,7 +81,40 @@ scripts\launch_app_prod.bat
 
 ---
 
-## 3. 앱 종료
+## 3. 앱 전용 프록시 (선택)
+
+Windows 전체 VPN이나 시스템 프록시를 바꾸지 않고 **Catalogue Manager의 Danbooru/Pybooru 요청과 전용 Chrome/Edge 외부 페이지 요청만** SOCKS5로 보낼 수 있습니다.
+
+먼저 로컬 전용 설정 파일을 만듭니다.
+
+```bat
+copy input\network.env.example input\network.env
+```
+
+`input\network.env`에서 다음 값을 설정합니다.
+
+```dotenv
+CATALOGUE_APP_PROXY_ENABLED=1
+CATALOGUE_APP_PROXY_HOST=127.0.0.1
+CATALOGUE_APP_PROXY_PORT=1080
+
+CATALOGUE_PROXY_UPSTREAM_HOST=your.socks5.proxy
+CATALOGUE_PROXY_UPSTREAM_PORT=1080
+CATALOGUE_PROXY_UPSTREAM_USERNAME=your_service_username
+CATALOGUE_PROXY_UPSTREAM_PASSWORD=your_service_password
+```
+
+- `input/network.env`는 `.gitignore` 대상이며 자격 증명을 커밋하지 않습니다.
+- 인증형 SOCKS5를 사용하는 경우 앱이 `127.0.0.1`에 무인증 브리지를 띄워 Chrome/Edge와 Pybooru가 함께 사용합니다.
+- Pybooru만 해당 로컬 SOCKS endpoint를 명시적으로 사용하므로 NAIA/Hugging Face 등 다른 백엔드 클라이언트는 기존 네트워크를 유지합니다.
+- Chrome/Edge는 앱 전용 `--user-data-dir` + `--proxy-server`로 실행되므로 일반 Chrome/Edge와 Windows 시스템 프록시 설정은 변경하지 않습니다.
+- 앱 GUI 자체의 `127.0.0.1` 요청은 Chromium의 loopback bypass에 의해 직접 연결됩니다.
+
+자세한 구조와 검증 절차는 `docs/app-scoped-proxy.md`를 참고하세요.
+
+---
+
+## 4. 앱 종료
 
 ```bat
 scripts\stop_app.bat
@@ -89,7 +124,7 @@ scripts\stop_app.bat
 
 ---
 
-## 4. 가상환경에서 직접 명령 실행
+## 5. 가상환경에서 직접 명령 실행
 
 공식 스크립트 대신 터미널에서 직접 실행할 때는 **먼저 가상환경을 활성화**하세요.
 
@@ -126,7 +161,7 @@ npm run dev
 
 ---
 
-## 5. 가상환경 사용 여부 확인
+## 6. 가상환경 사용 여부 확인
 
 ### 방법 A — Python 경로 확인
 
@@ -154,7 +189,7 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
 
 ---
 
-## 6. 자주 쓰는 유지보수 명령
+## 7. 자주 쓰는 유지보수 명령
 
 모두 가상환경 Python(`.venv`)을 사용합니다.
 
@@ -167,23 +202,23 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
 
 ---
 
-## 7. 디렉터리 구조 (요약)
+## 8. 디렉터리 구조 (요약)
 
 ```
 Catalogue_Manager/
 ├── .venv/              # Python 가상환경 (setup.bat으로 생성)
 ├── backend/            # FastAPI 백엔드
 ├── frontend/           # React 프론트엔드
-├── desktop/            # pywebview 데스크톱 런처
+├── desktop/            # Chrome/Edge 데스크톱 런처 + 앱 전용 SOCKS 브리지
 ├── scripts/            # 실행/설정 배치 파일
 ├── data/               # SQLite DB (catalogue.db)
-├── input/              # series.csv, Danbooru 설정
+├── input/              # series.csv, Danbooru/로컬 네트워크 설정
 └── output/             # 생성 이미지, 내보내기 등
 ```
 
 ---
 
-## 8. 문제 해결
+## 9. 문제 해결
 
 ### `.venv`가 없다는 오류
 
@@ -202,6 +237,13 @@ scripts\stop_app.bat
 ```bat
 scripts\launch_desktop.bat
 ```
+
+### 앱 프록시 시작 실패
+
+- `input/network.env`가 `network.env.example`에서 복사되었는지 확인
+- upstream SOCKS5 주소/포트와 서비스 자격 증명 확인
+- `%LOCALAPPDATA%\CatalogueManager\logs\proxy.log` 확인
+- 프록시를 끄려면 `CATALOGUE_APP_PROXY_ENABLED=0`
 
 ### PowerShell에서 activate가 막힐 때
 
