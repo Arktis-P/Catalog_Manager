@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import socket
 import subprocess
 import sys
@@ -24,7 +25,7 @@ def _port_is_open(host: str, port: int, timeout: float = 0.25) -> bool:
         return False
 
 
-def _start_proxy_bridge(config: AppProxyConfig, timeout_seconds: float = 10) -> None:
+def _start_proxy_endpoint(config: AppProxyConfig, timeout_seconds: float = 10) -> None:
     global _proxy_process, _proxy_log_handle
     if not config.enabled:
         return
@@ -40,8 +41,42 @@ def _start_proxy_bridge(config: AppProxyConfig, timeout_seconds: float = 10) -> 
 
     log_path = launcher.runtime_log_dir() / "proxy.log"
     _proxy_log_handle = log_path.open("a", encoding="utf-8")
+
+    if config.mode == "ssh":
+        ssh_exe = shutil.which("ssh")
+        if not ssh_exe:
+            raise RuntimeError("Windows OpenSSH client (ssh.exe) was not found in PATH")
+        key_path = config.ssh_key_path
+        if not key_path.is_file():
+            raise RuntimeError(f"SSH key file not found: {key_path}")
+        command = [
+            ssh_exe,
+            "-N",
+            "-D",
+            f"{config.listen_host}:{config.listen_port}",
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-o",
+            "ServerAliveInterval=30",
+            "-o",
+            "ServerAliveCountMax=3",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-p",
+            str(config.ssh_port),
+            "-i",
+            str(key_path),
+            config.ssh_target,
+        ]
+    else:
+        command = [sys.executable, "-m", "desktop.socks_bridge"]
+
     _proxy_process = subprocess.Popen(
-        [sys.executable, "-m", "desktop.socks_bridge"],
+        command,
         cwd=launcher.PROJECT_ROOT,
         stdout=_proxy_log_handle,
         stderr=subprocess.STDOUT,
@@ -51,8 +86,9 @@ def _start_proxy_bridge(config: AppProxyConfig, timeout_seconds: float = 10) -> 
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         if _port_is_open(config.listen_host, config.listen_port):
+            mode_label = "SSH dynamic forward" if config.mode == "ssh" else "SOCKS5 bridge"
             print(
-                f"[desktop] App proxy ready at {config.listen_host}:{config.listen_port}.",
+                f"[desktop] {mode_label} ready at {config.listen_host}:{config.listen_port}.",
                 flush=True,
             )
             return
@@ -61,13 +97,13 @@ def _start_proxy_bridge(config: AppProxyConfig, timeout_seconds: float = 10) -> 
         time.sleep(0.1)
 
     exit_code = _proxy_process.poll() if _proxy_process is not None else None
-    _stop_proxy_bridge()
+    _stop_proxy_endpoint()
     raise RuntimeError(
         f"App proxy failed to start (exit={exit_code}). See {log_path}."
     )
 
 
-def _stop_proxy_bridge() -> None:
+def _stop_proxy_endpoint() -> None:
     global _proxy_process, _proxy_log_handle
     if _proxy_process is not None and _proxy_process.poll() is None:
         if sys.platform == "win32":
@@ -114,8 +150,6 @@ def _open_app_browser(url: str, profile_dir: Path) -> "subprocess.Popen[bytes] |
         "--no-default-browser-check",
     ]
     if _proxy_config.enabled:
-        # Chromium has implicit bypass rules for localhost/127.0.0.1, so the
-        # FastAPI GUI remains direct while external URL loads use this proxy.
         args.append(f"--proxy-server={_proxy_config.browser_proxy_url}")
         print(
             f"[desktop] Browser external traffic: {_proxy_config.browser_proxy_url}",
@@ -129,14 +163,14 @@ def run_desktop() -> int:
     global _proxy_config
     try:
         _proxy_config = load_app_proxy_config()
-        _start_proxy_bridge(_proxy_config)
+        _start_proxy_endpoint(_proxy_config)
         launcher.open_app_browser = _open_app_browser
         return launcher.run_desktop()
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"[desktop] Failed to initialize app proxy: {exc}", flush=True)
         return 1
     finally:
-        _stop_proxy_bridge()
+        _stop_proxy_endpoint()
 
 
 def main() -> None:
