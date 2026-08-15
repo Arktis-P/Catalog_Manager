@@ -13,7 +13,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_NETWORK_ENV = PROJECT_ROOT / "input" / "network.env"
 _TRUE_VALUES = {"1", "true", "yes", "on"}
-_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost"}
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -81,14 +81,19 @@ class AppProxyConfig:
             return
         if self.listen_host not in _LOOPBACK_HOSTS:
             raise ValueError(
-                "CATALOGUE_APP_PROXY_HOST must be loopback (127.0.0.1, localhost, or ::1)"
+                "CATALOGUE_APP_PROXY_HOST must be loopback (127.0.0.1 or localhost)"
             )
         if _is_placeholder(self.upstream_host):
             raise ValueError("Proxy is enabled but upstream SOCKS5 host is not configured")
+
         username_set = not _is_placeholder(self.upstream_username)
         password_set = not _is_placeholder(self.upstream_password)
         if username_set != password_set:
             raise ValueError("Upstream SOCKS5 username and password must be configured together")
+        if self.upstream_host.lower().endswith(".nordhold.net") and not username_set:
+            raise ValueError(
+                "NordVPN SOCKS5 requires service credentials; fill the upstream username/password"
+            )
 
     @property
     def uses_upstream_auth(self) -> bool:
