@@ -120,6 +120,15 @@ def _migrate_global_character_columns() -> None:
         "last_failure_reason": (
             "ALTER TABLE global_characters ADD COLUMN last_failure_reason TEXT"
         ),
+        "reference_profile": (
+            "ALTER TABLE global_characters ADD COLUMN reference_profile TEXT"
+        ),
+        "reference_profile_version": (
+            "ALTER TABLE global_characters ADD COLUMN reference_profile_version VARCHAR(50)"
+        ),
+        "reference_profile_updated_at": (
+            "ALTER TABLE global_characters ADD COLUMN reference_profile_updated_at DATETIME"
+        ),
         "non_human_candidate_score": (
             "ALTER TABLE global_characters ADD COLUMN non_human_candidate_score FLOAT NOT NULL DEFAULT 0.0"
         ),
