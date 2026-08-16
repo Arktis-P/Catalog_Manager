@@ -30,6 +30,10 @@ function isPendingInspection(job: V2GenerationJobState): boolean {
   return job.phase.startsWith("pending_inspection");
 }
 
+function isInspectionRegeneration(job: V2GenerationJobState): boolean {
+  return Boolean(job.prompt_variant_attempts?.inspection_regeneration);
+}
+
 function inspectionMetric(job: V2GenerationJobState, key: string): number {
   const value = job.prompt_variant_attempts[key];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -40,6 +44,7 @@ export function V2GenerationProgressPanel({ job, onDismiss, onCancel, onPause, o
   const isActive = job.status === "running" || job.status === "paused";
   const isDone = job.status === "completed" || job.status === "failed" || job.status === "cancelled";
   const inspection = isPendingInspection(job);
+  const inspectionRegeneration = isInspectionRegeneration(job);
 
   const metaParts: string[] = [];
   if (job.total > 0) metaParts.push(`${job.current}/${job.total}`);
@@ -49,6 +54,8 @@ export function V2GenerationProgressPanel({ job, onDismiss, onCancel, onPause, o
     );
     const errors = inspectionMetric(job, "errors");
     if (errors > 0) metaParts.push(`오류 ${errors}`);
+  } else if (inspectionRegeneration) {
+    metaParts.push(`캐릭터 #${job.character_id ?? "-"}`);
   } else {
     metaParts.push(`완료 ${job.completed} · 실패 ${job.failed}`);
   }
@@ -56,10 +63,19 @@ export function V2GenerationProgressPanel({ job, onDismiss, onCancel, onPause, o
   const isRegeneration = job.kind === "regenerate";
   const displayName = inspection
     ? job.current_character_tag || "Pending 자동 검사"
-    : isRegeneration
-      ? `V2 재생성 · ${job.character_tag || job.current_character_tag || "캐릭터"}`
-      : job.current_character_tag || "V2 이미지 생성";
-  const kindLabel = inspection ? "자동 검사" : isRegeneration ? "V2 재생성" : "V2 생성";
+    : inspectionRegeneration
+      ? `자동 검사 재생성 · ${job.character_tag || job.current_character_tag || "캐릭터"}`
+      : isRegeneration
+        ? `V2 재생성 · ${job.character_tag || job.current_character_tag || "캐릭터"}`
+        : job.current_character_tag || "V2 이미지 생성";
+  const kindLabel = inspection
+    ? "자동 검사"
+    : inspectionRegeneration
+      ? "검사 재생성"
+      : isRegeneration
+        ? "V2 재생성"
+        : "V2 생성";
+  const pauseSupported = !inspection && !inspectionRegeneration;
 
   return (
     <div
@@ -76,10 +92,10 @@ export function V2GenerationProgressPanel({ job, onDismiss, onCancel, onPause, o
         <span className="badge badge-compact">{statusShortLabel(job.status)}</span>
         {metaParts.length > 0 ? <span className="task-meta">{metaParts.join(" · ")}</span> : null}
         <div className="task-row1-spacer" />
-        {!inspection && job.status === "running" && onPause ? (
+        {pauseSupported && job.status === "running" && onPause ? (
           <button className="btn btn-small btn-ghost task-btn" type="button" aria-label="일시정지" title="일시정지" onClick={onPause}>⏸</button>
         ) : null}
-        {!inspection && job.status === "paused" && onResume ? (
+        {pauseSupported && job.status === "paused" && onResume ? (
           <button className="btn btn-small btn-ghost task-btn" type="button" aria-label="재개" title="재개" onClick={onResume}>▶</button>
         ) : null}
         {isDone && onDismiss ? (
