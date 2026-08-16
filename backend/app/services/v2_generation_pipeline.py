@@ -36,6 +36,15 @@ from app.services.settings_service import SettingsService
 ImageBytesGenerator = Callable[[str, str], bytes]
 CancelCheck = Callable[[], bool]
 
+SEMANTIC_REGEN_REASON_PREFIXES = (
+    "embedded_gallery:",
+    "goods_or_screen_character_gallery",
+    "atypical_swimwear:",
+    "atypical_underwear:",
+    "unexpected_non_human_output",
+    "unexpected_male_output",
+)
+
 
 class V2PipelineCancelled(RuntimeError):
     pass
@@ -103,6 +112,15 @@ def _replace_prompt_tags(
             remaining.append(prompt_tag)
             known.add(_tag_key(prompt_tag))
     return f"{head}, {', '.join(remaining)}" if remaining else head
+
+
+def _is_semantic_generation_reject(identity: IdentityCheckResult | None) -> bool:
+    if identity is None or identity.status != "reject":
+        return False
+    return any(
+        str(reason).startswith(SEMANTIC_REGEN_REASON_PREFIXES)
+        for reason in identity.reasons
+    )
 
 
 class V2GenerationPipeline:
@@ -343,6 +361,16 @@ class V2GenerationPipeline:
 
         character.last_failure_reason = self._failure_reason(image, identity)
         commit_db_session(self.db)
+        if _is_semantic_generation_reject(identity):
+            # Collage/goods/outfit/gender-output failures are stochastic generation
+            # failures, not evidence that hair/eye prompt tags are wrong. Retry the same
+            # prompt; changing appearance tags here would waste generations and can
+            # damage an otherwise correct character identity.
+            if state.attempt_in_variant < state.retry_max:
+                return V2AsyncCheckResult(state, None, True)
+            result = self._async_final_result(character, image, "generation_failed")
+            return V2AsyncCheckResult(state, result, False)
+
         cutoff = str(self._public_settings()["v2_recent_character_cutoff"])
         if state.revision_index < 0 and self._is_recent(character, cutoff):
             result = self._async_final_result(character, image, "likely_untrained")
@@ -510,7 +538,8 @@ class V2GenerationPipeline:
         for _ in range(retry_max):
             image = self._generate_and_store(character, variant, should_cancel=should_cancel)
             image, identity = self._check_image(image, character, variant)
-            if image.quality_status != "reject":
+            should_retry_semantic = _is_semantic_generation_reject(identity)
+            if image.quality_status != "reject" and not should_retry_semantic:
                 break
             character.last_failure_reason = self._failure_reason(image, identity)
             commit_db_session(self.db)
@@ -563,7 +592,7 @@ class V2GenerationPipeline:
                 retry_max=retry_max,
                 should_cancel=cancel,
             )
-            if image.quality_status == "reject":
+            if image.quality_status == "reject" or _is_semantic_generation_reject(identity):
                 character.generation_status = "generation_failed"
                 commit_db_session(self.db)
                 return V2PipelineResult(character.id, character.generation_status, character.generation_attempts, image.id)
@@ -589,7 +618,7 @@ class V2GenerationPipeline:
                     should_cancel=cancel,
                 )
                 image = revised_image
-                if revised_image.quality_status == "reject":
+                if revised_image.quality_status == "reject" or _is_semantic_generation_reject(revised_identity):
                     continue
                 if revised_identity is not None and revised_identity.status != "reject":
                     character.previous_base_prompt = character.base_prompt
