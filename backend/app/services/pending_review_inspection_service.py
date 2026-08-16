@@ -17,6 +17,7 @@ from app.services.identity_checker import IDENTITY_CHECKER_VERSION
 from app.services.quality_checker import QUALITY_CHECKER_VERSION
 from app.services.reference_profile_service import REFERENCE_PROFILE_VERSION
 from app.services.settings_service import SettingsService
+from app.services.v2_generation_job_manager import v2_generation_job_manager
 from app.services.v2_generation_pipeline import V2GenerationPipeline, V2PipelineResult
 
 PENDING_INSPECTION_VERSION = "v1.2"
@@ -45,6 +46,18 @@ class PendingInspectionSummary:
     errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass
+class PendingInspectionResetSummary:
+    requested: int
+    matched: int = 0
+    images_reset: int = 0
+    reviews_reset: int = 0
+    profiles_reset: int = 0
+
+    def as_dict(self) -> dict[str, int]:
         return asdict(self)
 
 
@@ -209,6 +222,10 @@ class PendingReviewInspectionService:
     def _append_auto_note(review: GlobalCharacterReview, marker: str) -> None:
         review.review_note = f"{review.review_note}\n{marker}".strip() if review.review_note else marker
 
+    @staticmethod
+    def _auto_marker_suffix(*, test_run: bool) -> str:
+        return ";test=1" if test_run else ""
+
     def _prefill_rating(
         self,
         character: GlobalCharacter,
@@ -216,6 +233,7 @@ class PendingReviewInspectionService:
         rating: int,
         confidence: float,
         reason: str,
+        test_run: bool = False,
     ) -> bool:
         """Prefill a likely rating while leaving the item pending for one-key confirmation."""
         review = self._review_for(character)
@@ -229,6 +247,7 @@ class PendingReviewInspectionService:
             (
                 f"auto_inspection={PENDING_INSPECTION_VERSION};prefill=1;rating={rating};"
                 f"confidence={confidence:.2f};reason={reason}"
+                f"{self._auto_marker_suffix(test_run=test_run)}"
             ),
         )
         self.db.flush()
@@ -242,6 +261,7 @@ class PendingReviewInspectionService:
         confidence: float,
         audit_sample_rate: float,
         reason: str,
+        test_run: bool = False,
     ) -> str:
         review = self._review_for(character)
         # Never overwrite an explicit pending user decision.
@@ -256,6 +276,7 @@ class PendingReviewInspectionService:
         marker = (
             f"auto_inspection={PENDING_INSPECTION_VERSION};rating={rating};"
             f"confidence={confidence:.2f};audit={int(audit)};reason={reason}"
+            f"{self._auto_marker_suffix(test_run=test_run)}"
         )
         self._append_auto_note(review, marker)
         if not audit:
@@ -267,30 +288,143 @@ class PendingReviewInspectionService:
         self.db.flush()
         return "audit" if audit else "completed"
 
+    @staticmethod
+    def _json_reason_list(value: str | None) -> list[str]:
+        if not value:
+            return []
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return [str(item) for item in parsed] if isinstance(parsed, list) else []
+
     def _regenerate_capped(
         self,
         character: GlobalCharacter,
         *,
         max_regenerations: int,
     ) -> tuple[V2PipelineResult | None, int]:
+        attempts = max(1, max_regenerations)
+        tracked_job = v2_generation_job_manager.start_inspection_regeneration(
+            character.id,
+            character_tag=character.character_tag,
+            max_attempts=attempts,
+        )
+        if tracked_job is None:
+            raise RuntimeError(f"{character.character_tag}: 재생성 작업이 이미 진행 중입니다.")
+
         pipeline = V2GenerationPipeline(self.db)
         state = pipeline.prepare_async_character(character.id)
         generated = 0
         try:
-            for _ in range(max(1, max_regenerations)):
-                if not pipeline.wait_before_async_generation(should_interrupt=lambda: False):
-                    break
-                image_id = pipeline.generate_async_attempt(state, should_cancel=lambda: False)
+            for attempt in range(1, attempts + 1):
+                if v2_generation_job_manager.is_inspection_regeneration_cancelled(tracked_job.job_id):
+                    pipeline.cancel_async_character(state)
+                    v2_generation_job_manager.finish_inspection_regeneration(
+                        tracked_job.job_id,
+                        status="cancelled",
+                        message=f"자동 검사 재생성 취소 · {character.character_tag} · {generated}/{attempts}",
+                    )
+                    return None, generated
+
+                v2_generation_job_manager.update_inspection_regeneration(
+                    tracked_job.job_id,
+                    phase="waiting",
+                    message=f"자동 검사 재생성 준비 · {character.character_tag} · {generated}/{attempts}",
+                )
+                if not pipeline.wait_before_async_generation(
+                    should_interrupt=lambda: v2_generation_job_manager.is_inspection_regeneration_cancelled(
+                        tracked_job.job_id
+                    )
+                ):
+                    pipeline.cancel_async_character(state)
+                    v2_generation_job_manager.finish_inspection_regeneration(
+                        tracked_job.job_id,
+                        status="cancelled",
+                        message=f"자동 검사 재생성 취소 · {character.character_tag} · {generated}/{attempts}",
+                    )
+                    return None, generated
+
+                v2_generation_job_manager.update_inspection_regeneration(
+                    tracked_job.job_id,
+                    phase="generating",
+                    message=f"자동 검사 재생성 · {character.character_tag} · {attempt}/{attempts}",
+                )
+                image_id = pipeline.generate_async_attempt(
+                    state,
+                    should_cancel=lambda: v2_generation_job_manager.is_inspection_regeneration_cancelled(
+                        tracked_job.job_id
+                    ),
+                )
                 generated += 1
+                v2_generation_job_manager.update_inspection_regeneration(
+                    tracked_job.job_id,
+                    phase="checking",
+                    generated=generated,
+                    message=f"재생성 이미지 검사 중 · {character.character_tag} · {generated}/{attempts}",
+                )
                 checked = pipeline.check_async_attempt(state, image_id)
+                image = self.db.get(GlobalCharacterImage, image_id)
+                self.db.refresh(character)
+                v2_generation_job_manager.update_inspection_regeneration(
+                    tracked_job.job_id,
+                    current=generated,
+                    generated=generated,
+                    checks_completed=generated,
+                    image_id=image_id,
+                    quality_status=image.quality_status if image else None,
+                    quality_reasons=self._json_reason_list(image.quality_reasons) if image else [],
+                    identity_status=image.identity_status if image else None,
+                    identity_reasons=self._json_reason_list(image.identity_reasons) if image else [],
+                    is_provisional=image.is_provisional if image else None,
+                    generation_status=character.generation_status,
+                    generation_attempts=character.generation_attempts,
+                    total_generation_attempts=character.total_generation_attempts,
+                    last_failure_reason=character.last_failure_reason,
+                )
                 if checked.result is not None:
+                    final_status = (
+                        "completed" if checked.result.generation_status == "generated" else "failed"
+                    )
+                    v2_generation_job_manager.finish_inspection_regeneration(
+                        tracked_job.job_id,
+                        status=final_status,
+                        message=(
+                            f"자동 검사 재생성 완료 · {character.character_tag} · {generated}/{attempts}"
+                            if final_status == "completed"
+                            else f"자동 검사 재생성 실패 · {character.character_tag} · {generated}/{attempts}"
+                        ),
+                        failure_reason=(
+                            None if final_status == "completed" else character.last_failure_reason
+                        ),
+                    )
                     return checked.result, generated
                 if not checked.needs_generation:
+                    v2_generation_job_manager.finish_inspection_regeneration(
+                        tracked_job.job_id,
+                        status="failed",
+                        message=f"자동 검사 재생성 실패 · {character.character_tag} · {generated}/{attempts}",
+                        failure_reason=character.last_failure_reason,
+                    )
                     return None, generated
+
             pipeline.fail_async_character(state, "pending_inspection_regeneration_limit")
+            self.db.refresh(character)
+            v2_generation_job_manager.finish_inspection_regeneration(
+                tracked_job.job_id,
+                status="failed",
+                message=f"자동 검사 재생성 제한 도달 · {character.character_tag} · {generated}/{attempts}",
+                failure_reason="pending_inspection_regeneration_limit",
+            )
             return None, generated
-        except Exception:
+        except Exception as exc:
             pipeline.fail_async_character(state, "pending_inspection_regeneration_error")
+            v2_generation_job_manager.finish_inspection_regeneration(
+                tracked_job.job_id,
+                status="failed",
+                message=f"자동 검사 재생성 오류 · {character.character_tag}",
+                failure_reason=str(exc),
+            )
             raise
 
     def _cleanup_superseded_rejects(self, character_id: int, *, keep_image_id: int) -> int:
@@ -320,6 +454,79 @@ class PendingReviewInspectionService:
             self.db.flush()
         return removed
 
+    @staticmethod
+    def _clear_image_inspection(image: GlobalCharacterImage) -> None:
+        image.quality_status = None
+        image.quality_score = None
+        image.quality_reasons = None
+        image.quality_checked_at = None
+        image.quality_checker_version = None
+        image.identity_status = None
+        image.character_confidence = None
+        image.hair_color_confidence = None
+        image.conflicting_character_tag = None
+        image.conflicting_character_confidence = None
+        image.identity_reasons = None
+        image.suggested_multicolor_tags = None
+        image.identity_checked_at = None
+        image.identity_checker_version = None
+        image.is_provisional = False
+
+    def reset_test_results(self, character_ids: list[int]) -> PendingInspectionResetSummary:
+        """Clear inspection metadata for explicitly tracked page-test characters only.
+
+        Generated image files are intentionally preserved. Automatic review decisions are
+        reverted only when an auto_inspection note exists, so an explicit user rating that
+        automation never touched is not removed.
+        """
+        ids = list(dict.fromkeys(character_id for character_id in character_ids if character_id > 0))[:1000]
+        summary = PendingInspectionResetSummary(requested=len(ids))
+        if not ids:
+            return summary
+
+        latest = self._latest_image_subquery()
+        rows = (
+            self.db.query(GlobalCharacter, GlobalCharacterImage)
+            .join(latest, latest.c.character_id == GlobalCharacter.id)
+            .join(GlobalCharacterImage, GlobalCharacterImage.id == latest.c.image_id)
+            .filter(GlobalCharacter.id.in_(ids))
+            .all()
+        )
+        summary.matched = len(rows)
+
+        for character, image in rows:
+            self._clear_image_inspection(image)
+            summary.images_reset += 1
+
+            if (
+                character.reference_profile is not None
+                or character.reference_profile_version is not None
+                or character.reference_profile_updated_at is not None
+            ):
+                character.reference_profile = None
+                character.reference_profile_version = None
+                character.reference_profile_updated_at = None
+                summary.profiles_reset += 1
+
+            review = (
+                self.db.query(GlobalCharacterReview)
+                .filter(GlobalCharacterReview.global_character_id == character.id)
+                .first()
+            )
+            if review is not None and review.review_note:
+                lines = [line for line in review.review_note.splitlines() if line.strip()]
+                auto_lines = [line for line in lines if line.startswith("auto_inspection=")]
+                if auto_lines:
+                    review.review_note = "\n".join(
+                        line for line in lines if not line.startswith("auto_inspection=")
+                    ) or None
+                    review.rating = None
+                    review.review_status = "pending"
+                    summary.reviews_reset += 1
+
+        commit_db_session(self.db)
+        return summary
+
     def inspect_batch(
         self,
         *,
@@ -329,6 +536,7 @@ class PendingReviewInspectionService:
         auto_complete: bool = True,
         audit_sample_rate: float = DEFAULT_AUDIT_SAMPLE_RATE,
         cleanup_rejected: bool = True,
+        test_run: bool = False,
     ) -> PendingInspectionSummary:
         summary = PendingInspectionSummary(requested_limit=limit)
         candidates = self.candidates(limit=limit)
@@ -349,6 +557,7 @@ class PendingReviewInspectionService:
                 commit_db_session(self.db)
 
                 final_image = checked
+                regeneration_exhausted = False
                 was_reject = checked.quality_status == "reject" or checked.identity_status == "reject"
                 if was_reject:
                     summary.rejected += 1
@@ -359,6 +568,11 @@ class PendingReviewInspectionService:
                         )
                         summary.characters_regenerated += 1
                         summary.regeneration_images += generated
+                        regeneration_exhausted = (
+                            result is None and generated >= max(1, max_regenerations)
+                        ) or (
+                            result is not None and result.generation_status == "generation_failed"
+                        )
                         commit_db_session(self.db)
                         latest = (
                             self.db.query(GlobalCharacterImage)
@@ -373,7 +587,6 @@ class PendingReviewInspectionService:
                                     character.id,
                                     keep_image_id=final_image.id,
                                 )
-                        _ = result
                 elif checked.quality_status == "warning" or checked.identity_status == "warning":
                     summary.warnings += 1
                 else:
@@ -388,6 +601,7 @@ class PendingReviewInspectionService:
                         rating=3,
                         confidence=confidence,
                         reason="confident_female_output",
+                        test_run=test_run,
                     ):
                         summary.prefilled_pending += 1
                     summary.suggested_only += 1
@@ -399,6 +613,7 @@ class PendingReviewInspectionService:
                             confidence=confidence,
                             audit_sample_rate=audit_sample_rate,
                             reason="local_prior_and_output_agree",
+                            test_run=test_run,
                         )
                         if outcome == "completed":
                             summary.auto_completed += 1
@@ -413,22 +628,21 @@ class PendingReviewInspectionService:
                             rating=rating,
                             confidence=confidence,
                             reason="conservative_rating_prefill",
+                            test_run=test_run,
                         ):
                             summary.prefilled_pending += 1
 
-                if (
-                    auto_complete
-                    and auto_regenerate
-                    and character.generation_status == "generation_failed"
-                ):
-                    # 0-star is only automatic after the capped regeneration path is
-                    # exhausted. A deterministic 10% sample still remains in pending.
+                if auto_complete and auto_regenerate and regeneration_exhausted:
+                    # 0-star is automatic only when this inspection run actually
+                    # exhausted its capped regeneration budget. Do not reuse a stale
+                    # generation_failed state from an earlier run/reset.
                     outcome = self._apply_auto_rating(
                         character,
                         rating=0,
                         confidence=1.0,
                         audit_sample_rate=audit_sample_rate,
                         reason="regeneration_limit_exhausted",
+                        test_run=test_run,
                     )
                     if outcome == "completed":
                         summary.auto_completed += 1
