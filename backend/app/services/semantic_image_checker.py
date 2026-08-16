@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping
 
+from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.services.reference_profile_service import CharacterReferenceProfile
 
-SEMANTIC_CHECKER_VERSION = "v1.2"
+SEMANTIC_CHECKER_VERSION = "v1.3"
 
 HARD_LAYOUT_TAGS = frozenset(
     {
@@ -89,8 +90,11 @@ NON_HUMAN_OUTPUT_TAGS = frozenset({"no_humans", "animal_focus", "creature", "mon
 
 HARD_LAYOUT_REJECT = 0.58
 GOODS_SIGNAL = 0.48
+OUTFIT_REFERENCE_SIGNAL = 0.55
 OUTFIT_REJECT = 0.67
 GENDER_CONFIDENT = 0.72
+LOCAL_GENDER_PRIOR_CONFIDENCE = 0.90
+LOCAL_NO_HUMANS_PRIOR_CONFIDENCE = 0.80
 REFERENCE_STABLE_RATIO = 0.72
 REFERENCE_ATYPICAL_RATIO = 0.12
 
@@ -111,6 +115,16 @@ def _active(scores: Mapping[str, float], tags: frozenset[str], threshold: float)
     return sorted(tag for tag in tags if scores.get(tag, 0.0) >= threshold)
 
 
+def needs_outfit_reference(tag_scores: Mapping[str, float]) -> bool:
+    """Only outputs that look like swimwear/underwear need a Danbooru baseline.
+
+    The common path therefore requires zero Danbooru requests, which matters for a
+    six-figure pending queue.
+    """
+    scores = _normalized_scores(tag_scores)
+    return max(_max_score(scores, SWIMWEAR_TAGS), _max_score(scores, UNDERWEAR_TAGS)) >= OUTFIT_REFERENCE_SIGNAL
+
+
 @dataclass(frozen=True)
 class SemanticCheckResult:
     status: str  # pass | warning | reject
@@ -119,16 +133,72 @@ class SemanticCheckResult:
     suggested_rating_confidence: float | None = None
 
 
+def _apply_gender_prior(
+    scores: Mapping[str, float],
+    *,
+    gender_prior: str | None,
+    non_human_candidate_score: float,
+    status: str,
+    reasons: list[str],
+) -> tuple[str, int | None, float | None]:
+    """Use already-collected local metadata before considering any network reference."""
+    gender = normalize_gender(gender_prior)
+    output_girl = scores.get("1girl", 0.0)
+    output_boy = scores.get("1boy", 0.0)
+    non_human_output = _max_score(scores, NON_HUMAN_OUTPUT_TAGS)
+
+    if gender == "no_humans":
+        confidence = max(LOCAL_NO_HUMANS_PRIOR_CONFIDENCE, min(non_human_candidate_score, 1.0))
+        reasons.append(f"auto_rating_candidate:-1:{confidence:.2f}")
+        return status, -1, confidence
+
+    if gender == "1boy":
+        if output_boy >= GENDER_CONFIDENT and output_girl < 0.35:
+            confidence = min(LOCAL_GENDER_PRIOR_CONFIDENCE, output_boy)
+            reasons.append(f"auto_rating_candidate:1:{confidence:.2f}")
+            return status, 1, confidence
+        if output_girl >= GENDER_CONFIDENT and output_boy < 0.35:
+            confidence = min(LOCAL_GENDER_PRIOR_CONFIDENCE, output_girl)
+            reasons.append(f"auto_rating_candidate:3:{confidence:.2f}")
+            return status, 3, confidence
+        return status, None, None
+
+    if gender == "1girl":
+        if non_human_output >= GENDER_CONFIDENT:
+            reasons.append("unexpected_non_human_output")
+            return "reject", None, None
+        if output_boy >= GENDER_CONFIDENT and output_girl < 0.35:
+            reasons.append("unexpected_male_output")
+            return "reject", None, None
+        if output_girl >= GENDER_CONFIDENT and output_boy < 0.35:
+            confidence = min(LOCAL_GENDER_PRIOR_CONFIDENCE, output_girl)
+            reasons.append(f"auto_rating_candidate:3:{confidence:.2f}")
+            return status, 3, confidence
+
+    # A high existing non-human candidate score is useful supporting evidence, but
+    # female-like candidates are intentionally not auto-deleted; the dedicated
+    # non-human workflow already treats them conservatively.
+    if gender != "1girl" and non_human_candidate_score >= 0.85 and non_human_output >= GENDER_CONFIDENT:
+        confidence = min(non_human_candidate_score, non_human_output)
+        reasons.append(f"auto_rating_candidate:-1:{confidence:.2f}")
+        return status, -1, confidence
+
+    return status, None, None
+
+
 def evaluate_semantic_tags(
     tag_scores: Mapping[str, float],
     *,
     reference_profile: CharacterReferenceProfile | None = None,
+    gender_prior: str | None = None,
+    non_human_candidate_score: float = 0.0,
 ) -> SemanticCheckResult:
     """Detect expensive-to-review generation failures from existing WD tag scores.
 
     This intentionally reuses the already-required WD request. It does not load a local
-    vision model and does not download any reference image. Reject thresholds are
-    conservative because a reject causes regeneration.
+    vision model and does not download any reference image. The existing local gender
+    and non-human signals handle the common path; a Danbooru metadata profile is only
+    needed when the generated image itself looks like swimwear/underwear.
     """
     scores = _normalized_scores(tag_scores)
     reasons: list[str] = []
@@ -149,8 +219,13 @@ def evaluate_semantic_tags(
         status = "warning"
         reasons.append("printed_character_or_goods_possible")
 
-    suggested_rating: int | None = None
-    suggested_confidence: float | None = None
+    status, suggested_rating, suggested_confidence = _apply_gender_prior(
+        scores,
+        gender_prior=gender_prior,
+        non_human_candidate_score=non_human_candidate_score,
+        status=status,
+        reasons=reasons,
+    )
 
     if reference_profile is not None and reference_profile.has_stable_sample:
         swimwear_score = _max_score(scores, SWIMWEAR_TAGS)
@@ -173,36 +248,29 @@ def evaluate_semantic_tags(
                 f"atypical_underwear:{underwear_score:.2f}/{reference_profile.underwear_ratio:.2f}"
             )
 
-        non_human_output = _max_score(scores, NON_HUMAN_OUTPUT_TAGS)
-        output_girl = scores.get("1girl", 0.0)
-        output_boy = scores.get("1boy", 0.0)
-
+        # Stable reference metadata may upgrade confidence but never downgrade a
+        # conservative local decision.
         if reference_profile.non_human_ratio >= REFERENCE_STABLE_RATIO:
-            suggested_rating = -1
-            suggested_confidence = reference_profile.non_human_ratio
-            reasons.append(f"auto_rating_candidate:-1:{suggested_confidence:.2f}")
+            ref_conf = reference_profile.non_human_ratio
+            if suggested_rating is None or ref_conf > (suggested_confidence or 0.0):
+                suggested_rating = -1
+                suggested_confidence = ref_conf
+                reasons.append(f"auto_rating_candidate:-1:{ref_conf:.2f}")
         elif reference_profile.boy_ratio >= REFERENCE_STABLE_RATIO:
+            output_girl = scores.get("1girl", 0.0)
+            output_boy = scores.get("1boy", 0.0)
             if output_boy >= GENDER_CONFIDENT and output_girl < 0.35:
-                suggested_rating = 1
-                suggested_confidence = min(reference_profile.boy_ratio, output_boy)
-                reasons.append(f"auto_rating_candidate:1:{suggested_confidence:.2f}")
+                ref_conf = min(reference_profile.boy_ratio, output_boy)
+                if ref_conf > (suggested_confidence or 0.0):
+                    suggested_rating = 1
+                    suggested_confidence = ref_conf
+                    reasons.append(f"auto_rating_candidate:1:{ref_conf:.2f}")
             elif output_girl >= GENDER_CONFIDENT and output_boy < 0.35:
-                suggested_rating = 3
-                suggested_confidence = min(reference_profile.boy_ratio, output_girl)
-                reasons.append(f"auto_rating_candidate:3:{suggested_confidence:.2f}")
-        elif reference_profile.girl_ratio >= REFERENCE_STABLE_RATIO:
-            if non_human_output >= GENDER_CONFIDENT:
-                status = "reject"
-                reasons.append("unexpected_non_human_output")
-            elif output_boy >= GENDER_CONFIDENT and output_girl < 0.35:
-                status = "reject"
-                reasons.append("unexpected_male_output")
-            elif output_girl >= GENDER_CONFIDENT and output_boy < 0.35:
-                # A normal female result is the common path. Prefill 3 later but never
-                # auto-complete it, so 5/6 favorites remain visible to the user.
-                suggested_rating = 3
-                suggested_confidence = min(reference_profile.girl_ratio, output_girl)
-                reasons.append(f"auto_rating_candidate:3:{suggested_confidence:.2f}")
+                ref_conf = min(reference_profile.boy_ratio, output_girl)
+                if ref_conf > (suggested_confidence or 0.0):
+                    suggested_rating = 3
+                    suggested_confidence = ref_conf
+                    reasons.append(f"auto_rating_candidate:3:{ref_conf:.2f}")
 
     return SemanticCheckResult(
         status=status,
