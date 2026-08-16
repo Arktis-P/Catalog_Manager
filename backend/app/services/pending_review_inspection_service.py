@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -24,8 +23,9 @@ from app.services.reference_profile_service import (
 from app.services.settings_service import SettingsService
 from app.services.v2_generation_pipeline import V2GenerationPipeline, V2PipelineResult
 
-PENDING_INSPECTION_VERSION = "v1.0"
+PENDING_INSPECTION_VERSION = "v1.1"
 AUTO_RATING_CONFIDENCE = 0.85
+PREFILL_RATING_CONFIDENCE = 0.72
 DEFAULT_AUDIT_SAMPLE_RATE = 0.10
 DEFAULT_MAX_REGENERATIONS = 2
 
@@ -43,6 +43,7 @@ class PendingInspectionSummary:
     rejected_files_removed: int = 0
     auto_completed: int = 0
     audit_kept_pending: int = 0
+    prefilled_pending: int = 0
     suggested_only: int = 0
     ratings: dict[str, int] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
@@ -202,6 +203,35 @@ class PendingReviewInspectionService:
             self.db.flush()
         return review
 
+    @staticmethod
+    def _append_auto_note(review: GlobalCharacterReview, marker: str) -> None:
+        review.review_note = f"{review.review_note}\n{marker}".strip() if review.review_note else marker
+
+    def _prefill_rating(
+        self,
+        character: GlobalCharacter,
+        *,
+        rating: int,
+        confidence: float,
+        reason: str,
+    ) -> bool:
+        """Prefill a likely rating while leaving the item pending for one-key confirmation."""
+        review = self._review_for(character)
+        if review.rating is not None:
+            return False
+        review.rating = rating
+        if review.gender is None:
+            review.gender = character.gender
+        self._append_auto_note(
+            review,
+            (
+                f"auto_inspection={PENDING_INSPECTION_VERSION};prefill=1;rating={rating};"
+                f"confidence={confidence:.2f};reason={reason}"
+            ),
+        )
+        self.db.flush()
+        return True
+
     def _apply_auto_rating(
         self,
         character: GlobalCharacter,
@@ -225,7 +255,13 @@ class PendingReviewInspectionService:
             f"auto_inspection={PENDING_INSPECTION_VERSION};rating={rating};"
             f"confidence={confidence:.2f};audit={int(audit)};reason={reason}"
         )
-        review.review_note = f"{review.review_note}\n{marker}".strip() if review.review_note else marker
+        self._append_auto_note(review, marker)
+        if not audit:
+            # The compact baseline is useful only while the character still needs
+            # review/regeneration. Drop it as soon as automation completes the item.
+            character.reference_profile = None
+            character.reference_profile_version = None
+            character.reference_profile_updated_at = None
         self.db.flush()
         return "audit" if audit else "completed"
 
@@ -256,7 +292,7 @@ class PendingReviewInspectionService:
             raise
 
     def _cleanup_superseded_rejects(self, character_id: int, *, keep_image_id: int) -> int:
-        """After a successful replacement, remove only unselected rejected predecessors."""
+        """Keep one latest result and remove older unselected rejects to cap storage growth."""
         rows = (
             self.db.query(GlobalCharacterImage)
             .filter(
@@ -338,16 +374,11 @@ class PendingReviewInspectionService:
                         )
                         if latest is not None:
                             final_image = latest
-                        if (
-                            cleanup_rejected
-                            and final_image is not None
-                            and final_image.quality_status != "reject"
-                            and final_image.identity_status != "reject"
-                        ):
-                            summary.rejected_files_removed += self._cleanup_superseded_rejects(
-                                character.id,
-                                keep_image_id=final_image.id,
-                            )
+                            if cleanup_rejected:
+                                summary.rejected_files_removed += self._cleanup_superseded_rejects(
+                                    character.id,
+                                    keep_image_id=final_image.id,
+                                )
                         _ = result
                 elif checked.quality_status == "warning" or checked.identity_status == "warning":
                     summary.warnings += 1
@@ -355,30 +386,41 @@ class PendingReviewInspectionService:
                     summary.passed += 1
 
                 rating, confidence = self._candidate_from_reasons(final_image)
-                if rating == 3 and confidence is not None:
-                    # 3 is deliberately a suggestion only: hiding a potentially favorite
-                    # character would work against the user's final preference review.
-                    summary.suggested_only += 1
-                elif (
-                    auto_complete
-                    and rating in {-1, 1}
-                    and confidence is not None
-                    and confidence >= AUTO_RATING_CONFIDENCE
-                ):
-                    outcome = self._apply_auto_rating(
+                if rating == 3 and confidence is not None and confidence >= PREFILL_RATING_CONFIDENCE:
+                    # 3 is never auto-completed: prefill it so normal female results
+                    # usually need only Enter while favorites can still be promoted.
+                    if self._prefill_rating(
                         character,
-                        rating=rating,
+                        rating=3,
                         confidence=confidence,
-                        audit_sample_rate=audit_sample_rate,
-                        reason="reference_and_output_agree",
-                    )
-                    if outcome == "completed":
-                        summary.auto_completed += 1
-                    elif outcome == "audit":
-                        summary.audit_kept_pending += 1
-                    if outcome in {"completed", "audit"}:
-                        key = str(rating)
-                        summary.ratings[key] = summary.ratings.get(key, 0) + 1
+                        reason="male_reference_feminized_output",
+                    ):
+                        summary.prefilled_pending += 1
+                    summary.suggested_only += 1
+                elif rating in {-1, 1} and confidence is not None:
+                    if auto_complete and confidence >= AUTO_RATING_CONFIDENCE:
+                        outcome = self._apply_auto_rating(
+                            character,
+                            rating=rating,
+                            confidence=confidence,
+                            audit_sample_rate=audit_sample_rate,
+                            reason="reference_and_output_agree",
+                        )
+                        if outcome == "completed":
+                            summary.auto_completed += 1
+                        elif outcome == "audit":
+                            summary.audit_kept_pending += 1
+                        if outcome in {"completed", "audit"}:
+                            key = str(rating)
+                            summary.ratings[key] = summary.ratings.get(key, 0) + 1
+                    elif confidence >= PREFILL_RATING_CONFIDENCE:
+                        if self._prefill_rating(
+                            character,
+                            rating=rating,
+                            confidence=confidence,
+                            reason="conservative_rating_prefill",
+                        ):
+                            summary.prefilled_pending += 1
 
                 if (
                     auto_complete
@@ -386,7 +428,7 @@ class PendingReviewInspectionService:
                     and character.generation_status == "generation_failed"
                 ):
                     # 0-star is only automatic after the capped regeneration path is
-                    # exhausted. A 10% deterministic sample still remains in pending.
+                    # exhausted. A deterministic 10% sample still remains in pending.
                     outcome = self._apply_auto_rating(
                         character,
                         rating=0,
