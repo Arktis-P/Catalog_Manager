@@ -12,7 +12,11 @@ from app.models.character import Character
 from app.models.global_character import GlobalCharacter
 from app.models.global_character_image import GlobalCharacterImage
 from app.models.image import Image
-from app.services.identity_checker import IDENTITY_CHECKER_VERSION, check_identity
+from app.services.identity_checker import (
+    IDENTITY_CHECKER_VERSION,
+    check_identity,
+    is_tagger_failure,
+)
 from app.services.prompt_service import v2_multicolor_prompt_candidates
 from app.services.quality_checker import QUALITY_CHECKER_VERSION, check_quality
 
@@ -188,7 +192,12 @@ def run_v2_quality_identity_checks(
             identity.suggested_multicolor_tags, ensure_ascii=False
         )
         image.identity_checked_at = now
-        image.identity_checker_version = IDENTITY_CHECKER_VERSION
+        # Tagger failures are not a completed inspection. Leaving the version unset
+        # keeps the image in the pending backfill until WD signals are available.
+        if is_tagger_failure(identity.reasons):
+            image.identity_checker_version = None
+        else:
+            image.identity_checker_version = IDENTITY_CHECKER_VERSION
 
     apply_provisional_status(db, image, character)
     db.flush()

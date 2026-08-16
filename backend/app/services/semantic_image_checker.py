@@ -6,12 +6,11 @@ from typing import Mapping
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.services.reference_profile_service import CharacterReferenceProfile
 
-SEMANTIC_CHECKER_VERSION = "v1.3"
+SEMANTIC_CHECKER_VERSION = "v1.4"
 
 HARD_LAYOUT_TAGS = frozenset(
     {
         "multiple_views",
-        "character_sheet",
         "reference_sheet",
         "collage",
         "4koma",
@@ -24,24 +23,30 @@ GOODS_OR_SCREEN_TAGS = frozenset(
         "card",
         "playing_card",
         "poster_(object)",
-        "framed_picture",
-        "picture_(object)",
         "photo_(object)",
         "monitor",
         "screen",
         "television",
-        "phone_screen",
-        # Danbooru/WD print tags commonly produced when faces or artwork are rendered
-        # onto clothes. These are not a hard reject alone; they become reject-worthy
-        # when combined with multiple-subject/gallery evidence below.
+        # Strong clothing-print evidence. character_print is the WD tag that most
+        # reliably marks face/gallery artwork baked into clothes.
+        "character_print",
         "print_shirt",
         "print_bikini",
         "print_swimsuit",
         "print_bra",
         "print_panties",
         "print_dress",
-        "printed_shirt",
-        "clothing_print",
+        "clothes_writing",
+    }
+)
+PRINT_CLOTHING_TAGS = frozenset(
+    {
+        "print_shirt",
+        "print_bikini",
+        "print_swimsuit",
+        "print_bra",
+        "print_panties",
+        "print_dress",
     }
 )
 MULTI_SUBJECT_TAGS = frozenset(
@@ -59,6 +64,7 @@ TEXT_OR_PRINT_TAGS = frozenset(
         "japanese_text",
         "logo",
         "character_name",
+        "clothes_writing",
     }
 )
 SWIMWEAR_TAGS = frozenset(
@@ -89,6 +95,13 @@ UNDERWEAR_TAGS = frozenset(
 NON_HUMAN_OUTPUT_TAGS = frozenset({"no_humans", "animal_focus", "creature", "monster", "feral"})
 
 HARD_LAYOUT_REJECT = 0.58
+# Combination-only soft thresholds: neither signal alone is enough.
+SOFT_LAYOUT_REJECT = 0.35
+SOFT_MULTI_REJECT = 0.40
+POSTER_MULTI_REJECT = 0.70
+POSTER_TEXT_REJECT = 0.15
+CHARACTER_PRINT_REJECT = 0.45
+PRINT_WITH_CHARACTER_PRINT = 0.25
 GOODS_SIGNAL = 0.48
 OUTFIT_REFERENCE_SIGNAL = 0.55
 OUTFIT_REJECT = 0.67
@@ -209,10 +222,34 @@ def evaluate_semantic_tags(
         status = "reject"
         reasons.append(f"embedded_gallery:{','.join(hard_layout[:3])}")
 
+    soft_layout = scores.get("multiple_views", 0.0)
+    multi_score = _max_score(scores, MULTI_SUBJECT_TAGS)
+    if soft_layout >= SOFT_LAYOUT_REJECT and multi_score >= SOFT_MULTI_REJECT and status != "reject":
+        # Neither score alone is reject-worthy, but together they match character-sheet /
+        # sketch-panel galleries that WD under-tags as hard collage/sheet labels.
+        status = "reject"
+        reasons.append("embedded_gallery:multiple_views+multi")
+
+    text_score = _max_score(scores, TEXT_OR_PRINT_TAGS)
+    if multi_score >= POSTER_MULTI_REJECT and text_score >= POSTER_TEXT_REJECT and status != "reject":
+        status = "reject"
+        reasons.append("poster_or_collage_with_text")
+
+    character_print = scores.get("character_print", 0.0)
+    print_clothing = _active(scores, PRINT_CLOTHING_TAGS, GOODS_SIGNAL)
+    if character_print >= CHARACTER_PRINT_REJECT or (
+        print_clothing and character_print >= PRINT_WITH_CHARACTER_PRINT
+    ):
+        status = "reject"
+        reasons.append("printed_character_gallery")
+
     goods = _active(scores, GOODS_OR_SCREEN_TAGS, GOODS_SIGNAL)
     multi = _active(scores, MULTI_SUBJECT_TAGS, GOODS_SIGNAL)
     print_signals = _active(scores, TEXT_OR_PRINT_TAGS, GOODS_SIGNAL)
-    if len(goods) >= 2 or (goods and multi):
+    if status != "reject" and (len(goods) >= 2 or (goods and multi)):
+        status = "reject"
+        reasons.append("goods_or_screen_character_gallery")
+    elif status != "reject" and print_clothing and multi:
         status = "reject"
         reasons.append("goods_or_screen_character_gallery")
     elif goods and print_signals and status != "reject":

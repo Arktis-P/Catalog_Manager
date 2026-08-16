@@ -164,6 +164,8 @@ Review -> V2 검수 상단의 `Pending 자동 검사` 패널에서 실행한다.
 
 페이지 테스트가 실제로 검사한 캐릭터 ID는 서버가 `settings` 테이블의 `pending_inspection_test_character_ids`에 직접 기록한다. 브라우저 상태에 의존하지 않으므로 새로고침이나 다른 탭에서도 초기화 대상이 유지되며, `stats`의 `test_tracked`로 개수를 확인한다.
 
+`run-selected`는 기본 `force_recheck=true`로 현재 페이지 카드를 checker version과 무관하게 다시 검사한다. 전체 `run`은 기존 증분 skip을 유지한다. WD 태거는 HF router를 먼저 시도하고, Provider 미지원 시 이미 설치된 로컬 ONNX(`data/models/wd-tagger`)로 폴백한다. `tagger_error`/`tagger_unavailable`/`tagger_no_predictions`는 identity checker version을 찍지 않아 재검사 대상에 남는다.
+
 `reset-selected`는 캐릭터 ID를 최대 1000개까지 받아 최신 이미지 검사 메타데이터와 `auto_inspection=...;test=1` 자동 판정만 초기화한다. `character_ids`를 비워 보내면 서버가 기록한 페이지 테스트 대상을 사용하고, 초기화한 ID는 추적 목록에서 제거한 뒤 남은 개수를 `test_tracked_remaining`으로 돌려준다. 실제 이미지 파일과 테스트가 아닌 기존 자동검사/수동 결과는 보존한다.
 
 추적 기록이 없을 때(예: 서버 기록 이전에 실행한 테스트) UI 버튼은 `현재 페이지 검사 결과 초기화`로 바뀌어 현재 화면에 보이는 카드만 대상으로 되돌린다.

@@ -15,9 +15,27 @@ from app.services.reference_profile_service import (
     get_pending_reference_context,
     get_reference_profile_for_tag,
 )
-from app.services.semantic_image_checker import evaluate_semantic_tags, needs_outfit_reference
+from app.services.semantic_image_checker import SEMANTIC_CHECKER_VERSION, evaluate_semantic_tags, needs_outfit_reference
 
-IDENTITY_CHECKER_VERSION = "v3.2"
+# Base identity logic version. Effective stored version also embeds the semantic
+# ruleset so pending images are requeued when only semantic rules change.
+IDENTITY_CHECKER_BASE_VERSION = "v3.4"
+IDENTITY_CHECKER_VERSION = f"{IDENTITY_CHECKER_BASE_VERSION}+semantic-{SEMANTIC_CHECKER_VERSION}"
+
+TAGGER_FAILURE_REASONS = frozenset(
+    {
+        "tagger_unavailable",
+        "tagger_error",
+        "tagger_no_predictions",
+    }
+)
+
+
+def is_tagger_failure(reasons: Iterable[str] | None) -> bool:
+    """True when identity work did not actually run (must not stamp current version)."""
+    if not reasons:
+        return False
+    return any(str(reason) in TAGGER_FAILURE_REASONS for reason in reasons)
 
 # ── 임계값 (조정 가능) ──────────────────────────────────────────────
 CHARACTER_CONFLICT_THRESHOLD = 0.75    # 다른 캐릭터 태그 고신뢰 판정 → reject
@@ -165,11 +183,25 @@ def _merge_semantic_result(
     # Read cheap local priors first. A compact `{tag} solo` metadata profile is fetched
     # only when this specific generated image already looks like swimwear/underwear.
     profile = context.cached_profile
-    if profile is None and needs_outfit_reference(tag_scores):
-        try:
-            profile = get_reference_profile_for_tag(character_tag, build_if_missing=True)
-        except Exception:
-            profile = None
+    reference_note: str | None = None
+    if needs_outfit_reference(tag_scores):
+        if profile is not None:
+            reference_note = "reference_loaded"
+        else:
+            try:
+                profile = get_reference_profile_for_tag(character_tag, build_if_missing=True)
+            except Exception:
+                profile = None
+                reference_note = "reference_fetch_failed"
+            else:
+                if profile is None:
+                    reference_note = "reference_insufficient"
+                elif not profile.has_stable_sample:
+                    reference_note = "reference_insufficient"
+                else:
+                    reference_note = "reference_loaded"
+    else:
+        reference_note = "reference_not_needed"
 
     semantic = evaluate_semantic_tags(
         tag_scores,
@@ -187,6 +219,8 @@ def _merge_semantic_result(
     for reason in semantic.reasons:
         if reason not in reasons:
             reasons.append(reason)
+    if reference_note and reference_note not in reasons:
+        reasons.append(reference_note)
 
     return IdentityCheckResult(
         status=status,
@@ -238,7 +272,9 @@ def check_identity(
         )
 
     model = hf_wd_model or DEFAULT_HF_WD_MODEL
-    threshold = min(HAIR_COLOR_MATCH_THRESHOLD, CHARACTER_DETECT_THRESHOLD)
+    # Keep weak-but-useful gallery/text signals (often 0.15–0.30). Character/hair
+    # identity still applies its own thresholds on the returned score map.
+    threshold = 0.15
     predictions, error = predict_tags_via_hf(
         image_path,
         hf_token=hf_token,

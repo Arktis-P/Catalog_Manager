@@ -302,6 +302,7 @@ def test_page_test_tracking_is_recorded_server_side(
 
     run_selected_pending_inspection(
         payload=PendingInspectionSelection(character_ids=[first.id, second.id, skipped.id]),
+        force_recheck=False,
         db=db,
     )
 
@@ -406,12 +407,13 @@ def test_run_selected_returns_only_actually_inspected_ids(db: Session, monkeypat
     payload = PendingInspectionSelection(
         character_ids=[inspectable_a.id, inspectable_b.id, skipped_current.id]
     )
-    result = run_selected_pending_inspection(payload=payload, db=db)
+    result = run_selected_pending_inspection(payload=payload, force_recheck=False, db=db)
 
     assert set(inspected_tags) == {"inspect_a", "inspect_b"}
     assert result["inspected"] == 2
     assert result["inspected_character_ids"] == [inspectable_a.id, inspectable_b.id]
     assert skipped_current.id not in result["inspected_character_ids"]
+    assert result["skipped_current_version"] == 1
 
 
 def test_run_selected_ids_round_trip_reset_requeues_candidates(
@@ -446,6 +448,7 @@ def test_run_selected_ids_round_trip_reset_requeues_candidates(
 
     run_result = run_selected_pending_inspection(
         payload=PendingInspectionSelection(character_ids=[first.id, second.id, skipped.id]),
+        force_recheck=False,
         db=db,
     )
     tracked_ids = run_result["inspected_character_ids"]

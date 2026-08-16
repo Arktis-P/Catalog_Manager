@@ -30,6 +30,15 @@ type InspectionSummary = {
   ratings: Record<string, number>;
   errors: string[];
   inspected_character_ids?: number[];
+  skipped_current_version?: number;
+  tagger_success?: number;
+  tagger_error?: number;
+  semantic_pass?: number;
+  semantic_warning?: number;
+  semantic_reject?: number;
+  reference_loaded?: number;
+  reference_failed?: number;
+  regeneration_requested?: number;
 };
 
 type InspectionResetSummary = {
@@ -56,7 +65,7 @@ async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-function inspectionQuery(limit?: number): URLSearchParams {
+function inspectionQuery(limit?: number, overrides?: Record<string, string>): URLSearchParams {
   const query = new URLSearchParams({
     auto_regenerate: "true",
     max_regenerations: "2",
@@ -66,6 +75,11 @@ function inspectionQuery(limit?: number): URLSearchParams {
   });
   if (limit != null) {
     query.set("limit", String(limit));
+  }
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      query.set(key, value);
+    }
   }
   return query;
 }
@@ -343,7 +357,11 @@ export function PendingInspectionPanel() {
         }
 
         const chunk = characterIds.slice(index, index + BATCH_SIZE);
-        const query = inspectionQuery();
+        const query = inspectionQuery(undefined, {
+          force_recheck: "true",
+          // Page tests keep rejected files for diagnosis unless the operator asks otherwise.
+          cleanup_rejected: "false",
+        });
         const response = await fetch(`/api/review/v2/pending-inspection/run-selected?${query.toString()}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -355,12 +373,26 @@ export function PendingInspectionPanel() {
         const inspected = (metrics.inspected ?? 0) + result.inspected;
         const regenerated = (metrics.regenerated ?? 0) + result.characters_regenerated;
         const autoCompleted = (metrics.auto_completed ?? 0) + result.auto_completed;
+        const taggerOk = (metrics.tagger_success as number | undefined ?? 0) + (result.tagger_success ?? 0);
+        const taggerErr = (metrics.tagger_error as number | undefined ?? 0) + (result.tagger_error ?? 0);
+        const semanticReject = (metrics.semantic_reject as number | undefined ?? 0) + (result.semantic_reject ?? 0);
         task = addInspectionResult(
           task,
           result,
           processed,
-          `현재 페이지 Pending 자동 검사 · ${processed.toLocaleString()}/${characterIds.length.toLocaleString()} · 실제 검사 ${inspected.toLocaleString()} · 재생성 ${regenerated.toLocaleString()} · 자동완료 ${autoCompleted.toLocaleString()}`,
+          `현재 페이지 Pending 자동 검사 · ${processed.toLocaleString()}/${characterIds.length.toLocaleString()} · 실제 검사 ${inspected.toLocaleString()} · tagger ${taggerOk}/${taggerErr} · reject ${semanticReject.toLocaleString()} · 재생성 ${regenerated.toLocaleString()} · 자동완료 ${autoCompleted.toLocaleString()}`,
         );
+        task = {
+          ...task,
+          prompt_variant_attempts: {
+            ...task.prompt_variant_attempts,
+            tagger_success: taggerOk,
+            tagger_error: taggerErr,
+            semantic_reject: semanticReject,
+            semantic_pass: (metrics.semantic_pass as number | undefined ?? 0) + (result.semantic_pass ?? 0),
+            semantic_warning: (metrics.semantic_warning as number | undefined ?? 0) + (result.semantic_warning ?? 0),
+          },
+        };
         upsertLocalV2Job(task);
         setMessage(task.message);
         await loadStats();

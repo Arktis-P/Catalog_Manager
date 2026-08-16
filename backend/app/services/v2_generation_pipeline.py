@@ -28,6 +28,7 @@ from app.services.identity_checker import (
     IDENTITY_CHECKER_VERSION,
     IdentityCheckResult,
     check_identity,
+    is_tagger_failure,
 )
 from app.services.prompt_service import refresh_global_character_base_prompt, v2_multicolor_prompt_candidates
 from app.services.quality_checker import QUALITY_CHECKER_VERSION, check_quality
@@ -426,7 +427,10 @@ class V2GenerationPipeline:
                 identity.suggested_multicolor_tags, ensure_ascii=False
             )
             image.identity_checked_at = now
-            image.identity_checker_version = IDENTITY_CHECKER_VERSION
+            if is_tagger_failure(identity.reasons):
+                image.identity_checker_version = None
+            else:
+                image.identity_checker_version = IDENTITY_CHECKER_VERSION
 
         apply_provisional_status(self.db, image, character)
         commit_db_session(self.db)

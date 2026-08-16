@@ -20,9 +20,50 @@ def profile(**overrides) -> CharacterReferenceProfile:
 
 
 def test_reference_sheet_is_regeneration_reject() -> None:
-    result = evaluate_semantic_tags({"character_sheet": 0.91, "1girl": 0.9})
+    result = evaluate_semantic_tags({"reference_sheet": 0.91, "1girl": 0.9})
     assert result.status == "reject"
     assert any(reason.startswith("embedded_gallery:") for reason in result.reasons)
+
+
+def test_soft_multiple_views_plus_multi_is_reject() -> None:
+    result = evaluate_semantic_tags(
+        {
+            "multiple_views": 0.40,
+            "multiple_girls": 0.45,
+            "1girl": 0.55,
+        }
+    )
+    assert result.status == "reject"
+    assert "embedded_gallery:multiple_views+multi" in result.reasons
+
+
+def test_character_print_gallery_is_reject() -> None:
+    result = evaluate_semantic_tags(
+        {
+            "print_shirt": 0.60,
+            "character_print": 0.51,
+            "1boy": 0.57,
+        }
+    )
+    assert result.status == "reject"
+    assert "printed_character_gallery" in result.reasons
+
+
+def test_poster_collage_with_text_is_reject() -> None:
+    result = evaluate_semantic_tags(
+        {
+            "multiple_girls": 0.87,
+            "english_text": 0.18,
+            "1girl": 0.4,
+        }
+    )
+    assert result.status == "reject"
+    assert "poster_or_collage_with_text" in result.reasons
+
+
+def test_single_weak_print_shirt_is_not_hard_reject() -> None:
+    result = evaluate_semantic_tags({"print_shirt": 0.30, "1girl": 0.9, "solo": 0.8})
+    assert result.status == "pass"
 
 
 def test_multiple_goods_and_character_cards_are_rejected() -> None:
@@ -39,7 +80,7 @@ def test_multiple_goods_and_character_cards_are_rejected() -> None:
 
 def test_single_print_signal_is_warning_not_hard_reject() -> None:
     result = evaluate_semantic_tags(
-        {"printed_shirt": 0.75, "text": 0.7, "1girl": 0.9}
+        {"print_shirt": 0.75, "text": 0.7, "1girl": 0.9}
     )
     assert result.status == "warning"
     assert "printed_character_or_goods_possible" in result.reasons

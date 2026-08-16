@@ -9,6 +9,11 @@ from app.database import get_db
 from app.models.global_character import GlobalCharacter
 from app.models.global_character_image import GlobalCharacterImage
 from app.models.global_character_review import GlobalCharacterReview
+from app.integrations.image_tagger.hf_wd_tagger import (
+    HFWdTaggerError,
+    assert_wd_tagger_ready,
+    local_wd_available,
+)
 from app.services.identity_checker import IDENTITY_CHECKER_VERSION
 from app.services.pending_review_inspection_service import (
     MAX_RESET_CHARACTERS,
@@ -39,13 +44,17 @@ def _active_v2_generation_exists() -> bool:
 
 
 def _assert_inspection_ready(db: Session) -> None:
-    if not SettingsService(db).get_hf_token():
-        # Without WD output the new semantic rules cannot run. Refuse the batch instead
-        # of stamping every image as "checked" with tagger_unavailable and silently
-        # preventing a later real backfill.
+    settings_service = SettingsService(db)
+    hf_token = settings_service.get_hf_token() or None
+    hf_model = settings_service.get_hf_wd_model() or None
+    try:
+        assert_wd_tagger_ready(hf_token=hf_token, model=hf_model or "SmilingWolf/wd-eva02-large-tagger-v3")
+    except HFWdTaggerError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not hf_token and not local_wd_available():
         raise HTTPException(
             status_code=409,
-            detail="Pending 자동 검사는 Settings의 Hugging Face Token이 필요합니다.",
+            detail="Pending 자동 검사는 로컬 WD ONNX 또는 Settings의 Hugging Face Token이 필요합니다.",
         )
     if _active_v2_generation_exists():
         # The inspector may call NAIA for rejected items. Never compete with the normal
@@ -60,8 +69,15 @@ def _assert_inspection_ready(db: Session) -> None:
 def _selected_candidates(
     db: Session,
     character_ids: list[int],
+    *,
+    force_recheck: bool = False,
 ) -> list[tuple[GlobalCharacter, GlobalCharacterImage]]:
-    """Return only currently-inspectable rows from an explicit UI page selection."""
+    """Return pending rows for an explicit UI page selection.
+
+    Production incremental runs skip images already on the current checker versions.
+    Page tests pass force_recheck=True so algorithm changes can be validated against
+    the currently visible cards even after a prior pass.
+    """
     ids = list(dict.fromkeys(character_id for character_id in character_ids if character_id > 0))[:30]
     if not ids:
         return []
@@ -75,7 +91,7 @@ def _selected_candidates(
         .group_by(GlobalCharacterImage.global_character_id)
         .subquery()
     )
-    return (
+    query = (
         db.query(GlobalCharacter, GlobalCharacterImage)
         .join(latest, latest.c.character_id == GlobalCharacter.id)
         .join(GlobalCharacterImage, GlobalCharacterImage.id == latest.c.image_id)
@@ -90,7 +106,9 @@ def _selected_candidates(
                 GlobalCharacterReview.review_status == "pending",
             )
         )
-        .filter(
+    )
+    if not force_recheck:
+        query = query.filter(
             or_(
                 GlobalCharacterImage.quality_checker_version.is_(None),
                 GlobalCharacterImage.quality_checker_version != QUALITY_CHECKER_VERSION,
@@ -98,9 +116,7 @@ def _selected_candidates(
                 GlobalCharacterImage.identity_checker_version != IDENTITY_CHECKER_VERSION,
             )
         )
-        .order_by(GlobalCharacter.id.asc())
-        .all()
-    )
+    return query.order_by(GlobalCharacter.id.asc()).all()
 
 
 @router.get("/stats")
@@ -153,22 +169,28 @@ def run_selected_pending_inspection(
     auto_complete: bool = Query(default=True),
     audit_sample_rate: float = Query(default=0.10, ge=0.0, le=1.0),
     cleanup_rejected: bool = Query(default=True),
+    force_recheck: bool = Query(default=True),
     db: Session = Depends(get_db),
 ):
-    """Inspect at most 30 explicitly selected characters, intended for current-page testing."""
+    """Inspect at most 30 explicitly selected characters, intended for current-page testing.
+
+    force_recheck defaults to True so page tests re-run the current algorithm even when
+    checker versions are already stamped. Production /run keeps incremental skipping.
+    """
     selected_ids = list(dict.fromkeys(character_id for character_id in payload.character_ids if character_id > 0))
     if not selected_ids:
         raise HTTPException(status_code=400, detail="검사할 현재 페이지 항목이 없습니다.")
     if len(selected_ids) > 30:
         raise HTTPException(status_code=400, detail="현재 페이지 테스트는 한 번에 최대 30개까지 가능합니다.")
 
-    rows = _selected_candidates(db, selected_ids)
+    rows = _selected_candidates(db, selected_ids, force_recheck=force_recheck)
+    skipped_current_version = max(0, len(selected_ids) - len(rows)) if not force_recheck else 0
     if not rows:
-        # No HF/NAIA work is necessary when every visible item has no image, is already
-        # current, or has become completed since the page was rendered.
         service = PendingReviewInspectionService(db)
         service.candidates = lambda *, limit: []  # type: ignore[method-assign]
-        return service.inspect_batch(limit=len(selected_ids), test_run=True).as_dict()
+        result = service.inspect_batch(limit=len(selected_ids), test_run=True).as_dict()
+        result["skipped_current_version"] = skipped_current_version
+        return result
 
     _assert_inspection_ready(db)
     service = PendingReviewInspectionService(db)
@@ -184,9 +206,9 @@ def run_selected_pending_inspection(
         cleanup_rejected=cleanup_rejected,
         test_run=True,
     )
-    # inspected_character_ids comes from characters that actually completed inspection,
-    # not from the pre-filtered candidate list (skipped/failed IDs are excluded).
-    return summary.as_dict()
+    result = summary.as_dict()
+    result["skipped_current_version"] = skipped_current_version
+    return result
 
 
 @router.post("/reset-selected")

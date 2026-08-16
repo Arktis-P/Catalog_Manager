@@ -13,7 +13,7 @@ from app.models.global_character_image import GlobalCharacterImage
 from app.models.global_character_review import GlobalCharacterReview
 from app.services.character_image_service import run_v2_quality_identity_checks
 from app.services.db_write_queue import commit_db_session
-from app.services.identity_checker import IDENTITY_CHECKER_VERSION
+from app.services.identity_checker import IDENTITY_CHECKER_VERSION, is_tagger_failure
 from app.services.quality_checker import QUALITY_CHECKER_VERSION
 from app.services.reference_profile_service import REFERENCE_PROFILE_VERSION
 from app.services.settings_service import SettingsService
@@ -48,6 +48,16 @@ class PendingInspectionSummary:
     errors: list[str] = field(default_factory=list)
     # Only characters that actually completed _inspect_existing in this batch.
     inspected_character_ids: list[int] = field(default_factory=list)
+    # Page-test / operator diagnostics (cheap counters, no per-image payloads).
+    tagger_success: int = 0
+    tagger_error: int = 0
+    semantic_pass: int = 0
+    semantic_warning: int = 0
+    semantic_reject: int = 0
+    reference_loaded: int = 0
+    reference_failed: int = 0
+    regeneration_requested: int = 0
+    skipped_current_version: int = 0
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -592,6 +602,32 @@ class PendingReviewInspectionService:
         summary.test_tracked_remaining = len(self.tracked_test_character_ids())
         return summary
 
+    def _record_inspection_diagnostics(
+        self,
+        summary: PendingInspectionSummary,
+        image: GlobalCharacterImage,
+    ) -> None:
+        reasons = self._json_reason_list(image.identity_reasons)
+        if is_tagger_failure(reasons):
+            summary.tagger_error += 1
+            return
+        if image.identity_checker_version:
+            summary.tagger_success += 1
+        if image.identity_status == "reject" or image.quality_status == "reject":
+            summary.semantic_reject += 1
+        elif image.identity_status == "warning" or image.quality_status == "warning":
+            summary.semantic_warning += 1
+        elif image.identity_status == "pass" and image.quality_status == "pass":
+            summary.semantic_pass += 1
+        if any(str(reason).startswith("reference_") for reason in reasons):
+            if any(
+                str(reason) in {"reference_fetch_failed", "reference_insufficient"}
+                for reason in reasons
+            ):
+                summary.reference_failed += 1
+            elif any(str(reason) == "reference_loaded" for reason in reasons):
+                summary.reference_loaded += 1
+
     def inspect_batch(
         self,
         *,
@@ -620,6 +656,7 @@ class PendingReviewInspectionService:
                 checked = self._inspect_existing(character, image)
                 summary.inspected += 1
                 summary.inspected_character_ids.append(character.id)
+                self._record_inspection_diagnostics(summary, checked)
                 commit_db_session(self.db)
 
                 final_image = checked
@@ -628,6 +665,7 @@ class PendingReviewInspectionService:
                 if was_reject:
                     summary.rejected += 1
                     if auto_regenerate:
+                        summary.regeneration_requested += 1
                         result, generated = self._regenerate_capped(
                             character,
                             max_regenerations=max_regenerations,
