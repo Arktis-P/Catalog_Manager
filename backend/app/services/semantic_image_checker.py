@@ -5,7 +5,7 @@ from typing import Mapping
 
 from app.services.reference_profile_service import CharacterReferenceProfile
 
-SEMANTIC_CHECKER_VERSION = "v1.0"
+SEMANTIC_CHECKER_VERSION = "v1.1"
 
 HARD_LAYOUT_TAGS = frozenset(
     {
@@ -25,10 +25,20 @@ GOODS_OR_SCREEN_TAGS = frozenset(
         "poster_(object)",
         "framed_picture",
         "picture_(object)",
+        "photo_(object)",
         "monitor",
         "screen",
         "television",
         "phone_screen",
+        # Danbooru/WD print tags commonly produced when faces or artwork are rendered
+        # onto clothes. These are not a hard reject alone; they become reject-worthy
+        # when combined with multiple-subject/gallery evidence below.
+        "print_shirt",
+        "print_bikini",
+        "print_swimsuit",
+        "print_bra",
+        "print_panties",
+        "print_dress",
         "printed_shirt",
         "clothing_print",
     }
