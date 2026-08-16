@@ -1,8 +1,9 @@
-"""WD tagger: HF Inference Providers (router) with local ONNX fallback.
+"""WD tagger: existing local ONNX first, HF Inference Provider as remote fallback.
 
-The legacy host api-inference.huggingface.co is decommissioned. The current WD models
-(SmilingWolf/*-tagger-v3) are also not served by hf-inference providers, so a working
-local ONNX checkout under data/models/wd-tagger/ is the supported path today.
+The legacy host api-inference.huggingface.co is decommissioned. The current SmilingWolf
+WD models are not served by hf-inference providers, so when an existing checkout under
+``data/models/wd-tagger/`` is present we use it directly and avoid a doomed network
+request for every inspected image.
 """
 from __future__ import annotations
 
@@ -151,6 +152,10 @@ class HFWdTagger:
         raise HFWdTaggerError(f"HF WD 태거 예측 실패: {last_error}")
 
 
+def _as_public_predictions(preds: list[LocalTagPrediction]) -> list[TagPrediction]:
+    return [TagPrediction(tag=item.tag, confidence=item.confidence) for item in preds]
+
+
 def predict_tags_via_hf(
     image_path: Path,
     *,
@@ -159,11 +164,21 @@ def predict_tags_via_hf(
     threshold: float = 0.35,
     allow_local_fallback: bool = True,
 ) -> tuple[list[TagPrediction], str | None]:
-    """Predict WD tags via HF router, falling back to a local ONNX model when needed.
+    """Predict WD tags without downloading a model.
+
+    Existing local ONNX is deliberately preferred. This avoids one failing HF request
+    per image on the six-figure pending queue. If local inference is unavailable or
+    fails, an explicitly configured HF token may still try the remote provider.
 
     Returns:
         (predictions, error_message) — 실패 시 predictions=[], error_message=str
     """
+    local_error: str | None = None
+    if allow_local_fallback and local_wd_available():
+        preds, local_error = predict_tags_via_local(image_path, threshold=threshold)
+        if local_error is None:
+            return _as_public_predictions(preds), None
+
     remote_error: str | None = None
     if hf_token:
         tagger = HFWdTagger(hf_token, model=model)
@@ -176,17 +191,8 @@ def predict_tags_via_hf(
     else:
         remote_error = "hf_token_missing"
 
-    if allow_local_fallback and local_wd_available():
-        preds, local_error = predict_tags_via_local(image_path, threshold=threshold)
-        if local_error is None:
-            return [
-                TagPrediction(tag=item.tag, confidence=item.confidence)
-                for item in preds
-            ], None
-        return [], (
-            f"remote_failed=({remote_error}); local_failed=({local_error})"
-        )
-
+    if local_error is not None:
+        return [], f"local_failed=({local_error}); remote_failed=({remote_error})"
     if allow_local_fallback:
         return [], (
             f"{remote_error}; local_wd_unavailable "
