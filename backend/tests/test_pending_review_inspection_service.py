@@ -37,6 +37,8 @@ def add_character(
     tag: str,
     review_status: str | None,
     checker_current: bool = False,
+    quality_status: str = "pass",
+    identity_status: str | None = "pass",
 ) -> GlobalCharacter:
     character = GlobalCharacter(
         character_tag=tag,
@@ -48,10 +50,12 @@ def add_character(
     character.images.append(
         GlobalCharacterImage(
             image_path=f"output/generated_images/pending_review/{tag}.webp",
-            quality_status="pass",
-            identity_status="pass",
+            quality_status=quality_status,
+            identity_status=identity_status,
             quality_checker_version=QUALITY_CHECKER_VERSION if checker_current else "old",
-            identity_checker_version=IDENTITY_CHECKER_VERSION if checker_current else "old",
+            identity_checker_version=(
+                IDENTITY_CHECKER_VERSION if checker_current and identity_status is not None else None
+            ),
         )
     )
     if review_status is not None:
@@ -78,6 +82,22 @@ def test_candidate_query_never_returns_completed_reviews(db: Session) -> None:
     assert pending.id in ids
     assert no_review.id in ids
     assert len(ids) == 2
+
+
+def test_current_quality_reject_does_not_require_identity_version(db: Session) -> None:
+    rejected = add_character(
+        db,
+        tag="quality_reject_audit",
+        review_status="pending",
+        checker_current=True,
+        quality_status="reject",
+        identity_status=None,
+    )
+
+    rows = PendingReviewInspectionService(db).candidates(limit=50)
+    ids = {character.id for character, _image in rows}
+
+    assert rejected.id not in ids
 
 
 def test_rating_three_prefill_stays_pending(db: Session) -> None:
