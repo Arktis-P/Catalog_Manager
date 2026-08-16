@@ -89,7 +89,9 @@ def test_male_reference_and_male_output_suggest_one() -> None:
         gender_prior="1boy",
     )
     assert result.suggested_rating == 1
-    assert result.suggested_rating_confidence == 0.88
+    # Local persisted gender is the primary prior; the lower reference ratio does not
+    # reduce an already stronger local+output agreement.
+    assert result.suggested_rating_confidence == 0.9
 
 
 def test_male_reference_and_feminized_output_suggest_three_only() -> None:
