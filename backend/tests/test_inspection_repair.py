@@ -38,6 +38,20 @@ def test_male_hair_then_auto_zero() -> None:
     )
 
 
+def test_male_low_confidence_without_hair_mismatch_does_not_invent_hair_repair() -> None:
+    ctx = RepairContext()
+    assert (
+        decide_repair_stage(
+            gender="1boy",
+            quality_status="pass",
+            identity_status="warning",
+            reasons=["character_tag_low_confidence"],
+            context=ctx,
+        )
+        == STAGE_AUTO_ZERO
+    )
+
+
 def test_female_hair_multicolor_eye_order() -> None:
     ctx = RepairContext()
     assert (
@@ -66,8 +80,8 @@ def test_female_hair_multicolor_eye_order() -> None:
         decide_repair_stage(
             gender="1girl",
             quality_status="pass",
-            identity_status="reject",
-            reasons=["character_tag_undetected"],
+            identity_status="warning",
+            reasons=["character_tag_low_confidence"],
             context=ctx,
         )
         == STAGE_IDENTITY_EYE
@@ -77,15 +91,34 @@ def test_female_hair_multicolor_eye_order() -> None:
         decide_repair_stage(
             gender="1girl",
             quality_status="pass",
-            identity_status="reject",
-            reasons=["character_tag_undetected"],
+            identity_status="warning",
+            reasons=["character_tag_low_confidence"],
             context=ctx,
         )
         == STAGE_AUTO_ZERO
     )
 
 
-def test_identity_failure_skips_semantic_stages() -> None:
+def test_character_tag_undetected_alone_does_not_regenerate_or_auto_zero() -> None:
+    for gender, reason in (
+        ("1girl", "character_tag_undetected"),
+        ("1boy", "boy_character_tag_undetected"),
+    ):
+        ctx = RepairContext()
+        assert (
+            decide_repair_stage(
+                gender=gender,
+                quality_status="pass",
+                identity_status="warning",
+                reasons=[reason],
+                context=ctx,
+            )
+            == STAGE_DONE
+        )
+        assert ctx.identity_ok is True
+
+
+def test_actionable_identity_failure_skips_semantic_stages() -> None:
     ctx = RepairContext()
     ctx.mark(STAGE_IDENTITY_HAIR)
     ctx.mark(STAGE_IDENTITY_MULTICOLOR)
@@ -95,7 +128,7 @@ def test_identity_failure_skips_semantic_stages() -> None:
             gender="1girl",
             quality_status="pass",
             identity_status="reject",
-            reasons=["character_tag_undetected", "atypical_swimwear:0.9/0.0"],
+            reasons=["character_tag_low_confidence", "atypical_swimwear:0.9/0.0"],
             context=ctx,
         )
         == STAGE_AUTO_ZERO
@@ -124,6 +157,20 @@ def test_semantic_gallery_only_when_identity_ok() -> None:
             quality_status="pass",
             identity_status="reject",
             reasons=["weak_print_gallery"],
+            context=ctx,
+        )
+        == STAGE_SEMANTIC_GALLERY
+    )
+
+
+def test_tag_undetected_can_still_repair_semantic_gallery() -> None:
+    ctx = RepairContext()
+    assert (
+        decide_repair_stage(
+            gender="1girl",
+            quality_status="pass",
+            identity_status="reject",
+            reasons=["character_tag_undetected", "weak_print_gallery"],
             context=ctx,
         )
         == STAGE_SEMANTIC_GALLERY
