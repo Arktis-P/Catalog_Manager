@@ -120,6 +120,14 @@ class CharacterReferenceProfile:
         return self.sample_count >= MIN_REFERENCE_SAMPLE
 
 
+@dataclass(frozen=True)
+class PendingReferenceContext:
+    """Cheap local context available without any Danbooru request."""
+
+    non_human_candidate_score: float
+    cached_profile: CharacterReferenceProfile | None
+
+
 def _post_tags(post: dict[str, object]) -> set[str]:
     # Danbooru keeps 1girl/1boy/outfit/no_humans in general tags. Meta tags are
     # intentionally ignored because they add little identity value and increase noise.
@@ -217,6 +225,28 @@ def get_or_build_reference_profile(
     character.reference_profile_updated_at = datetime.now()
     db.flush()
     return profile
+
+
+def get_pending_reference_context(character_tag: str) -> PendingReferenceContext | None:
+    """Read only local cached context for one pending character.
+
+    This is intentionally separated from profile building so the common inspection
+    path does not make one Danbooru request per character.
+    """
+    from app.database import SessionLocal
+
+    with SessionLocal() as db:
+        character = (
+            db.query(GlobalCharacter)
+            .filter(GlobalCharacter.character_tag == character_tag)
+            .first()
+        )
+        if character is None or not is_pending_character(db, character.id):
+            return None
+        return PendingReferenceContext(
+            non_human_candidate_score=float(character.non_human_candidate_score or 0.0),
+            cached_profile=cached_reference_profile(character),
+        )
 
 
 def get_reference_profile_for_tag(
