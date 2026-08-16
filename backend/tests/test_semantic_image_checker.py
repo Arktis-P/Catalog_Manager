@@ -87,3 +87,22 @@ def test_male_reference_and_feminized_output_suggest_three_only() -> None:
     )
     assert result.suggested_rating == 3
     assert result.status == "pass"
+
+
+def test_normal_female_reference_prefills_three_candidate() -> None:
+    result = evaluate_semantic_tags(
+        {"1girl": 0.93, "1boy": 0.04},
+        reference_profile=profile(girl_ratio=0.9),
+    )
+    assert result.suggested_rating == 3
+    assert result.suggested_rating_confidence == 0.9
+    assert result.status == "pass"
+
+
+def test_female_reference_with_confident_male_output_is_rejected() -> None:
+    result = evaluate_semantic_tags(
+        {"1girl": 0.08, "1boy": 0.91},
+        reference_profile=profile(girl_ratio=0.94),
+    )
+    assert result.status == "reject"
+    assert "unexpected_male_output" in result.reasons
