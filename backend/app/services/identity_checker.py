@@ -11,8 +11,10 @@ from app.integrations.danbooru.appearance_extractor import (
     STREAK_COLOR_TAGS,
     normalize_gender,
 )
+from app.services.reference_profile_service import get_reference_profile_for_tag
+from app.services.semantic_image_checker import evaluate_semantic_tags
 
-IDENTITY_CHECKER_VERSION = "v2.0"
+IDENTITY_CHECKER_VERSION = "v3.0"
 
 # ── 임계값 (조정 가능) ──────────────────────────────────────────────
 CHARACTER_CONFLICT_THRESHOLD = 0.75    # 다른 캐릭터 태그 고신뢰 판정 → reject
@@ -136,6 +138,39 @@ def evaluate_identity(
     )
 
 
+def _merge_semantic_result(
+    base: IdentityCheckResult,
+    tag_scores: dict[str, float],
+    *,
+    character_tag: str,
+) -> IdentityCheckResult:
+    # Only pending characters get a Danbooru baseline. The helper caches one compact
+    # metadata request and never stores/downloads reference images. Completed reviews
+    # return None immediately, so they do not incur this extra work.
+    profile = get_reference_profile_for_tag(character_tag, build_if_missing=True)
+    semantic = evaluate_semantic_tags(tag_scores, reference_profile=profile)
+
+    rank = {"pass": 0, "warning": 1, "reject": 2}
+    status = base.status
+    if rank.get(semantic.status, 0) > rank.get(status, 0):
+        status = semantic.status
+
+    reasons = list(base.reasons)
+    for reason in semantic.reasons:
+        if reason not in reasons:
+            reasons.append(reason)
+
+    return IdentityCheckResult(
+        status=status,
+        character_confidence=base.character_confidence,
+        hair_color_confidence=base.hair_color_confidence,
+        conflicting_character_tag=base.conflicting_character_tag,
+        conflicting_character_confidence=base.conflicting_character_confidence,
+        reasons=reasons,
+        suggested_multicolor_tags=base.suggested_multicolor_tags,
+    )
+
+
 def check_identity(
     image_path: Path,
     *,
@@ -147,10 +182,15 @@ def check_identity(
     hf_token: str | None = None,
     hf_wd_model: str | None = None,
 ) -> IdentityCheckResult:
-    """HF WD 태거(기존 연동 재사용)로 이미지를 예측하고 identity 규칙을 적용한다.
+    """HF WD 태거 결과로 identity + low-cost semantic 검사를 수행한다.
 
-    태거를 사용할 수 없거나 예측이 비어 있으면 불확실한 것으로 보고 보수적으로
-    warning을 반환한다 (§8.2 "불확실하면 warning").
+    기존 WD 호출 하나를 재사용해 다음을 추가 검출한다.
+    - 카드/포스터/화면/캐릭터 시트처럼 의미 없는 이미지 속 이미지 패턴
+    - reference metadata와 크게 어긋나는 수영복/속옷 출력
+    - 안정적인 non-human / 원본 남성 성향에 대한 보수적 rating 후보
+
+    reference baseline은 `{character_tag} solo`의 태그 메타데이터만 사용하며
+    Danbooru 이미지를 다운로드하거나 저장하지 않는다.
     """
     from app.integrations.image_tagger.hf_wd_tagger import (
         DEFAULT_HF_WD_MODEL,
@@ -189,7 +229,7 @@ def check_identity(
         )
 
     tag_scores = {p.tag: p.confidence for p in predictions}
-    return evaluate_identity(
+    base = evaluate_identity(
         tag_scores,
         character_tag=character_tag,
         primary_hair_color=primary_hair_color,
@@ -197,3 +237,4 @@ def check_identity(
         gender=gender,
         known_character_tags=known_character_tags,
     )
+    return _merge_semantic_result(base, tag_scores, character_tag=character_tag)
