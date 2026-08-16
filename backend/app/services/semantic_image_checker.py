@@ -5,7 +5,7 @@ from typing import Mapping
 
 from app.services.reference_profile_service import CharacterReferenceProfile
 
-SEMANTIC_CHECKER_VERSION = "v1.1"
+SEMANTIC_CHECKER_VERSION = "v1.2"
 
 HARD_LAYOUT_TAGS = frozenset(
     {
@@ -190,12 +190,19 @@ def evaluate_semantic_tags(
                 suggested_rating = 3
                 suggested_confidence = min(reference_profile.boy_ratio, output_girl)
                 reasons.append(f"auto_rating_candidate:3:{suggested_confidence:.2f}")
-        elif (
-            reference_profile.girl_ratio >= REFERENCE_STABLE_RATIO
-            and non_human_output >= GENDER_CONFIDENT
-        ):
-            status = "reject"
-            reasons.append("unexpected_non_human_output")
+        elif reference_profile.girl_ratio >= REFERENCE_STABLE_RATIO:
+            if non_human_output >= GENDER_CONFIDENT:
+                status = "reject"
+                reasons.append("unexpected_non_human_output")
+            elif output_boy >= GENDER_CONFIDENT and output_girl < 0.35:
+                status = "reject"
+                reasons.append("unexpected_male_output")
+            elif output_girl >= GENDER_CONFIDENT and output_boy < 0.35:
+                # A normal female result is the common path. Prefill 3 later but never
+                # auto-complete it, so 5/6 favorites remain visible to the user.
+                suggested_rating = 3
+                suggested_confidence = min(reference_profile.girl_ratio, output_girl)
+                reasons.append(f"auto_rating_candidate:3:{suggested_confidence:.2f}")
 
     return SemanticCheckResult(
         status=status,
