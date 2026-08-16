@@ -17,7 +17,7 @@ from app.services.reference_profile_service import (
 )
 from app.services.semantic_image_checker import evaluate_semantic_tags, needs_outfit_reference
 
-IDENTITY_CHECKER_VERSION = "v3.1"
+IDENTITY_CHECKER_VERSION = "v3.2"
 
 # ── 임계값 (조정 가능) ──────────────────────────────────────────────
 CHARACTER_CONFLICT_THRESHOLD = 0.75    # 다른 캐릭터 태그 고신뢰 판정 → reject
@@ -148,21 +148,34 @@ def _merge_semantic_result(
     character_tag: str,
     gender: str | None,
 ) -> IdentityCheckResult:
+    # Semantic automation is pending-only. Completed characters must never be pulled
+    # back into automatic regeneration/rating merely because a later manual action
+    # happens to run the identity checker again.
+    try:
+        context = get_pending_reference_context(character_tag)
+    except Exception:
+        # Keep the pre-existing identity result usable in isolated tests, migrations,
+        # or transient DB failures instead of turning an optional automation layer into
+        # a generation blocker.
+        context = None
+    if context is None:
+        return base
+
     # The six-figure pending queue must not trigger one Danbooru request per image.
     # Read cheap local priors first. A compact `{tag} solo` metadata profile is fetched
     # only when this specific generated image already looks like swimwear/underwear.
-    context = get_pending_reference_context(character_tag)
-    profile = context.cached_profile if context is not None else None
-    non_human_score = context.non_human_candidate_score if context is not None else 0.0
-
-    if context is not None and profile is None and needs_outfit_reference(tag_scores):
-        profile = get_reference_profile_for_tag(character_tag, build_if_missing=True)
+    profile = context.cached_profile
+    if profile is None and needs_outfit_reference(tag_scores):
+        try:
+            profile = get_reference_profile_for_tag(character_tag, build_if_missing=True)
+        except Exception:
+            profile = None
 
     semantic = evaluate_semantic_tags(
         tag_scores,
         reference_profile=profile,
         gender_prior=gender,
-        non_human_candidate_score=non_human_score,
+        non_human_candidate_score=context.non_human_candidate_score,
     )
 
     rank = {"pass": 0, "warning": 1, "reject": 2}
@@ -197,15 +210,16 @@ def check_identity(
     hf_token: str | None = None,
     hf_wd_model: str | None = None,
 ) -> IdentityCheckResult:
-    """HF WD 태거 결과로 identity + low-cost semantic 검사를 수행한다.
+    """HF WD 태거 결과로 identity + pending-only semantic 검사를 수행한다.
 
     기존 WD 호출 하나를 재사용해 다음을 추가 검출한다.
     - 카드/포스터/화면/캐릭터 시트처럼 의미 없는 이미지 속 이미지 패턴
     - 기존 로컬 성별/non-human 데이터와 생성 결과의 충돌
     - 수영복/속옷 신호가 있을 때만 reference metadata와 기본 복장 비교
 
-    reference baseline은 `{character_tag} solo`의 태그 메타데이터만 사용하며
-    Danbooru 이미지를 다운로드하거나 저장하지 않는다.
+    semantic 자동화는 review가 pending(또는 아직 review row가 없음)인 캐릭터에만
+    적용된다. reference baseline은 `{character_tag} solo`의 태그 메타데이터만
+    사용하며 Danbooru 이미지를 다운로드하거나 저장하지 않는다.
     """
     from app.integrations.image_tagger.hf_wd_tagger import (
         DEFAULT_HF_WD_MODEL,
