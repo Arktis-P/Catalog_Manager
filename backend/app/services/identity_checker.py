@@ -117,7 +117,7 @@ def evaluate_identity(
     if primary_hair_color and primary_hair_color.strip():
         expected_hair_tags.add(_normalize_tag(primary_hair_color))
 
-    # Compatibility-only parameter. Current HF WD tagger predictions expose only
+    # Compatibility-only parameter. Current WD tagger predictions expose only
     # tag/score, not WD category metadata, so DB-wide character tag comparison
     # would create false conflicts and force an expensive full-character scan.
     _ = known_character_tags
@@ -244,23 +244,20 @@ def check_identity(
     hf_token: str | None = None,
     hf_wd_model: str | None = None,
 ) -> IdentityCheckResult:
-    """HF WD 태거 결과로 identity + pending-only semantic 검사를 수행한다.
+    """WD tagger 결과로 identity + pending-only semantic 검사를 수행한다.
 
-    기존 WD 호출 하나를 재사용해 다음을 추가 검출한다.
-    - 카드/포스터/화면/캐릭터 시트처럼 의미 없는 이미지 속 이미지 패턴
-    - 기존 로컬 성별/non-human 데이터와 생성 결과의 충돌
-    - 수영복/속옷 신호가 있을 때만 reference metadata와 기본 복장 비교
-
-    semantic 자동화는 review가 pending(또는 아직 review row가 없음)인 캐릭터에만
-    적용된다. reference baseline은 `{character_tag} solo`의 태그 메타데이터만
-    사용하며 Danbooru 이미지를 다운로드하거나 저장하지 않는다.
+    Existing local ONNX is preferred and requires no HF token. Remote HF is only a
+    fallback when local WD is unavailable. The same WD predictions are reused for
+    identity, gallery/print detection, gender/non-human conflict, and conditional outfit
+    reference checks.
     """
     from app.integrations.image_tagger.hf_wd_tagger import (
         DEFAULT_HF_WD_MODEL,
+        local_wd_available,
         predict_tags_via_hf,
     )
 
-    if not hf_token:
+    if not hf_token and not local_wd_available():
         return IdentityCheckResult(
             status="warning",
             character_confidence=None,
