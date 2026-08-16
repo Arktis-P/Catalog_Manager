@@ -55,6 +55,9 @@ def test_init_db_creates_v2_schema(temp_engine: Engine) -> None:
         "first_post_at",
         "generation_status",
         "generation_attempts",
+        "reference_profile",
+        "reference_profile_version",
+        "reference_profile_updated_at",
     }.issubset(_columns(temp_engine, "global_characters"))
     assert {
         "quality_status",
@@ -150,9 +153,14 @@ def test_legacy_schema_is_migrated_to_v2_columns(temp_engine: Engine) -> None:
     database.init_db()
 
     assert "character_appearance_tag_relevance" in inspect(temp_engine).get_table_names()
-    assert {"generation_status", "generation_attempts", "primary_hair_needs_review"}.issubset(
-        _columns(temp_engine, "global_characters")
-    )
+    assert {
+        "generation_status",
+        "generation_attempts",
+        "primary_hair_needs_review",
+        "reference_profile",
+        "reference_profile_version",
+        "reference_profile_updated_at",
+    }.issubset(_columns(temp_engine, "global_characters"))
     assert {"quality_status", "identity_status", "is_provisional"}.issubset(
         _columns(temp_engine, "global_character_images")
     )
