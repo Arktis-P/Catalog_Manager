@@ -11,10 +11,13 @@ from app.integrations.danbooru.appearance_extractor import (
     STREAK_COLOR_TAGS,
     normalize_gender,
 )
-from app.services.reference_profile_service import get_reference_profile_for_tag
-from app.services.semantic_image_checker import evaluate_semantic_tags
+from app.services.reference_profile_service import (
+    get_pending_reference_context,
+    get_reference_profile_for_tag,
+)
+from app.services.semantic_image_checker import evaluate_semantic_tags, needs_outfit_reference
 
-IDENTITY_CHECKER_VERSION = "v3.0"
+IDENTITY_CHECKER_VERSION = "v3.1"
 
 # ── 임계값 (조정 가능) ──────────────────────────────────────────────
 CHARACTER_CONFLICT_THRESHOLD = 0.75    # 다른 캐릭터 태그 고신뢰 판정 → reject
@@ -143,12 +146,24 @@ def _merge_semantic_result(
     tag_scores: dict[str, float],
     *,
     character_tag: str,
+    gender: str | None,
 ) -> IdentityCheckResult:
-    # Only pending characters get a Danbooru baseline. The helper caches one compact
-    # metadata request and never stores/downloads reference images. Completed reviews
-    # return None immediately, so they do not incur this extra work.
-    profile = get_reference_profile_for_tag(character_tag, build_if_missing=True)
-    semantic = evaluate_semantic_tags(tag_scores, reference_profile=profile)
+    # The six-figure pending queue must not trigger one Danbooru request per image.
+    # Read cheap local priors first. A compact `{tag} solo` metadata profile is fetched
+    # only when this specific generated image already looks like swimwear/underwear.
+    context = get_pending_reference_context(character_tag)
+    profile = context.cached_profile if context is not None else None
+    non_human_score = context.non_human_candidate_score if context is not None else 0.0
+
+    if context is not None and profile is None and needs_outfit_reference(tag_scores):
+        profile = get_reference_profile_for_tag(character_tag, build_if_missing=True)
+
+    semantic = evaluate_semantic_tags(
+        tag_scores,
+        reference_profile=profile,
+        gender_prior=gender,
+        non_human_candidate_score=non_human_score,
+    )
 
     rank = {"pass": 0, "warning": 1, "reject": 2}
     status = base.status
@@ -186,8 +201,8 @@ def check_identity(
 
     기존 WD 호출 하나를 재사용해 다음을 추가 검출한다.
     - 카드/포스터/화면/캐릭터 시트처럼 의미 없는 이미지 속 이미지 패턴
-    - reference metadata와 크게 어긋나는 수영복/속옷 출력
-    - 안정적인 non-human / 원본 남성 성향에 대한 보수적 rating 후보
+    - 기존 로컬 성별/non-human 데이터와 생성 결과의 충돌
+    - 수영복/속옷 신호가 있을 때만 reference metadata와 기본 복장 비교
 
     reference baseline은 `{character_tag} solo`의 태그 메타데이터만 사용하며
     Danbooru 이미지를 다운로드하거나 저장하지 않는다.
@@ -237,4 +252,9 @@ def check_identity(
         gender=gender,
         known_character_tags=known_character_tags,
     )
-    return _merge_semantic_result(base, tag_scores, character_tag=character_tag)
+    return _merge_semantic_result(
+        base,
+        tag_scores,
+        character_tag=character_tag,
+        gender=gender,
+    )
