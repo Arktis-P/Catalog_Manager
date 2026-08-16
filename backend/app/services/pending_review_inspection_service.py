@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -15,15 +15,11 @@ from app.services.character_image_service import run_v2_quality_identity_checks
 from app.services.db_write_queue import commit_db_session
 from app.services.identity_checker import IDENTITY_CHECKER_VERSION
 from app.services.quality_checker import QUALITY_CHECKER_VERSION
-from app.services.reference_profile_service import (
-    REFERENCE_PROFILE_VERSION,
-    cached_reference_profile,
-    get_or_build_reference_profile,
-)
+from app.services.reference_profile_service import REFERENCE_PROFILE_VERSION
 from app.services.settings_service import SettingsService
 from app.services.v2_generation_pipeline import V2GenerationPipeline, V2PipelineResult
 
-PENDING_INSPECTION_VERSION = "v1.1"
+PENDING_INSPECTION_VERSION = "v1.2"
 AUTO_RATING_CONFIDENCE = 0.85
 PREFILL_RATING_CONFIDENCE = 0.72
 DEFAULT_AUDIT_SAMPLE_RATE = 0.10
@@ -58,7 +54,7 @@ class PendingReviewInspectionService:
     Design constraints:
     - completed reviews never enter the query;
     - reference images are never downloaded or saved;
-    - one compact Danbooru metadata profile is cached per pending character;
+    - Danbooru metadata is fetched lazily only for outfit-ambiguous outputs;
     - existing WD/quality infrastructure is reused instead of adding a local model;
     - regeneration is capped per character to prevent storage/API runaway;
     - high-confidence automatic ratings keep a deterministic audit sample pending.
@@ -78,6 +74,26 @@ class PendingReviewInspectionService:
             .subquery()
         )
 
+    @staticmethod
+    def _needs_inspection_filter():
+        """Return true only when the latest image has not completed the current checks.
+
+        A quality reject intentionally skips identity checking, so a current quality
+        reject is already fully inspected even though identity_checker_version is NULL.
+        This prevents 0-star audit samples from re-entering the backfill forever.
+        """
+        return or_(
+            GlobalCharacterImage.quality_checker_version.is_(None),
+            GlobalCharacterImage.quality_checker_version != QUALITY_CHECKER_VERSION,
+            and_(
+                GlobalCharacterImage.quality_status != "reject",
+                or_(
+                    GlobalCharacterImage.identity_checker_version.is_(None),
+                    GlobalCharacterImage.identity_checker_version != IDENTITY_CHECKER_VERSION,
+                ),
+            ),
+        )
+
     def candidates(self, *, limit: int) -> list[tuple[GlobalCharacter, GlobalCharacterImage]]:
         latest = self._latest_image_subquery()
         return (
@@ -94,14 +110,7 @@ class PendingReviewInspectionService:
                     GlobalCharacterReview.review_status == "pending",
                 )
             )
-            .filter(
-                or_(
-                    GlobalCharacterImage.quality_checker_version.is_(None),
-                    GlobalCharacterImage.quality_checker_version != QUALITY_CHECKER_VERSION,
-                    GlobalCharacterImage.identity_checker_version.is_(None),
-                    GlobalCharacterImage.identity_checker_version != IDENTITY_CHECKER_VERSION,
-                )
-            )
+            .filter(self._needs_inspection_filter())
             .order_by(GlobalCharacter.id.asc())
             .limit(max(1, min(limit, 500)))
             .all()
@@ -125,14 +134,7 @@ class PendingReviewInspectionService:
             )
         )
         total = base.count()
-        remaining = base.filter(
-            or_(
-                GlobalCharacterImage.quality_checker_version.is_(None),
-                GlobalCharacterImage.quality_checker_version != QUALITY_CHECKER_VERSION,
-                GlobalCharacterImage.identity_checker_version.is_(None),
-                GlobalCharacterImage.identity_checker_version != IDENTITY_CHECKER_VERSION,
-            )
-        ).count()
+        remaining = base.filter(self._needs_inspection_filter()).count()
         return {
             "inspection_version": PENDING_INSPECTION_VERSION,
             "quality_checker_version": QUALITY_CHECKER_VERSION,
@@ -342,14 +344,6 @@ class PendingReviewInspectionService:
                 if review is not None and review.review_status != "pending":
                     continue
 
-                had_profile = cached_reference_profile(character) is not None
-                profile = get_or_build_reference_profile(self.db, character)
-                if profile is not None and not had_profile:
-                    summary.profile_built += 1
-                    # check_identity may run through a short-lived SessionLocal, so make
-                    # the compact profile visible before the WD request.
-                    commit_db_session(self.db)
-
                 checked = self._inspect_existing(character, image)
                 summary.inspected += 1
                 commit_db_session(self.db)
@@ -393,7 +387,7 @@ class PendingReviewInspectionService:
                         character,
                         rating=3,
                         confidence=confidence,
-                        reason="male_reference_feminized_output",
+                        reason="confident_female_output",
                     ):
                         summary.prefilled_pending += 1
                     summary.suggested_only += 1
@@ -404,7 +398,7 @@ class PendingReviewInspectionService:
                             rating=rating,
                             confidence=confidence,
                             audit_sample_rate=audit_sample_rate,
-                            reason="reference_and_output_agree",
+                            reason="local_prior_and_output_agree",
                         )
                         if outcome == "completed":
                             summary.auto_completed += 1
