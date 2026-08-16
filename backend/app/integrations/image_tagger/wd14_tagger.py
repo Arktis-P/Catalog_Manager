@@ -1,11 +1,14 @@
 """Local ONNX WaifuDiffusion tagger using an already-downloaded model tree.
 
 Prefers an existing checkout under data/models/wd-tagger/. Never downloads models.
+The singleton session and serialized inference keep long pending-review runs from
+loading duplicate 400MB-class sessions or multiplying CPU pressure across checker threads.
 """
 
 from __future__ import annotations
 
 import csv
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -139,6 +142,17 @@ class LocalWdTagger:
 
 
 _tagger: LocalWdTagger | None = None
+_tagger_init_lock = threading.Lock()
+_inference_lock = threading.Lock()
+
+
+def _shared_tagger() -> LocalWdTagger:
+    global _tagger
+    if _tagger is None:
+        with _tagger_init_lock:
+            if _tagger is None:
+                _tagger = LocalWdTagger()
+    return _tagger
 
 
 def predict_tags_via_local(
@@ -147,17 +161,15 @@ def predict_tags_via_local(
     threshold: float = 0.35,
     model_dir: Path | None = None,
 ) -> tuple[list[TagPrediction], str | None]:
-    global _tagger
     try:
-        if model_dir is not None:
-            tagger = LocalWdTagger(model_dir)
-        else:
-            if _tagger is None:
-                _tagger = LocalWdTagger()
-            tagger = _tagger
+        tagger = LocalWdTagger(model_dir) if model_dir is not None else _shared_tagger()
         if not tagger.available:
             return [], "local_wd_unavailable"
-        return tagger.predict(image_path, threshold=threshold), None
+        # Normal V2 generation can submit several checker workers at once. Sharing one
+        # large ONNX session is intentional; serialize run/load to avoid duplicate model
+        # loads and CPU spikes on a laptop. Pending backfill is already sequential.
+        with _inference_lock:
+            return tagger.predict(image_path, threshold=threshold), None
     except LocalWdTaggerError as exc:
         return [], str(exc)
     except Exception as exc:
