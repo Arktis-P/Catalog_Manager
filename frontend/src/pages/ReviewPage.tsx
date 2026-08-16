@@ -4,6 +4,7 @@ import { AppearanceReviewPanel } from "../components/review/AppearanceReviewPane
 import { CatalogReviewPanel } from "../components/review/CatalogReviewPanel";
 import { CharacterGroupReviewPanel } from "../components/review/CharacterGroupReviewPanel";
 import { GlobalCatalogReviewPanel } from "../components/review/GlobalCatalogReviewPanel";
+import { PendingInspectionPanel } from "../components/review/PendingInspectionPanel";
 import { ReviewRatingGuide } from "../components/review/ReviewRatingGuide";
 import { V2ReviewPanel } from "../components/review/V2ReviewPanel";
 
@@ -118,6 +119,7 @@ export function ReviewPage() {
       </header>
 
       {initialMode !== "v2" && initialMode !== "links" ? <ReviewRatingGuide /> : null}
+      {initialMode === "v2" ? <PendingInspectionPanel /> : null}
 
       {initialMode === "catalog" ? (
         catalogScope === "series" ? (
