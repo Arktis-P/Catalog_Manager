@@ -46,6 +46,12 @@ class GlobalCharacter(Base):
     prompt_variant_attempts: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Pending 자동 검수용 compact baseline. Danbooru 원본/썸네일은 저장하지 않고
+    # `{character_tag} solo`의 태그 통계만 작은 JSON으로 보관한다.
+    reference_profile: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reference_profile_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    reference_profile_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # 의상 차이 등으로 태그가 분리된 동일 캐릭터를 묶기 위한 자기참조 부모 링크.
     # Series의 parent_series_id와 동일하게 1단계 깊이만 허용한다 (부모는 자식을 가질 수 없음).
     parent_character_id: Mapped[int | None] = mapped_column(
