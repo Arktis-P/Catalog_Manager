@@ -26,20 +26,40 @@ function statusShortLabel(status: string): string {
   }
 }
 
+function isPendingInspection(job: V2GenerationJobState): boolean {
+  return job.phase.startsWith("pending_inspection");
+}
+
+function inspectionMetric(job: V2GenerationJobState, key: string): number {
+  const value = job.prompt_variant_attempts[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 export function V2GenerationProgressPanel({ job, onDismiss, onCancel, onPause, onResume }: V2GenerationProgressPanelProps) {
   const percent = getProgressPercent(job);
   const isActive = job.status === "running" || job.status === "paused";
   const isDone = job.status === "completed" || job.status === "failed" || job.status === "cancelled";
+  const inspection = isPendingInspection(job);
 
   const metaParts: string[] = [];
   if (job.total > 0) metaParts.push(`${job.current}/${job.total}`);
-  metaParts.push(`완료 ${job.completed} · 실패 ${job.failed}`);
+  if (inspection) {
+    metaParts.push(
+      `검사 ${inspectionMetric(job, "inspected")} · 재생성 ${inspectionMetric(job, "regenerated")} · 자동완료 ${inspectionMetric(job, "auto_completed")}`,
+    );
+    const errors = inspectionMetric(job, "errors");
+    if (errors > 0) metaParts.push(`오류 ${errors}`);
+  } else {
+    metaParts.push(`완료 ${job.completed} · 실패 ${job.failed}`);
+  }
 
   const isRegeneration = job.kind === "regenerate";
-  const displayName = isRegeneration
-    ? `V2 재생성 · ${job.character_tag || job.current_character_tag || "캐릭터"}`
-    : job.current_character_tag || "V2 이미지 생성";
-  const kindLabel = isRegeneration ? "V2 재생성" : "V2 생성";
+  const displayName = inspection
+    ? job.current_character_tag || "Pending 자동 검사"
+    : isRegeneration
+      ? `V2 재생성 · ${job.character_tag || job.current_character_tag || "캐릭터"}`
+      : job.current_character_tag || "V2 이미지 생성";
+  const kindLabel = inspection ? "자동 검사" : isRegeneration ? "V2 재생성" : "V2 생성";
 
   return (
     <div
@@ -56,16 +76,16 @@ export function V2GenerationProgressPanel({ job, onDismiss, onCancel, onPause, o
         <span className="badge badge-compact">{statusShortLabel(job.status)}</span>
         {metaParts.length > 0 ? <span className="task-meta">{metaParts.join(" · ")}</span> : null}
         <div className="task-row1-spacer" />
-        {job.status === "running" && onPause ? (
+        {!inspection && job.status === "running" && onPause ? (
           <button className="btn btn-small btn-ghost task-btn" type="button" aria-label="일시정지" title="일시정지" onClick={onPause}>⏸</button>
         ) : null}
-        {job.status === "paused" && onResume ? (
+        {!inspection && job.status === "paused" && onResume ? (
           <button className="btn btn-small btn-ghost task-btn" type="button" aria-label="재개" title="재개" onClick={onResume}>▶</button>
         ) : null}
         {isDone && onDismiss ? (
           <button className="btn btn-small btn-ghost task-btn" type="button" aria-label="닫기" onClick={onDismiss}>×</button>
         ) : null}
-        {!isDone && onCancel ? (
+        {!inspection && !isDone && onCancel ? (
           <button className="btn btn-small btn-ghost task-btn" type="button" aria-label="취소" onClick={onCancel}>×</button>
         ) : null}
       </div>
