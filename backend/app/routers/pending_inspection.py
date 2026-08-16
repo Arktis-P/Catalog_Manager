@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.pending_review_inspection_service import PendingReviewInspectionService
+from app.services.settings_service import SettingsService
 
 router = APIRouter(prefix="/review/v2/pending-inspection", tags=["review-v2-inspection"])
 
@@ -30,6 +31,15 @@ def run_pending_inspection(
     Completed reviews are never selected. Failed images can be regenerated through the
     existing V2 pipeline, with a hard cap to prevent runaway API/storage use.
     """
+    if not SettingsService(db).get_hf_token():
+        # Without WD output the new semantic rules cannot run. Refuse the batch instead
+        # of stamping every image as "checked" with tagger_unavailable and silently
+        # preventing a later real backfill.
+        raise HTTPException(
+            status_code=409,
+            detail="Pending 자동 검사는 Settings의 Hugging Face Token이 필요합니다.",
+        )
+
     summary = PendingReviewInspectionService(db).inspect_batch(
         limit=limit,
         auto_regenerate=auto_regenerate,
