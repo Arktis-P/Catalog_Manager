@@ -111,6 +111,16 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
     [visibleV2Jobs],
   );
 
+  const localPendingInspectionActive = useMemo(
+    () =>
+      visibleV2Jobs.some(
+        (job) =>
+          isLocalPendingInspectionJob(job) &&
+          (job.status === "queued" || job.status === "running" || job.status === "paused"),
+      ),
+    [visibleV2Jobs],
+  );
+
   useEffect(() => {
     void ensureNotificationPermission();
   }, []);
@@ -149,6 +159,17 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
     void refreshJobs();
     void refreshV2Jobs();
   }, [refreshJobs, refreshV2Jobs]);
+
+  // Pending 자동 검사는 브라우저 로컬 작업 카드지만, reject 시 재생성 작업은
+  // 서버 V2 job manager에 생성된다. 검사 중에만 job 목록을 가볍게 새로고침해
+  // 해당 캐릭터 재생성을 기존 전역 작업 목록에 1초 이내로 발견한다.
+  useEffect(() => {
+    if (!localPendingInspectionActive) return;
+    const poll = () => void refreshV2Jobs();
+    poll();
+    const timer = window.setInterval(poll, 1000);
+    return () => window.clearInterval(timer);
+  }, [localPendingInspectionActive, refreshV2Jobs]);
 
   // "모든 작업 완료 시 알림" 모드: running → idle 전환 감지
   useEffect(() => {
