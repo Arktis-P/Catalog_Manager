@@ -10,12 +10,14 @@
 
 - 로컬 비전 모델을 추가하지 않는다.
 - 이미 사용 중인 Hugging Face WD 태거의 1회 예측 결과를 semantic 검사에도 재사용한다.
-- Danbooru 참조 이미지를 다운로드하거나 저장하지 않는다.
-- `{character_tag} solo` 최대 60개 포스트의 태그 메타데이터만 1회 조회하고 작은 JSON profile로 캐시한다.
-- 참조 profile은 자동 완료된 캐릭터에서 즉시 제거한다.
+- **일반적인 pending 이미지는 Danbooru를 추가 조회하지 않는다.** 이미 DB에 저장된 gender/non-human 신호와 WD 결과만으로 먼저 판정한다.
+- 생성 결과에서 수영복/속옷 신호가 강하게 나온 경우처럼 기본 복장 비교가 실제로 필요한 항목에 대해서만 `{character_tag} solo` 메타데이터를 최대 60개 포스트까지 1회 조회한다.
+- Danbooru 참조 이미지는 다운로드하거나 저장하지 않는다. 포스트의 태그 메타데이터만 사용한다.
+- 필요해서 만든 reference profile도 작은 JSON 통계만 캐시하며, 자동 완료된 캐릭터에서는 즉시 제거한다.
 - 자동 재생성은 기본 최대 2회로 제한한다.
 - 재생성 후 이전 reject 이미지는 cover/provisional이 아닌 경우 삭제하여 저장공간 증가를 제한한다.
 - UI는 10개 단위 배치로 순차 처리한다. 같은 배치에서 진행이 멈추면 무한 재시도하지 않고 자동 중단한다.
+- 일반 V2 생성/재생성 작업이 진행 중일 때는 Pending 자동 검사를 시작하지 않아 NAIA/SQLite 작업이 서로 경쟁하지 않게 한다.
 
 ## 검사 흐름
 
@@ -24,7 +26,8 @@ pending + 기존 이미지 1장
   -> 기존 quality 검사
   -> 기존 HF WD identity 검사 1회
      -> 동일 WD 결과로 semantic 검사
-     -> 필요할 때만 compact Danbooru reference profile 비교
+        -> 기존 DB gender/non-human 신호 우선 사용
+        -> 수영복/속옷 신호가 강할 때만 compact Danbooru outfit profile 조회/비교
   -> pass/warning: pending 유지
   -> reject: 기존 V2 재생성 파이프라인으로 최대 2회 재생성
        -> 생성될 때마다 quality -> identity -> semantic 재검사
@@ -39,11 +42,13 @@ pending + 기존 이미지 1장
 - `multiple_views`, `character_sheet`, `reference_sheet`, `collage` 등 이미지 속 이미지/시트형 출력
 - 카드, 포스터, 화면, 인쇄 의상 신호가 여러 개 겹치거나 다중 인물 신호와 같이 검출되는 경우
 - reference profile에서 수영복/속옷 비중이 매우 낮은데 생성 이미지에서 해당 복장이 높은 confidence로 검출되는 경우
-- 안정적인 여성 reference인데 생성 결과가 비인간으로 강하게 검출되는 경우
+- 기존 gender가 여성인데 생성 결과가 강하게 남성/비인간으로 판정되는 경우
 
 단일 `print_shirt` 같은 약한 신호 하나만으로는 자동 reject하지 않는다.
 
 ## Reference profile
+
+Reference profile은 모든 캐릭터에 미리 만드는 데이터가 아니다. **생성 이미지 자체가 수영복/속옷으로 보여 기본 복장 비교가 필요한 pending 캐릭터에서만 지연 생성한다.**
 
 영구 저장하는 것은 이미지가 아니라 다음 통계뿐이다.
 
@@ -59,9 +64,11 @@ reference sample이 12개 미만이면 outfit/gender 자동 판단에는 사용�
 
 ## 자동 rating 정책
 
-- `-1`: reference가 안정적으로 비인간일 때 후보
-- `1`: 원본 reference가 안정적으로 남성이고 생성 결과도 남성일 때 후보
-- `3`: 원본 reference는 남성이지만 생성 결과가 여성으로 안정적으로 바뀐 경우. **자동 완료하지 않고 pending rating만 3으로 미리 입력**한다.
+- `-1`: 기존 non-human 데이터와 생성 결과가 충분히 일치하거나, 필요한 경우 reference가 안정적으로 비인간일 때 후보
+- `1`: 원본 gender가 남성이고 생성 결과도 높은 confidence로 남성일 때 후보
+- `3`: 두 경우 모두 **자동 완료하지 않고 pending rating만 3으로 미리 입력**한다.
+  - 원본 남성 캐릭터가 여성으로 안정적으로 생성된 경우
+  - 원본 여성 캐릭터가 정상적으로 여성으로 생성된 일반적인 경우
 - `0`: 자동 재생성 제한까지 모두 실패한 경우
 
 `-1`, `1`은 confidence 0.85 이상에서만 자동 완료한다. `0`은 재생성 제한 소진이 명확한 근거이므로 confidence 1.0으로 취급한다.
@@ -93,6 +100,8 @@ Review -> V2 검수 상단의 `Pending 자동 검사` 패널에서 실행한다.
 - `auto_complete` 기본 true
 - `audit_sample_rate` 기본 0.10
 - `cleanup_rejected` 기본 true
+
+HF Token이 없거나 기존 V2 생성/재생성 작업이 진행 중이면 자동 검사를 시작하지 않고 409로 중단한다.
 
 ## 후속 보정
 
