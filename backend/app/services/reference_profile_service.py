@@ -199,12 +199,14 @@ def get_or_build_reference_profile(
     character: GlobalCharacter,
     *,
     force: bool = False,
+    allow_network: bool = False,
     client_factory: Callable[[], DanbooruClient] = DanbooruClient,
 ) -> CharacterReferenceProfile | None:
     """Return a compact cached profile for a pending character.
 
-    Completed reviews are deliberately skipped. On a cache miss this performs one
-    metadata request only; no reference image is downloaded or persisted.
+    The default is cache-only. Callers must explicitly set `allow_network=True` (or
+    `force=True`) before a cache miss may perform the one metadata request. This keeps
+    a large pending backfill from accidentally issuing one Danbooru call per character.
     """
     if not is_pending_character(db, character.id):
         return None
@@ -212,6 +214,8 @@ def get_or_build_reference_profile(
         cached = cached_reference_profile(character)
         if cached is not None:
             return cached
+    if not allow_network and not force:
+        return None
 
     try:
         profile = build_reference_profile(client_factory(), character.character_tag)
@@ -254,7 +258,7 @@ def get_reference_profile_for_tag(
     *,
     build_if_missing: bool = True,
 ) -> CharacterReferenceProfile | None:
-    """Small bridge for image checkers that do not own the caller's DB session."""
+    """Bridge for image checkers; network is explicit on cache misses."""
     from app.database import SessionLocal
 
     with SessionLocal() as db:
@@ -268,7 +272,11 @@ def get_reference_profile_for_tag(
         cached = cached_reference_profile(character)
         if cached is not None or not build_if_missing:
             return cached
-        profile = get_or_build_reference_profile(db, character)
+        profile = get_or_build_reference_profile(
+            db,
+            character,
+            allow_network=True,
+        )
         if profile is not None:
             db.commit()
         return profile
