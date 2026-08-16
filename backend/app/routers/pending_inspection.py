@@ -6,8 +6,16 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.services.pending_review_inspection_service import PendingReviewInspectionService
 from app.services.settings_service import SettingsService
+from app.services.v2_generation_job_manager import v2_generation_job_manager
 
 router = APIRouter(prefix="/review/v2/pending-inspection", tags=["review-v2-inspection"])
+
+
+def _active_v2_generation_exists() -> bool:
+    return any(
+        job.status in {"queued", "running", "paused"}
+        for job in v2_generation_job_manager.list_visible_jobs(limit=100)
+    )
 
 
 @router.get("/stats")
@@ -38,6 +46,14 @@ def run_pending_inspection(
         raise HTTPException(
             status_code=409,
             detail="Pending 자동 검사는 Settings의 Hugging Face Token이 필요합니다.",
+        )
+    if _active_v2_generation_exists():
+        # The inspector may call NAIA for rejected items. Never compete with the normal
+        # V2 generation queue: keeping a single producer is both cheaper and safer for
+        # SQLite/NAIA on a laptop.
+        raise HTTPException(
+            status_code=409,
+            detail="V2 생성/재생성 작업이 진행 중입니다. 완료 후 Pending 자동 검사를 실행하세요.",
         )
 
     summary = PendingReviewInspectionService(db).inspect_batch(
