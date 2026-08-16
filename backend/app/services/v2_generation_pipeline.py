@@ -30,6 +30,13 @@ from app.services.identity_checker import (
     check_identity,
     is_tagger_failure,
 )
+from app.services.inspection_repair import (
+    STAGE_IDENTITY_EYE,
+    STAGE_IDENTITY_HAIR,
+    STAGE_IDENTITY_MULTICOLOR,
+    is_semantic_repair_reject,
+    needs_identity_repair,
+)
 from app.services.prompt_service import refresh_global_character_base_prompt, v2_multicolor_prompt_candidates
 from app.services.quality_checker import QUALITY_CHECKER_VERSION, check_quality
 from app.services.settings_service import SettingsService
@@ -40,6 +47,9 @@ CancelCheck = Callable[[], bool]
 SEMANTIC_REGEN_REASON_PREFIXES = (
     "embedded_gallery:",
     "goods_or_screen_character_gallery",
+    "printed_character_gallery",
+    "poster_or_collage_with_text",
+    "weak_print_gallery",
     "atypical_swimwear:",
     "atypical_underwear:",
     "unexpected_non_human_output",
@@ -118,8 +128,9 @@ def _replace_prompt_tags(
 def _is_semantic_generation_reject(identity: IdentityCheckResult | None) -> bool:
     if identity is None or identity.status != "reject":
         return False
-    return any(
+    return is_semantic_repair_reject(identity.reasons) or any(
         str(reason).startswith(SEMANTIC_REGEN_REASON_PREFIXES)
+        or str(reason) in SEMANTIC_REGEN_REASON_PREFIXES
         for reason in identity.reasons
     )
 
@@ -318,8 +329,15 @@ class V2GenerationPipeline:
         self,
         state: V2AsyncCharacterState,
         image_id: int,
+        *,
+        external_stage_control: bool = False,
     ) -> V2AsyncCheckResult:
-        """Check one image and decide whether its state needs another generation task."""
+        """Check one image and decide whether its state needs another generation task.
+
+        When ``external_stage_control`` is True (pending-inspection stage loop), this
+        method does not advance identity prompt revisions. Same-prompt quality/semantic
+        retries remain allowed; identity/semantic stage progression is owned outside.
+        """
         character = self.db.get(GlobalCharacter, state.character_id)
         image = self.db.get(GlobalCharacterImage, image_id)
         if character is None or image is None:
@@ -342,6 +360,9 @@ class V2GenerationPipeline:
         def retry_quality_or_advance() -> V2AsyncCheckResult:
             if state.attempt_in_variant < state.retry_max:
                 return V2AsyncCheckResult(state, None, True)
+            if external_stage_control:
+                result = self._async_final_result(character, image, "generation_failed")
+                return V2AsyncCheckResult(state, result, False)
             return advance_revision()
 
         if image.quality_status == "reject":
@@ -349,7 +370,11 @@ class V2GenerationPipeline:
             commit_db_session(self.db)
             return retry_quality_or_advance()
 
-        if identity is not None and identity.status != "reject":
+        if (
+            identity is not None
+            and identity.status != "reject"
+            and not needs_identity_repair(identity.reasons)
+        ):
             if state.revision_index >= 0:
                 variant = state.current_variant
                 character.previous_base_prompt = character.base_prompt
@@ -362,6 +387,34 @@ class V2GenerationPipeline:
 
         character.last_failure_reason = self._failure_reason(image, identity)
         commit_db_session(self.db)
+
+        if external_stage_control:
+            # Outer pending-inspection loop owns identity/semantic stage progression.
+            if _is_semantic_generation_reject(identity) and state.attempt_in_variant < state.retry_max:
+                return V2AsyncCheckResult(state, None, True)
+            result = self._async_final_result(character, image, "generation_failed")
+            return V2AsyncCheckResult(state, result, False)
+
+        # Identity/appearance repairs always win over semantic same-prompt retries.
+        # Otherwise atypical_swimwear/gallery rejects permanently skip hair/multicolor/eye.
+        if identity is not None and needs_identity_repair(identity.reasons):
+            cutoff = str(self._public_settings()["v2_recent_character_cutoff"])
+            if state.revision_index < 0 and self._is_recent(character, cutoff):
+                result = self._async_final_result(character, image, "likely_untrained")
+                return V2AsyncCheckResult(state, result, False)
+            if state.revision_index < 0:
+                state.revision_variants = tuple(
+                    self._revision_variants(character, state.initial_variant, identity)
+                )
+                if not state.revision_variants:
+                    result = self._async_final_result(character, image, "generation_failed")
+                    return V2AsyncCheckResult(state, result, False)
+                state.revision_index = 0
+                state.current_variant = state.revision_variants[0]
+                state.attempt_in_variant = 0
+                return V2AsyncCheckResult(state, None, True)
+            return advance_revision()
+
         if _is_semantic_generation_reject(identity):
             # Collage/goods/outfit/gender-output failures are stochastic generation
             # failures, not evidence that hair/eye prompt tags are wrong. Retry the same
@@ -390,6 +443,47 @@ class V2GenerationPipeline:
             state.attempt_in_variant = 0
             return V2AsyncCheckResult(state, None, True)
         return advance_revision()
+
+    def build_stage_variant(
+        self,
+        character: GlobalCharacter,
+        *,
+        stage: str,
+        identity: IdentityCheckResult | None = None,
+    ) -> PromptVariant | None:
+        """Build a single prompt variant for an explicit pending-inspection repair stage."""
+        multicolor = tuple(v2_multicolor_prompt_candidates(self.db, character.id))
+        initial = PromptVariant(
+            base_prompt=character.base_prompt or "",
+            primary_hair_color=character.primary_hair_color,
+            multicolor_tags=multicolor,
+        )
+        if identity is None:
+            identity = IdentityCheckResult(
+                status="warning",
+                character_confidence=None,
+                hair_color_confidence=None,
+                conflicting_character_tag=None,
+                conflicting_character_confidence=None,
+                reasons=[],
+                suggested_multicolor_tags=[],
+            )
+        variants = self._revision_variants(character, initial, identity)
+        if stage == STAGE_IDENTITY_HAIR:
+            return next((item for item in variants if item.revision_level == 1), None)
+        if stage == STAGE_IDENTITY_MULTICOLOR:
+            return next((item for item in variants if item.revision_level == 2), None)
+        if stage == STAGE_IDENTITY_EYE:
+            return next((item for item in variants if item.revision_level == 3), None)
+        return None
+
+    def apply_variant_to_character(self, character: GlobalCharacter, variant: PromptVariant) -> None:
+        character.previous_base_prompt = character.base_prompt
+        character.base_prompt = variant.base_prompt
+        character.primary_hair_color = variant.primary_hair_color
+        character.prompt_revision_reason = variant.revision_reason
+        character.prompt_revision_level = variant.revision_level
+        commit_db_session(self.db)
 
     def _check_image(
         self,

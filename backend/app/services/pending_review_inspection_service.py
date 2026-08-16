@@ -13,18 +13,35 @@ from app.models.global_character_image import GlobalCharacterImage
 from app.models.global_character_review import GlobalCharacterReview
 from app.services.character_image_service import run_v2_quality_identity_checks
 from app.services.db_write_queue import commit_db_session
-from app.services.identity_checker import IDENTITY_CHECKER_VERSION, is_tagger_failure
+from app.services.identity_checker import IDENTITY_CHECKER_VERSION, IdentityCheckResult, is_tagger_failure
+from app.services.inspection_repair import (
+    STAGE_AUTO_ZERO,
+    STAGE_DONE,
+    STAGE_IDENTITY_EYE,
+    STAGE_IDENTITY_HAIR,
+    STAGE_IDENTITY_MULTICOLOR,
+    STAGE_QUALITY,
+    STAGE_SEMANTIC_GALLERY,
+    STAGE_SEMANTIC_OUTFIT,
+    RepairContext,
+    decide_repair_stage,
+    identity_insufficient,
+    needs_identity_repair,
+)
 from app.services.quality_checker import QUALITY_CHECKER_VERSION
 from app.services.reference_profile_service import REFERENCE_PROFILE_VERSION
 from app.services.settings_service import SettingsService
 from app.services.v2_generation_job_manager import v2_generation_job_manager
 from app.services.v2_generation_pipeline import V2GenerationPipeline, V2PipelineResult
 
-PENDING_INSPECTION_VERSION = "v1.2"
+PENDING_INSPECTION_VERSION = "v1.3"
 AUTO_RATING_CONFIDENCE = 0.85
 PREFILL_RATING_CONFIDENCE = 0.72
 DEFAULT_AUDIT_SAMPLE_RATE = 0.10
 DEFAULT_MAX_REGENERATIONS = 2
+# Identity ladder (hair/multicolor/eye) plus up to two semantic passes needs headroom
+# beyond the historical per-character regeneration default of 2.
+MAX_STAGE_REGENERATIONS = 6
 MAX_TRACKED_TEST_CHARACTERS = 2000
 MAX_RESET_CHARACTERS = 1000
 
@@ -58,6 +75,8 @@ class PendingInspectionSummary:
     reference_failed: int = 0
     regeneration_requested: int = 0
     skipped_current_version: int = 0
+    # Per-character repair diagnostics for page tests / operator triage.
+    character_diagnostics: list[dict[str, object]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -359,6 +378,9 @@ class PendingReviewInspectionService:
         character: GlobalCharacter,
         *,
         max_regenerations: int,
+        external_stage_control: bool = False,
+        repair_stage: str | None = None,
+        identity_snapshot: IdentityCheckResult | None = None,
     ) -> tuple[V2PipelineResult | None, int]:
         attempts = max(1, max_regenerations)
         tracked_job = v2_generation_job_manager.start_inspection_regeneration(
@@ -370,6 +392,19 @@ class PendingReviewInspectionService:
             raise RuntimeError(f"{character.character_tag}: 재생성 작업이 이미 진행 중입니다.")
 
         pipeline = V2GenerationPipeline(self.db)
+        if repair_stage in {
+            STAGE_IDENTITY_HAIR,
+            STAGE_IDENTITY_MULTICOLOR,
+            STAGE_IDENTITY_EYE,
+        }:
+            variant = pipeline.build_stage_variant(
+                character,
+                stage=repair_stage,
+                identity=identity_snapshot,
+            )
+            if variant is not None:
+                pipeline.apply_variant_to_character(character, variant)
+
         state = pipeline.prepare_async_character(character.id)
         generated = 0
         try:
@@ -404,7 +439,11 @@ class PendingReviewInspectionService:
                 v2_generation_job_manager.update_inspection_regeneration(
                     tracked_job.job_id,
                     phase="generating",
-                    message=f"자동 검사 재생성 · {character.character_tag} · {attempt}/{attempts}",
+                    message=(
+                        f"자동 검사 재생성 · {character.character_tag}"
+                        f"{f' · {repair_stage}' if repair_stage else ''}"
+                        f" · {attempt}/{attempts}"
+                    ),
                 )
                 image_id = pipeline.generate_async_attempt(
                     state,
@@ -419,7 +458,11 @@ class PendingReviewInspectionService:
                     generated=generated,
                     message=f"재생성 이미지 검사 중 · {character.character_tag} · {generated}/{attempts}",
                 )
-                checked = pipeline.check_async_attempt(state, image_id)
+                checked = pipeline.check_async_attempt(
+                    state,
+                    image_id,
+                    external_stage_control=external_stage_control,
+                )
                 image = self.db.get(GlobalCharacterImage, image_id)
                 self.db.refresh(character)
                 v2_generation_job_manager.update_inspection_regeneration(
@@ -482,6 +525,158 @@ class PendingReviewInspectionService:
                 failure_reason=str(exc),
             )
             raise
+
+    def _latest_image_for(self, character_id: int) -> GlobalCharacterImage | None:
+        return (
+            self.db.query(GlobalCharacterImage)
+            .filter(GlobalCharacterImage.global_character_id == character_id)
+            .order_by(GlobalCharacterImage.id.desc())
+            .first()
+        )
+
+    def _image_count_for(self, character_id: int) -> int:
+        return (
+            self.db.query(func.count(GlobalCharacterImage.id))
+            .filter(GlobalCharacterImage.global_character_id == character_id)
+            .scalar()
+            or 0
+        )
+
+    @staticmethod
+    def _identity_snapshot_from_image(image: GlobalCharacterImage) -> IdentityCheckResult:
+        reasons = PendingReviewInspectionService._json_reason_list(image.identity_reasons)
+        suggested = PendingReviewInspectionService._json_reason_list(image.suggested_multicolor_tags)
+        return IdentityCheckResult(
+            status=image.identity_status or "warning",
+            character_confidence=image.character_confidence,
+            hair_color_confidence=image.hair_color_confidence,
+            conflicting_character_tag=image.conflicting_character_tag,
+            conflicting_character_confidence=image.conflicting_character_confidence,
+            reasons=reasons,
+            suggested_multicolor_tags=suggested,
+        )
+
+    def _repair_with_stages(
+        self,
+        character: GlobalCharacter,
+        image: GlobalCharacterImage,
+        *,
+        auto_regenerate: bool,
+        max_regenerations: int,
+        cleanup_rejected: bool,
+        summary: PendingInspectionSummary,
+    ) -> tuple[GlobalCharacterImage, RepairContext, bool]:
+        """Identity-first repair loop with explicit reinspection of each new latest image."""
+        context = RepairContext(
+            latest_image_id=image.id,
+            image_count=self._image_count_for(character.id),
+        )
+        current = image
+        stage_budget = max(max_regenerations, MAX_STAGE_REGENERATIONS)
+        auto_zero = False
+
+        while True:
+            reasons = self._json_reason_list(current.identity_reasons)
+            context.latest_image_id = current.id
+            context.image_count = self._image_count_for(character.id)
+            context.reject_reason = reasons[0] if reasons else None
+            if is_tagger_failure(reasons):
+                context.final_action = "manual"
+                return current, context, False
+
+            stage = decide_repair_stage(
+                gender=character.gender,
+                quality_status=current.quality_status,
+                identity_status=current.identity_status,
+                reasons=reasons,
+                context=context,
+            )
+
+            if stage == STAGE_DONE:
+                context.final_action = "pass"
+                context.identity_ok = True
+                return current, context, False
+
+            if stage == STAGE_AUTO_ZERO:
+                context.final_action = "0성"
+                context.mark(STAGE_AUTO_ZERO)
+                return current, context, True
+
+            if not auto_regenerate:
+                context.final_action = "manual"
+                return current, context, False
+
+            if context.regeneration_requested >= stage_budget:
+                context.final_action = "0성"
+                return current, context, True
+
+            # Identity stages generate once; semantic/quality may use the configured cap
+            # for same-prompt stochastic retries inside the generation job.
+            per_job_attempts = (
+                max(1, max_regenerations)
+                if stage in {STAGE_SEMANTIC_OUTFIT, STAGE_SEMANTIC_GALLERY, STAGE_QUALITY}
+                else 1
+            )
+            context.mark(stage)
+            summary.regeneration_requested += 1
+            context.regeneration_requested += 1
+            identity_snapshot = self._identity_snapshot_from_image(current)
+            result, generated = self._regenerate_capped(
+                character,
+                max_regenerations=per_job_attempts,
+                external_stage_control=True,
+                repair_stage=stage,
+                identity_snapshot=identity_snapshot,
+            )
+            summary.characters_regenerated += 1
+            summary.regeneration_images += generated
+            if generated:
+                context.regeneration_completed += 1
+
+            latest = self._latest_image_for(character.id)
+            if latest is None:
+                context.final_action = "0성"
+                return current, context, True
+
+            # New latest must be inspected even when the generation job already stamped
+            # checker versions — force a fresh pass when the pipeline skipped identity
+            # (quality reject) or left an older stamp somehow.
+            if (
+                latest.id != current.id
+                or latest.identity_checker_version != IDENTITY_CHECKER_VERSION
+                or (
+                    latest.quality_status != "reject"
+                    and latest.identity_status is None
+                )
+            ):
+                if latest.quality_checker_version != QUALITY_CHECKER_VERSION or (
+                    latest.quality_status != "reject"
+                    and latest.identity_checker_version != IDENTITY_CHECKER_VERSION
+                ):
+                    latest = self._inspect_existing(character, latest)
+                context.reinspection_completed += 1
+                summary.inspected += 1
+                self._record_inspection_diagnostics(summary, latest)
+
+            if cleanup_rejected:
+                summary.rejected_files_removed += self._cleanup_superseded_rejects(
+                    character.id,
+                    keep_image_id=latest.id,
+                )
+
+            current = latest
+            commit_db_session(self.db)
+
+            if result is not None and result.generation_status == "generated":
+                # Pipeline reported success; still re-evaluate stages in case a warning
+                # identity repair remains (should be rare with external_stage_control).
+                continue
+
+            # generation_failed / cancelled / exhausted — let decide_repair_stage choose
+            # the next identity/semantic stage or auto-zero on the reinpected latest.
+            continue
+
+        return current, context, auto_zero
 
     def _cleanup_superseded_rejects(self, character_id: int, *, keep_image_id: int) -> int:
         """Keep one latest result and remove older unselected rejects to cap storage growth."""
@@ -659,42 +854,62 @@ class PendingReviewInspectionService:
                 self._record_inspection_diagnostics(summary, checked)
                 commit_db_session(self.db)
 
+                was_reject = checked.quality_status == "reject" or checked.identity_status == "reject"
+                reasons = self._json_reason_list(checked.identity_reasons)
+                needs_repair = (
+                    was_reject
+                    or needs_identity_repair(reasons)
+                    or identity_insufficient(reasons)
+                )
+
                 final_image = checked
                 regeneration_exhausted = False
-                was_reject = checked.quality_status == "reject" or checked.identity_status == "reject"
-                if was_reject:
-                    summary.rejected += 1
-                    if auto_regenerate:
-                        summary.regeneration_requested += 1
-                        result, generated = self._regenerate_capped(
-                            character,
-                            max_regenerations=max_regenerations,
-                        )
-                        summary.characters_regenerated += 1
-                        summary.regeneration_images += generated
-                        regeneration_exhausted = (
-                            result is None and generated >= max(1, max_regenerations)
-                        ) or (
-                            result is not None and result.generation_status == "generation_failed"
-                        )
-                        commit_db_session(self.db)
-                        latest = (
-                            self.db.query(GlobalCharacterImage)
-                            .filter(GlobalCharacterImage.global_character_id == character.id)
-                            .order_by(GlobalCharacterImage.id.desc())
-                            .first()
-                        )
-                        if latest is not None:
-                            final_image = latest
-                            if cleanup_rejected:
-                                summary.rejected_files_removed += self._cleanup_superseded_rejects(
-                                    character.id,
-                                    keep_image_id=final_image.id,
-                                )
+                repair_context: RepairContext | None = None
+
+                if needs_repair and not is_tagger_failure(reasons):
+                    if was_reject:
+                        summary.rejected += 1
+                    elif checked.quality_status == "warning" or checked.identity_status == "warning":
+                        summary.warnings += 1
+
+                    final_image, repair_context, auto_zero = self._repair_with_stages(
+                        character,
+                        checked,
+                        auto_regenerate=auto_regenerate,
+                        max_regenerations=max_regenerations,
+                        cleanup_rejected=cleanup_rejected,
+                        summary=summary,
+                    )
+                    regeneration_exhausted = auto_zero or repair_context.final_action == "0성"
+                    if repair_context.final_action == "pass":
+                        summary.passed += 1
                 elif checked.quality_status == "warning" or checked.identity_status == "warning":
                     summary.warnings += 1
+                    repair_context = RepairContext(
+                        latest_image_id=checked.id,
+                        image_count=self._image_count_for(character.id),
+                        final_action="pass",
+                        identity_ok=not identity_insufficient(reasons),
+                        reject_reason=reasons[0] if reasons else None,
+                    )
                 else:
                     summary.passed += 1
+                    repair_context = RepairContext(
+                        latest_image_id=checked.id,
+                        image_count=self._image_count_for(character.id),
+                        final_action="pass",
+                        identity_ok=True,
+                    )
+
+                if repair_context is not None:
+                    summary.character_diagnostics.append(
+                        {
+                            "character_id": character.id,
+                            "character_tag": character.character_tag,
+                            "inspected": True,
+                            **repair_context.as_dict(),
+                        }
+                    )
 
                 rating, confidence = self._candidate_from_reasons(final_image)
                 if rating == 3 and confidence is not None and confidence >= PREFILL_RATING_CONFIDENCE:

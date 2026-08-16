@@ -66,6 +66,42 @@ def test_single_weak_print_shirt_is_not_hard_reject() -> None:
     assert result.status == "pass"
 
 
+def test_weak_print_plus_character_print_is_reject() -> None:
+    result = evaluate_semantic_tags(
+        {
+            "print_shirt": 0.30,
+            "character_print": 0.12,
+            "1girl": 0.9,
+        }
+    )
+    assert result.status == "reject"
+    assert "weak_print_gallery" in result.reasons
+
+
+def test_weak_print_plus_multi_is_reject() -> None:
+    result = evaluate_semantic_tags(
+        {
+            "print_dress": 0.32,
+            "multiple_girls": 0.30,
+            "1girl": 0.7,
+        }
+    )
+    assert result.status == "reject"
+    assert "weak_print_gallery" in result.reasons
+
+
+def test_side_panel_multiple_views_plus_print_is_reject() -> None:
+    result = evaluate_semantic_tags(
+        {
+            "multiple_views": 0.33,
+            "print_shirt": 0.30,
+            "1girl": 0.8,
+        }
+    )
+    assert result.status == "reject"
+    assert "embedded_gallery:side_panel" in result.reasons
+
+
 def test_multiple_goods_and_character_cards_are_rejected() -> None:
     result = evaluate_semantic_tags(
         {

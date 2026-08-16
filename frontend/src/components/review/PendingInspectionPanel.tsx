@@ -39,6 +39,20 @@ type InspectionSummary = {
   reference_loaded?: number;
   reference_failed?: number;
   regeneration_requested?: number;
+  character_diagnostics?: Array<{
+    character_id: number;
+    character_tag?: string;
+    latest_image_id?: number | null;
+    image_count_for_character?: number;
+    inspected?: boolean;
+    identity_repair_stage?: string | null;
+    semantic_repair_stage?: string | null;
+    reject_reason?: string | null;
+    regeneration_requested?: number;
+    regeneration_completed?: number;
+    reinspection_completed?: number;
+    final_action?: string;
+  }>;
 };
 
 type InspectionResetSummary = {
@@ -376,11 +390,16 @@ export function PendingInspectionPanel() {
         const taggerOk = (metrics.tagger_success as number | undefined ?? 0) + (result.tagger_success ?? 0);
         const taggerErr = (metrics.tagger_error as number | undefined ?? 0) + (result.tagger_error ?? 0);
         const semanticReject = (metrics.semantic_reject as number | undefined ?? 0) + (result.semantic_reject ?? 0);
+        const reinpected = (result.character_diagnostics ?? []).reduce(
+          (sum, row) => sum + (row.reinspection_completed ?? 0),
+          0,
+        );
+        const autoZero = (result.character_diagnostics ?? []).filter((row) => row.final_action === "0성").length;
         task = addInspectionResult(
           task,
           result,
           processed,
-          `현재 페이지 Pending 자동 검사 · ${processed.toLocaleString()}/${characterIds.length.toLocaleString()} · 실제 검사 ${inspected.toLocaleString()} · tagger ${taggerOk}/${taggerErr} · reject ${semanticReject.toLocaleString()} · 재생성 ${regenerated.toLocaleString()} · 자동완료 ${autoCompleted.toLocaleString()}`,
+          `현재 페이지 Pending 자동 검사 · ${processed.toLocaleString()}/${characterIds.length.toLocaleString()} · 실제 검사 ${inspected.toLocaleString()} · tagger ${taggerOk}/${taggerErr} · reject ${semanticReject.toLocaleString()} · 재생성 ${regenerated.toLocaleString()} · 재검사 ${reinpected.toLocaleString()} · 0성 ${autoZero.toLocaleString()} · 자동완료 ${autoCompleted.toLocaleString()}`,
         );
         task = {
           ...task,
@@ -391,6 +410,7 @@ export function PendingInspectionPanel() {
             semantic_reject: semanticReject,
             semantic_pass: (metrics.semantic_pass as number | undefined ?? 0) + (result.semantic_pass ?? 0),
             semantic_warning: (metrics.semantic_warning as number | undefined ?? 0) + (result.semantic_warning ?? 0),
+            reinspection_completed: (metrics.reinspection_completed as number | undefined ?? 0) + reinpected,
           },
         };
         upsertLocalV2Job(task);
@@ -490,7 +510,7 @@ export function PendingInspectionPanel() {
         <div>
           <strong>Pending 자동 검사</strong>
           <div className="page-description" style={{ marginTop: 4 }}>
-            완료된 리뷰는 건드리지 않습니다. 기존 이미지가 있는 Pending만 검사하며 명백한 실패만 최대 2회 재생성합니다.
+            완료된 리뷰는 건드리지 않습니다. 기존 이미지가 있는 Pending만 최신 이미지 기준으로 검사하며, 외형 repair 후 semantic repair를 적용하고 재생성본을 다시 검사합니다.
             참조 이미지는 저장하지 않고 필요한 경우에만 Danbooru 태그 통계를 작은 캐시로 사용합니다.
           </div>
           <div style={{ marginTop: 6 }}>

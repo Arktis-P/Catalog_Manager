@@ -6,7 +6,7 @@ from typing import Mapping
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.services.reference_profile_service import CharacterReferenceProfile
 
-SEMANTIC_CHECKER_VERSION = "v1.4"
+SEMANTIC_CHECKER_VERSION = "v1.5"
 
 HARD_LAYOUT_TAGS = frozenset(
     {
@@ -102,6 +102,11 @@ POSTER_MULTI_REJECT = 0.70
 POSTER_TEXT_REJECT = 0.15
 CHARACTER_PRINT_REJECT = 0.45
 PRINT_WITH_CHARACTER_PRINT = 0.25
+# Weaker compound gallery signals for print/side-panel misses.
+WEAK_PRINT_CLOTHING = 0.28
+WEAK_CHARACTER_PRINT = 0.10
+WEAK_MULTI_WITH_PRINT = 0.25
+WEAK_SIDE_PANEL_VIEWS = 0.30
 GOODS_SIGNAL = 0.48
 OUTFIT_REFERENCE_SIGNAL = 0.55
 OUTFIT_REJECT = 0.67
@@ -237,11 +242,40 @@ def evaluate_semantic_tags(
 
     character_print = scores.get("character_print", 0.0)
     print_clothing = _active(scores, PRINT_CLOTHING_TAGS, GOODS_SIGNAL)
+    weak_print_clothing = _active(scores, PRINT_CLOTHING_TAGS, WEAK_PRINT_CLOTHING)
     if character_print >= CHARACTER_PRINT_REJECT or (
         print_clothing and character_print >= PRINT_WITH_CHARACTER_PRINT
     ):
         status = "reject"
         reasons.append("printed_character_gallery")
+    elif status != "reject" and weak_print_clothing and character_print >= WEAK_CHARACTER_PRINT:
+        # Weak print_* alone is not enough; require a second print-face cue.
+        status = "reject"
+        reasons.append("weak_print_gallery")
+    elif status != "reject" and weak_print_clothing and multi_score >= WEAK_MULTI_WITH_PRINT:
+        status = "reject"
+        reasons.append("weak_print_gallery")
+    elif (
+        status != "reject"
+        and soft_layout >= WEAK_SIDE_PANEL_VIEWS
+        and (
+            character_print >= WEAK_CHARACTER_PRINT
+            or multi_score >= WEAK_MULTI_WITH_PRINT
+            or bool(weak_print_clothing)
+        )
+    ):
+        # Side-panel / small-face collage often tags as mild multiple_views plus a
+        # weak print or multi-subject cue rather than a hard collage label.
+        status = "reject"
+        reasons.append("embedded_gallery:side_panel")
+    elif (
+        status != "reject"
+        and scores.get("clothes_writing", 0.0) >= WEAK_PRINT_CLOTHING
+        and weak_print_clothing
+        and multi_score >= WEAK_MULTI_WITH_PRINT
+    ):
+        status = "reject"
+        reasons.append("weak_print_gallery")
 
     goods = _active(scores, GOODS_OR_SCREEN_TAGS, GOODS_SIGNAL)
     multi = _active(scores, MULTI_SUBJECT_TAGS, GOODS_SIGNAL)
@@ -252,6 +286,14 @@ def evaluate_semantic_tags(
     elif status != "reject" and print_clothing and multi:
         status = "reject"
         reasons.append("goods_or_screen_character_gallery")
+    elif (
+        status != "reject"
+        and _max_score(scores, frozenset({"poster_(object)", "trading_card", "card", "monitor", "screen"}))
+        >= GOODS_SIGNAL
+        and text_score >= POSTER_TEXT_REJECT
+    ):
+        status = "reject"
+        reasons.append("poster_or_collage_with_text")
     elif goods and print_signals and status != "reject":
         status = "warning"
         reasons.append("printed_character_or_goods_possible")
