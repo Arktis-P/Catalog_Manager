@@ -1,7 +1,10 @@
 """Stage-ordered repair decisions for pending inspection / V2 regeneration.
 
-Identity repairs always precede semantic repairs. Persistent identity failure skips
-semantic stages and ends in an automatic 0-star decision.
+Identity repairs always precede semantic repairs. Persistent *actionable* appearance
+failure skips semantic stages and ends in an automatic 0-star decision. A missing WD
+character tag alone is intentionally non-actionable because many catalogue characters
+are outside the tagger vocabulary; treating that warning as identity failure would
+regenerate and auto-zero large parts of the pending queue for no visual reason.
 """
 
 from __future__ import annotations
@@ -20,12 +23,20 @@ STAGE_QUALITY = "quality"
 STAGE_AUTO_ZERO = "auto_zero"
 STAGE_DONE = "done"
 
+# Only signals that carry actual appearance evidence may spend regeneration budget.
+# `*_character_tag_undetected` is excluded: the local WD model simply does not know a
+# large fraction of the 100k+ catalogue character tags, so absence is not evidence that
+# the generated person is wrong.
 IDENTITY_INSUFFICIENT_REASONS = frozenset(
+    {
+        "character_tag_low_confidence",
+        "hair_color_mismatch",
+    }
+)
+IDENTITY_NONACTIONABLE_REASONS = frozenset(
     {
         "character_tag_undetected",
         "boy_character_tag_undetected",
-        "character_tag_low_confidence",
-        "hair_color_mismatch",
     }
 )
 IDENTITY_HAIR_REASONS = frozenset({"hair_color_mismatch"})
@@ -100,6 +111,7 @@ def _has_prefix(reasons: Iterable[str], prefixes: tuple[str, ...]) -> bool:
 
 
 def identity_insufficient(reasons: Iterable[str] | None) -> bool:
+    """Return True only for actionable appearance evidence, never tag absence alone."""
     if not reasons:
         return False
     return any(str(reason) in IDENTITY_INSUFFICIENT_REASONS for reason in reasons)
@@ -154,30 +166,30 @@ def decide_repair_stage(
 
     if gender_key == "1boy":
         if insufficient:
-            if not context.already(STAGE_IDENTITY_HAIR):
-                return STAGE_IDENTITY_HAIR
+            # Male policy is intentionally short: only a concrete hair mismatch earns
+            # one repair. If hair already matches (or hair repair was already tried),
+            # persistent actionable identity evidence ends at 0-star instead of
+            # inventing multicolor/eye tags.
             return STAGE_AUTO_ZERO
-        # Boy identity acceptable: continue to semantic if needed.
+        # Boy identity acceptable/unknown: continue to semantic if needed.
     else:
-        # Female / unknown: hair -> multicolor -> eye, then auto-zero if still bad.
+        # Female / unknown: hair -> multicolor -> eye, then auto-zero if actionable
+        # identity evidence is still bad. Tag-undetected alone never enters this ladder.
         if insufficient and not context.already(STAGE_IDENTITY_MULTICOLOR):
-            # Prefer multicolor after hair, or immediately when hair already tried /
-            # not applicable but identity is still weak.
             if context.already(STAGE_IDENTITY_HAIR) or not hair_mismatch:
                 return STAGE_IDENTITY_MULTICOLOR
         if insufficient and context.already(STAGE_IDENTITY_MULTICOLOR) and not context.already(
             STAGE_IDENTITY_EYE
         ):
-            return STAGE_IDENTITY_EYE
-        if insufficient and context.already(STAGE_IDENTITY_EYE):
+            if gender_key == "1girl":
+                return STAGE_IDENTITY_EYE
             return STAGE_AUTO_ZERO
-        if insufficient and context.already(STAGE_IDENTITY_MULTICOLOR) and gender_key != "1girl":
-            # Unknown gender: after multicolor, stop rather than inventing eye tags.
+        if insufficient and context.already(STAGE_IDENTITY_EYE):
             return STAGE_AUTO_ZERO
 
     context.identity_ok = not insufficient
 
-    # --- Semantic only when identity is acceptable -----------------------------
+    # --- Semantic only when actionable identity evidence is acceptable ---------
     if insufficient:
         return STAGE_AUTO_ZERO
 
