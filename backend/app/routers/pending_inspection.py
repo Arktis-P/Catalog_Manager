@@ -23,6 +23,10 @@ class PendingInspectionSelection(BaseModel):
     character_ids: list[int]
 
 
+class PendingInspectionResetSelection(BaseModel):
+    character_ids: list[int]
+
+
 def _active_v2_generation_exists() -> bool:
     return any(
         job.status in {"queued", "running", "paused"}
@@ -160,7 +164,7 @@ def run_selected_pending_inspection(
         # current, or has become completed since the page was rendered.
         service = PendingReviewInspectionService(db)
         service.candidates = lambda *, limit: []  # type: ignore[method-assign]
-        return service.inspect_batch(limit=len(selected_ids)).as_dict()
+        return service.inspect_batch(limit=len(selected_ids), test_run=True).as_dict()
 
     _assert_inspection_ready(db)
     service = PendingReviewInspectionService(db)
@@ -174,5 +178,31 @@ def run_selected_pending_inspection(
         auto_complete=auto_complete,
         audit_sample_rate=audit_sample_rate,
         cleanup_rejected=cleanup_rejected,
+        test_run=True,
     )
+    return summary.as_dict()
+
+
+@router.post("/reset-selected")
+def reset_selected_pending_inspection(
+    payload: PendingInspectionResetSelection,
+    db: Session = Depends(get_db),
+):
+    """Temporarily reset metadata produced while validating the page-test workflow.
+
+    The generated image files are kept. Only current checker metadata, compact reference
+    profile data, and review decisions carrying an auto_inspection marker are reverted.
+    """
+    selected_ids = list(dict.fromkeys(character_id for character_id in payload.character_ids if character_id > 0))
+    if not selected_ids:
+        raise HTTPException(status_code=400, detail="초기화할 테스트 항목이 없습니다.")
+    if len(selected_ids) > 1000:
+        raise HTTPException(status_code=400, detail="테스트 초기화는 한 번에 최대 1000개까지 가능합니다.")
+    if _active_v2_generation_exists():
+        raise HTTPException(
+            status_code=409,
+            detail="V2 생성/재생성 작업이 진행 중입니다. 완료 후 테스트 결과를 초기화하세요.",
+        )
+
+    summary = PendingReviewInspectionService(db).reset_test_results(selected_ids)
     return summary.as_dict()
