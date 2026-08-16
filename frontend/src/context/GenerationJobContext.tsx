@@ -35,6 +35,7 @@ interface GenerationJobContextValue {
   pauseV2Job: (jobId: string) => Promise<void>;
   resumeV2Job: (jobId: string) => Promise<void>;
   dismissV2Job: (jobId: string) => void;
+  upsertLocalV2Job: (job: V2GenerationJobState) => void;
   isV2GenerationActive: () => boolean;
 }
 
@@ -59,6 +60,10 @@ function normalizeGenerationJob(job: CollectJob): CollectJob {
     skipped_existing: job.skipped_existing ?? 0,
     updated: job.updated ?? 0,
   };
+}
+
+function isLocalPendingInspectionJob(job: V2GenerationJobState): boolean {
+  return job.phase.startsWith("pending_inspection");
 }
 
 export function GenerationJobProvider({ children }: { children: ReactNode }) {
@@ -97,7 +102,11 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
   const runningV2JobIds = useMemo(
     () =>
       visibleV2Jobs
-        .filter((job) => job.status === "queued" || job.status === "running" || job.status === "paused")
+        .filter(
+          (job) =>
+            !isLocalPendingInspectionJob(job) &&
+            (job.status === "queued" || job.status === "running" || job.status === "paused"),
+        )
         .map((job) => job.job_id),
     [visibleV2Jobs],
   );
@@ -390,6 +399,16 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
     setDismissedV2JobIds((current) => new Set(current).add(jobId));
   }, []);
 
+  const upsertLocalV2Job = useCallback((job: V2GenerationJobState) => {
+    setDismissedV2JobIds((current) => {
+      if (!current.has(job.job_id)) return current;
+      const next = new Set(current);
+      next.delete(job.job_id);
+      return next;
+    });
+    setV2Jobs((current) => upsertJob(current, job));
+  }, []);
+
   const isV2GenerationActive = useCallback(
     () => visibleV2Jobs.some((job) => job.status === "queued" || job.status === "running" || job.status === "paused"),
     [visibleV2Jobs],
@@ -415,6 +434,7 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
       pauseV2Job,
       resumeV2Job,
       dismissV2Job,
+      upsertLocalV2Job,
       isV2GenerationActive,
     }),
     [
@@ -435,6 +455,7 @@ export function GenerationJobProvider({ children }: { children: ReactNode }) {
       pauseV2Job,
       resumeV2Job,
       dismissV2Job,
+      upsertLocalV2Job,
       isV2GenerationActive,
     ],
   );
