@@ -25,6 +25,8 @@ AUTO_RATING_CONFIDENCE = 0.85
 PREFILL_RATING_CONFIDENCE = 0.72
 DEFAULT_AUDIT_SAMPLE_RATE = 0.10
 DEFAULT_MAX_REGENERATIONS = 2
+MAX_TRACKED_TEST_CHARACTERS = 2000
+MAX_RESET_CHARACTERS = 1000
 
 
 @dataclass
@@ -58,6 +60,7 @@ class PendingInspectionResetSummary:
     images_reset: int = 0
     reviews_reset: int = 0
     profiles_reset: int = 0
+    test_tracked_remaining: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return asdict(self)
@@ -158,7 +161,30 @@ class PendingReviewInspectionService:
             "pending_with_image": total,
             "remaining": remaining,
             "current": max(0, total - remaining),
+            "test_tracked": len(self.tracked_test_character_ids()),
         }
+
+    def tracked_test_character_ids(self) -> list[int]:
+        return self.settings_service.get_pending_inspection_test_ids()
+
+    def record_test_characters(self, character_ids: list[int]) -> list[int]:
+        """Remember page-test targets in the DB so a reset survives UI state loss."""
+        if not character_ids:
+            return self.tracked_test_character_ids()
+        merged = list(dict.fromkeys([*self.tracked_test_character_ids(), *character_ids]))
+        # Keep the newest entries: the oldest page tests are the least likely to still
+        # need a reset, and the list must stay small enough for one settings row.
+        return self.settings_service.set_pending_inspection_test_ids(
+            merged[-MAX_TRACKED_TEST_CHARACTERS:]
+        )
+
+    def forget_test_characters(self, character_ids: list[int]) -> list[int]:
+        if not character_ids:
+            return self.tracked_test_character_ids()
+        done = set(character_ids)
+        return self.settings_service.set_pending_inspection_test_ids(
+            [tracked for tracked in self.tracked_test_character_ids() if tracked not in done]
+        )
 
     def _inspect_existing(
         self,
@@ -499,7 +525,9 @@ class PendingReviewInspectionService:
         reverted only for `auto_inspection=...;test=1` markers. Non-test automation notes
         and ratings that no longer match the test marker (user edits) are left alone.
         """
-        ids = list(dict.fromkeys(character_id for character_id in character_ids if character_id > 0))[:1000]
+        ids = list(dict.fromkeys(character_id for character_id in character_ids if character_id > 0))[
+            :MAX_RESET_CHARACTERS
+        ]
         summary = PendingInspectionResetSummary(requested=len(ids))
         if not ids:
             return summary
@@ -560,6 +588,8 @@ class PendingReviewInspectionService:
             summary.reviews_reset += 1
 
         commit_db_session(self.db)
+        self.forget_test_characters(ids)
+        summary.test_tracked_remaining = len(self.tracked_test_character_ids())
         return summary
 
     def inspect_batch(
@@ -691,5 +721,8 @@ class PendingReviewInspectionService:
             except Exception as exc:
                 self.db.rollback()
                 summary.errors.append(f"{character.character_tag}: {exc}")
+
+        if test_run:
+            self.record_test_characters(summary.inspected_character_ids)
 
         return summary

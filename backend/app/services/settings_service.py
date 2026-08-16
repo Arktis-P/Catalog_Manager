@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -43,6 +45,7 @@ SETTING_V2_ANATOMY_CHECK_MODEL = "v2_anatomy_check_model"
 SETTING_V2_ANATOMY_REJECT_CONFIDENCE = "v2_anatomy_reject_confidence"
 SETTING_V2_REVIEW_CARD_SIZE = "v2_review_card_size"
 SETTING_V2_REVIEW_CARD_WIDTH_PX = "v2_review_card_width_px"
+SETTING_PENDING_INSPECTION_TEST_IDS = "pending_inspection_test_character_ids"
 VALID_NOTIFICATION_DISPLAYS = {"toast", "browser", "both"}
 DEFAULT_NOTIFICATION_DISPLAY = "toast"
 DEFAULT_V2_RELEVANCE_MIN_COOCCURRENCE = 10
@@ -292,6 +295,43 @@ class SettingsService:
         if normalized in {"0", "false", "no", "off"}:
             return False
         return default
+
+    def get_pending_inspection_test_ids(self) -> list[int]:
+        """Return character ids inspected by the page-test workflow.
+
+        The list is stored server-side so a temporary test reset stays possible after a
+        browser reload or from a different client.
+        """
+        raw = self._get_setting(SETTING_PENDING_INSPECTION_TEST_IDS)
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        ids: list[int] = []
+        for value in parsed:
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                continue
+            if number > 0 and number not in ids:
+                ids.append(number)
+        return ids
+
+    def set_pending_inspection_test_ids(self, ids: list[int]) -> list[int]:
+        unique: list[int] = []
+        for value in ids:
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                continue
+            if number > 0 and number not in unique:
+                unique.append(number)
+        self._set_setting(SETTING_PENDING_INSPECTION_TEST_IDS, json.dumps(unique))
+        return unique
 
     def get_v2_anatomy_check_enabled(self) -> bool:
         return self._get_bool_setting(

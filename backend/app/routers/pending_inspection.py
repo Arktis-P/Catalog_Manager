@@ -10,7 +10,10 @@ from app.models.global_character import GlobalCharacter
 from app.models.global_character_image import GlobalCharacterImage
 from app.models.global_character_review import GlobalCharacterReview
 from app.services.identity_checker import IDENTITY_CHECKER_VERSION
-from app.services.pending_review_inspection_service import PendingReviewInspectionService
+from app.services.pending_review_inspection_service import (
+    MAX_RESET_CHARACTERS,
+    PendingReviewInspectionService,
+)
 from app.services.quality_checker import QUALITY_CHECKER_VERSION
 from app.services.review_service import ReviewService
 from app.services.settings_service import SettingsService
@@ -24,7 +27,8 @@ class PendingInspectionSelection(BaseModel):
 
 
 class PendingInspectionResetSelection(BaseModel):
-    character_ids: list[int]
+    # Empty means "use the character ids this server recorded during page tests".
+    character_ids: list[int] = []
 
 
 def _active_v2_generation_exists() -> bool:
@@ -193,18 +197,23 @@ def reset_selected_pending_inspection(
     """Temporarily reset metadata produced while validating the page-test workflow.
 
     The generated image files are kept. Only current checker metadata, compact reference
-    profile data, and review decisions carrying an auto_inspection marker are reverted.
+    profile data, and review decisions carrying an `auto_inspection=...;test=1` marker are
+    reverted. When the client sends no ids the server-recorded page-test targets are used,
+    so a browser reload cannot strand the reset.
     """
+    service = PendingReviewInspectionService(db)
     selected_ids = list(dict.fromkeys(character_id for character_id in payload.character_ids if character_id > 0))
+    if len(selected_ids) > MAX_RESET_CHARACTERS:
+        raise HTTPException(status_code=400, detail="테스트 초기화는 한 번에 최대 1000개까지 가능합니다.")
+    if not selected_ids:
+        selected_ids = service.tracked_test_character_ids()[:MAX_RESET_CHARACTERS]
     if not selected_ids:
         raise HTTPException(status_code=400, detail="초기화할 테스트 항목이 없습니다.")
-    if len(selected_ids) > 1000:
-        raise HTTPException(status_code=400, detail="테스트 초기화는 한 번에 최대 1000개까지 가능합니다.")
     if _active_v2_generation_exists():
         raise HTTPException(
             status_code=409,
             detail="V2 생성/재생성 작업이 진행 중입니다. 완료 후 테스트 결과를 초기화하세요.",
         )
 
-    summary = PendingReviewInspectionService(db).reset_test_results(selected_ids)
+    summary = service.reset_test_results(selected_ids)
     return summary.as_dict()

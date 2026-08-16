@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -13,7 +14,9 @@ from app.models.global_character import GlobalCharacter
 from app.models.global_character_image import GlobalCharacterImage
 from app.models.global_character_review import GlobalCharacterReview
 from app.routers.pending_inspection import (
+    PendingInspectionResetSelection,
     PendingInspectionSelection,
+    reset_selected_pending_inspection,
     run_selected_pending_inspection,
 )
 from app.services.identity_checker import IDENTITY_CHECKER_VERSION
@@ -254,6 +257,121 @@ def test_reset_after_regeneration_clears_latest_image_and_requeues(db: Session) 
         row.id == character.id
         for row, _image in PendingReviewInspectionService(db).candidates(limit=50)
     )
+
+
+def patch_inspection_router(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.routers.pending_inspection._assert_inspection_ready",
+        lambda _db: None,
+    )
+    monkeypatch.setattr(
+        "app.routers.pending_inspection._active_v2_generation_exists",
+        lambda: False,
+    )
+
+
+def stub_inspection(monkeypatch: pytest.MonkeyPatch, inspected_tags: list[str] | None = None) -> None:
+    def fake_inspect(self, character, image):  # noqa: ANN001
+        if inspected_tags is not None:
+            inspected_tags.append(character.character_tag)
+        image.quality_status = "pass"
+        image.quality_score = 0.9
+        image.quality_reasons = "[]"
+        image.quality_checker_version = QUALITY_CHECKER_VERSION
+        image.identity_status = "pass"
+        image.character_confidence = 0.95
+        image.identity_reasons = '["auto_rating_candidate:3:0.95"]'
+        image.identity_checker_version = IDENTITY_CHECKER_VERSION
+        image.is_provisional = True
+        return image
+
+    monkeypatch.setattr(PendingReviewInspectionService, "_inspect_existing", fake_inspect)
+
+
+def test_page_test_tracking_is_recorded_server_side(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = make_pending_uninspected(db, tag="tracked_a")
+    second = make_pending_uninspected(db, tag="tracked_b")
+    skipped = make_character(db, tag="tracked_skip", auto_note=False, checker_current=True)
+    stub_inspection(monkeypatch)
+    patch_inspection_router(monkeypatch)
+
+    assert PendingReviewInspectionService(db).stats()["test_tracked"] == 0
+
+    run_selected_pending_inspection(
+        payload=PendingInspectionSelection(character_ids=[first.id, second.id, skipped.id]),
+        db=db,
+    )
+
+    service = PendingReviewInspectionService(db)
+    assert service.tracked_test_character_ids() == [first.id, second.id]
+    assert service.stats()["test_tracked"] == 2
+
+
+def test_reset_without_ids_uses_server_tracking_and_clears_it(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = make_pending_uninspected(db, tag="server_reset_a")
+    second = make_pending_uninspected(db, tag="server_reset_b")
+    stub_inspection(monkeypatch)
+    patch_inspection_router(monkeypatch)
+
+    run_selected_pending_inspection(
+        payload=PendingInspectionSelection(character_ids=[first.id, second.id]),
+        db=db,
+    )
+    before_remaining = PendingReviewInspectionService(db).stats()["remaining"]
+
+    # The UI sends no ids: the server must fall back to what it recorded itself.
+    result = reset_selected_pending_inspection(
+        payload=PendingInspectionResetSelection(),
+        db=db,
+    )
+
+    assert result["images_reset"] == 2
+    assert result["test_tracked_remaining"] == 0
+    service = PendingReviewInspectionService(db)
+    assert service.tracked_test_character_ids() == []
+    assert service.stats()["remaining"] == before_remaining + 2
+
+
+def test_reset_without_ids_and_without_tracking_is_rejected(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_inspection_router(monkeypatch)
+
+    with pytest.raises(HTTPException) as excinfo:
+        reset_selected_pending_inspection(payload=PendingInspectionResetSelection(), db=db)
+
+    assert excinfo.value.status_code == 400
+
+
+def test_reset_with_explicit_ids_keeps_untouched_tracking(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = make_pending_uninspected(db, tag="partial_a")
+    second = make_pending_uninspected(db, tag="partial_b")
+    stub_inspection(monkeypatch)
+    patch_inspection_router(monkeypatch)
+
+    run_selected_pending_inspection(
+        payload=PendingInspectionSelection(character_ids=[first.id, second.id]),
+        db=db,
+    )
+
+    result = reset_selected_pending_inspection(
+        payload=PendingInspectionResetSelection(character_ids=[first.id]),
+        db=db,
+    )
+
+    assert result["images_reset"] == 1
+    assert result["test_tracked_remaining"] == 1
+    assert PendingReviewInspectionService(db).tracked_test_character_ids() == [second.id]
 
 
 def test_run_selected_returns_only_actually_inspected_ids(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
