@@ -141,6 +141,81 @@ class V2GenerationJobManager:
         self._dispatch_next()
         return job
 
+    def start_inspection_regeneration(
+        self,
+        character_id: int,
+        *,
+        character_tag: str,
+        max_attempts: int,
+    ) -> V2GenerationJobState | None:
+        """Register a synchronous Pending-inspection regeneration in the global V2 job list.
+
+        The Pending inspector still owns the capped generation loop so it can enforce its
+        stricter per-character retry budget. This job object only mirrors that real work
+        into the existing global task UI and supports cancellation between attempts.
+        """
+        attempts = max(1, max_attempts)
+        job = V2GenerationJobState(
+            job_id=str(uuid.uuid4()),
+            kind="regenerate",
+            status="running",
+            phase="inspection_regeneration_generating",
+            message=f"자동 검사 재생성 시작 · {character_tag} · 0/{attempts}",
+            total=attempts,
+            character_id=character_id,
+            character_tag=character_tag,
+            current_character_tag=character_tag,
+            prompt_variant_attempts={"inspection_regeneration": 1, "max_attempts": attempts},
+        )
+        with self._lock:
+            if character_id in self._regenerating_character_ids:
+                return None
+            self._regenerating_character_ids.add(character_id)
+            self._jobs[job.job_id] = job
+        return job
+
+    def update_inspection_regeneration(self, job_id: str, **fields: object) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            valid = bool(job and job.prompt_variant_attempts.get("inspection_regeneration"))
+        if not valid:
+            return False
+        phase = fields.get("phase")
+        if isinstance(phase, str) and not phase.startswith("inspection_regeneration"):
+            fields["phase"] = f"inspection_regeneration_{phase}"
+        self._update(job_id, **fields)
+        return True
+
+    def is_inspection_regeneration_cancelled(self, job_id: str) -> bool:
+        return self._is_cancelled(job_id)
+
+    def finish_inspection_regeneration(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        message: str,
+        failure_reason: str | None = None,
+    ) -> V2GenerationJobState | None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or not job.prompt_variant_attempts.get("inspection_regeneration"):
+                return None
+            final_status = "cancelled" if job.status == "cancelled" or job_id in self._cancelled else status
+            job.status = final_status
+            job.phase = f"inspection_regeneration_{final_status}"
+            job.message = message
+            job.last_failure_reason = failure_reason
+            job.finished_at = _utc_now()
+            if final_status == "completed":
+                job.completed = 1
+                job.current = job.total if job.current >= job.total else job.current
+            elif final_status == "failed":
+                job.failed = max(1, job.failed)
+            if job.character_id is not None:
+                self._regenerating_character_ids.discard(job.character_id)
+            return job
+
     def get_job(self, job_id: str) -> V2GenerationJobState | None:
         with self._lock:
             return self._jobs.get(job_id)
@@ -156,6 +231,8 @@ class V2GenerationJobManager:
             job = self._jobs.get(job_id)
             if job is None or job.status != "running":
                 return False
+            if job.prompt_variant_attempts.get("inspection_regeneration"):
+                return False
         with self._pause_cond:
             self._paused_jobs.add(job_id)
         return True
@@ -164,6 +241,8 @@ class V2GenerationJobManager:
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None or job.status not in {"paused", "running"}:
+                return False
+            if job.prompt_variant_attempts.get("inspection_regeneration"):
                 return False
             if job_id not in self._paused_jobs:
                 return False
