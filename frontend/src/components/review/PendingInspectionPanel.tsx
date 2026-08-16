@@ -16,6 +16,7 @@ type InspectionSummary = {
   rejected_files_removed: number;
   auto_completed: number;
   audit_kept_pending: number;
+  prefilled_pending: number;
   suggested_only: number;
   ratings: Record<string, number>;
   errors: string[];
@@ -66,12 +67,15 @@ export function PendingInspectionPanel() {
     let regenerated = 0;
     let autoCompleted = 0;
     let audit = 0;
+    let prefilled = 0;
     let filesRemoved = 0;
     let errors = 0;
+    let stalled = false;
 
     try {
       let current = await loadStats();
       while (current.remaining > 0 && !stopRequested.current) {
+        const beforeRemaining = current.remaining;
         setMessage(
           `자동 검사 중 · 남은 ${current.remaining.toLocaleString()}개 · 한 번에 ${BATCH_SIZE}개씩 처리`,
         );
@@ -91,24 +95,38 @@ export function PendingInspectionPanel() {
         regenerated += result.characters_regenerated;
         autoCompleted += result.auto_completed;
         audit += result.audit_kept_pending;
+        prefilled += result.prefilled_pending;
         filesRemoved += result.rejected_files_removed;
         errors += result.errors.length;
         current = await loadStats();
 
         setMessage(
           `검사 ${inspected.toLocaleString()} · 재생성 ${regenerated.toLocaleString()} · 자동완료 ${autoCompleted.toLocaleString()} · ` +
-            `10% 검증대기 ${audit.toLocaleString()} · 불필요 이미지 삭제 ${filesRemoved.toLocaleString()}${errors ? ` · 오류 ${errors}` : ""}`,
+            `평점 미리입력 ${prefilled.toLocaleString()} · 10% 검증대기 ${audit.toLocaleString()} · ` +
+            `불필요 이미지 삭제 ${filesRemoved.toLocaleString()}${errors ? ` · 오류 ${errors}` : ""}`,
         );
+
+        // A broken image, unavailable external service, or repeated DB error can leave
+        // the same batch eligible forever. Stop rather than consuming API/local
+        // resources indefinitely; the user can retry after resolving the displayed error.
+        if (current.remaining >= beforeRemaining) {
+          stalled = true;
+          break;
+        }
       }
 
       if (stopRequested.current) {
         setMessage(
           `일시정지됨 · 검사 ${inspected.toLocaleString()} · 재생성 ${regenerated.toLocaleString()} · 자동완료 ${autoCompleted.toLocaleString()}`,
         );
+      } else if (stalled) {
+        setError(
+          `자동 검사가 같은 위치에서 더 진행되지 않아 안전하게 중지했습니다.${errors ? ` 누적 오류 ${errors}개를 확인하세요.` : " 상태를 새로고침한 뒤 다시 시도하세요."}`,
+        );
       } else {
         setMessage(
           `자동 검사 완료 · 검사 ${inspected.toLocaleString()} · 재생성 ${regenerated.toLocaleString()} · 자동완료 ${autoCompleted.toLocaleString()} · ` +
-            `검증 샘플 ${audit.toLocaleString()}개는 pending에 남겼습니다.`,
+            `평점 미리입력 ${prefilled.toLocaleString()} · 검증 샘플 ${audit.toLocaleString()}개는 pending에 남겼습니다.`,
         );
       }
     } catch (err) {
