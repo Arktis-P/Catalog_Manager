@@ -27,12 +27,23 @@ type InspectionSummary = {
   suggested_only: number;
   ratings: Record<string, number>;
   errors: string[];
+  inspected_character_ids?: number[];
+};
+
+type InspectionResetSummary = {
+  requested: number;
+  matched: number;
+  images_reset: number;
+  reviews_reset: number;
+  profiles_reset: number;
 };
 
 type RunScope = "all" | "page" | null;
 
 const BATCH_SIZE = 10;
 const PAGE_TEST_LIMIT = 30;
+const TEST_RESET_ENABLED = true;
+const TEST_IDS_STORAGE_KEY = "catalogue-manager:pending-inspection-test-character-ids";
 const inspectionStopRequests = new Set<string>();
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -72,6 +83,33 @@ function currentPageCharacterIds(): number[] {
     if (ids.length >= PAGE_TEST_LIMIT) break;
   }
   return ids;
+}
+
+function readTrackedTestIds(): number[] {
+  try {
+    const raw = window.localStorage.getItem(TEST_IDS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .slice(0, 1000);
+  } catch {
+    return [];
+  }
+}
+
+function persistTrackedTestIds(ids: number[]): void {
+  try {
+    if (ids.length === 0) {
+      window.localStorage.removeItem(TEST_IDS_STORAGE_KEY);
+    } else {
+      window.localStorage.setItem(TEST_IDS_STORAGE_KEY, JSON.stringify(ids.slice(0, 1000)));
+    }
+  } catch {
+    // 테스트 초기화 편의 기능이므로 localStorage 실패가 검사 자체를 막아서는 안 된다.
+  }
 }
 
 function makeInspectionJob(scope: Exclude<RunScope, null>, total: number): V2GenerationJobState {
@@ -165,6 +203,8 @@ export function PendingInspectionPanel() {
   const [runScope, setRunScope] = useState<RunScope>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [testCharacterIds, setTestCharacterIds] = useState<number[]>(readTrackedTestIds);
+  const [resetting, setResetting] = useState(false);
   const { v2Jobs, upsertLocalV2Job } = useGenerationJobs();
 
   const activeInspectionJob = useMemo(
@@ -177,6 +217,15 @@ export function PendingInspectionPanel() {
     [v2Jobs],
   );
   const running = runScope !== null || activeInspectionJob !== null;
+
+  const rememberTestCharacterIds = useCallback((ids: number[]) => {
+    if (ids.length === 0) return;
+    setTestCharacterIds((current) => {
+      const merged = Array.from(new Set([...current, ...ids])).slice(0, 1000);
+      persistTrackedTestIds(merged);
+      return merged;
+    });
+  }, []);
 
   const loadStats = useCallback(async () => {
     const response = await fetch("/api/review/v2/pending-inspection/stats");
@@ -336,6 +385,7 @@ export function PendingInspectionPanel() {
           body: JSON.stringify({ character_ids: chunk }),
         });
         const result = await readJson<InspectionSummary>(response);
+        rememberTestCharacterIds(result.inspected_character_ids ?? []);
         processed += chunk.length;
         const metrics = task.prompt_variant_attempts;
         const inspected = (metrics.inspected ?? 0) + result.inspected;
@@ -378,7 +428,38 @@ export function PendingInspectionPanel() {
     } finally {
       setRunScope(null);
     }
-  }, [loadStats, running, upsertLocalV2Job]);
+  }, [loadStats, rememberTestCharacterIds, running, upsertLocalV2Job]);
+
+  const resetTestResults = useCallback(async () => {
+    if (!TEST_RESET_ENABLED || running || resetting || testCharacterIds.length === 0) return;
+    const confirmed = window.confirm(
+      `현재까지 페이지 테스트로 검사한 ${testCharacterIds.length.toLocaleString()}개 항목의 검사 결과를 초기화합니다. ` +
+        "재생성된 이미지 파일 자체는 삭제하거나 되돌리지 않습니다. 계속할까요?",
+    );
+    if (!confirmed) return;
+
+    setResetting(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/review/v2/pending-inspection/reset-selected", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ character_ids: testCharacterIds }),
+      });
+      const result = await readJson<InspectionResetSummary>(response);
+      setTestCharacterIds([]);
+      persistTrackedTestIds([]);
+      setMessage(
+        `테스트 검사 초기화 완료 · 대상 ${result.matched.toLocaleString()} · 이미지 검사 ${result.images_reset.toLocaleString()} · ` +
+          `자동 레이팅 ${result.reviews_reset.toLocaleString()} · 참조 캐시 ${result.profiles_reset.toLocaleString()} 초기화 · 이미지 파일은 유지`,
+      );
+      await loadStats();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "테스트 검사 결과 초기화에 실패했습니다.");
+    } finally {
+      setResetting(false);
+    }
+  }, [loadStats, resetting, running, testCharacterIds]);
 
   if (!stats) {
     return error ? <div className="alert alert-error">{error}</div> : null;
@@ -412,6 +493,9 @@ export function PendingInspectionPanel() {
           <div style={{ marginTop: 4 }}>
             자동 검사 완료 {stats.current.toLocaleString()} / {stats.pending_with_image.toLocaleString()} · 남음{" "}
             <strong>{stats.remaining.toLocaleString()}</strong>
+            {TEST_RESET_ENABLED ? (
+              <> · 테스트 초기화 추적 <strong>{testCharacterIds.length.toLocaleString()}</strong></>
+            ) : null}
           </div>
           {displayedMessage ? <div style={{ marginTop: 6 }}>{displayedMessage}</div> : null}
           {error ? <div className="alert alert-error" style={{ marginTop: 6 }}>{error}</div> : null}
@@ -441,7 +525,20 @@ export function PendingInspectionPanel() {
               </button>
             </>
           )}
-          <button type="button" className="btn" disabled={running} onClick={() => void loadStats()}>
+          {TEST_RESET_ENABLED ? (
+            <button
+              type="button"
+              className="btn"
+              disabled={running || resetting || testCharacterIds.length === 0}
+              onClick={() => void resetTestResults()}
+              title="페이지 테스트로 실제 검사한 항목의 검사 메타데이터와 자동 판정만 초기화합니다. 재생성된 이미지 파일은 유지합니다."
+            >
+              {resetting
+                ? "테스트 결과 초기화 중..."
+                : `테스트 결과 초기화 (${testCharacterIds.length.toLocaleString()})`}
+            </button>
+          ) : null}
+          <button type="button" className="btn" disabled={running || resetting} onClick={() => void loadStats()}>
             상태 새로고침
           </button>
         </div>
