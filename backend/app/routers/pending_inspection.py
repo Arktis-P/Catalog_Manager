@@ -159,15 +159,12 @@ def run_selected_pending_inspection(
         raise HTTPException(status_code=400, detail="현재 페이지 테스트는 한 번에 최대 30개까지 가능합니다.")
 
     rows = _selected_candidates(db, selected_ids)
-    inspected_character_ids = [character.id for character, _image in rows]
     if not rows:
         # No HF/NAIA work is necessary when every visible item has no image, is already
         # current, or has become completed since the page was rendered.
         service = PendingReviewInspectionService(db)
         service.candidates = lambda *, limit: []  # type: ignore[method-assign]
-        result = service.inspect_batch(limit=len(selected_ids), test_run=True).as_dict()
-        result["inspected_character_ids"] = []
-        return result
+        return service.inspect_batch(limit=len(selected_ids), test_run=True).as_dict()
 
     _assert_inspection_ready(db)
     service = PendingReviewInspectionService(db)
@@ -183,9 +180,9 @@ def run_selected_pending_inspection(
         cleanup_rejected=cleanup_rejected,
         test_run=True,
     )
-    result = summary.as_dict()
-    result["inspected_character_ids"] = inspected_character_ids
-    return result
+    # inspected_character_ids comes from characters that actually completed inspection,
+    # not from the pre-filtered candidate list (skipped/failed IDs are excluded).
+    return summary.as_dict()
 
 
 @router.post("/reset-selected")

@@ -44,6 +44,8 @@ class PendingInspectionSummary:
     suggested_only: int = 0
     ratings: dict[str, int] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    # Only characters that actually completed _inspect_existing in this batch.
+    inspected_character_ids: list[int] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -225,6 +227,24 @@ class PendingReviewInspectionService:
     @staticmethod
     def _auto_marker_suffix(*, test_run: bool) -> str:
         return ";test=1" if test_run else ""
+
+    @staticmethod
+    def _auto_marker_fields(line: str) -> dict[str, str]:
+        if not line.startswith("auto_inspection="):
+            return {}
+        fields: dict[str, str] = {}
+        for part in line[len("auto_inspection=") :].split(";"):
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            fields[key.strip()] = value.strip()
+        return fields
+
+    @classmethod
+    def _is_test_auto_marker(cls, line: str) -> bool:
+        if not line.startswith("auto_inspection="):
+            return False
+        return cls._auto_marker_fields(line).get("test") == "1"
 
     def _prefill_rating(
         self,
@@ -476,8 +496,8 @@ class PendingReviewInspectionService:
         """Clear inspection metadata for explicitly tracked page-test characters only.
 
         Generated image files are intentionally preserved. Automatic review decisions are
-        reverted only when an auto_inspection note exists, so an explicit user rating that
-        automation never touched is not removed.
+        reverted only for `auto_inspection=...;test=1` markers. Non-test automation notes
+        and ratings that no longer match the test marker (user edits) are left alone.
         """
         ids = list(dict.fromkeys(character_id for character_id in character_ids if character_id > 0))[:1000]
         summary = PendingInspectionResetSummary(requested=len(ids))
@@ -513,16 +533,31 @@ class PendingReviewInspectionService:
                 .filter(GlobalCharacterReview.global_character_id == character.id)
                 .first()
             )
-            if review is not None and review.review_note:
-                lines = [line for line in review.review_note.splitlines() if line.strip()]
-                auto_lines = [line for line in lines if line.startswith("auto_inspection=")]
-                if auto_lines:
-                    review.review_note = "\n".join(
-                        line for line in lines if not line.startswith("auto_inspection=")
-                    ) or None
-                    review.rating = None
-                    review.review_status = "pending"
-                    summary.reviews_reset += 1
+            if review is None or not review.review_note:
+                continue
+
+            lines = [line for line in review.review_note.splitlines() if line.strip()]
+            test_lines = [line for line in lines if self._is_test_auto_marker(line)]
+            if not test_lines:
+                continue
+
+            marker_ratings: set[int] = set()
+            for line in test_lines:
+                fields = self._auto_marker_fields(line)
+                raw_rating = fields.get("rating")
+                if raw_rating is not None:
+                    try:
+                        marker_ratings.add(int(raw_rating))
+                    except ValueError:
+                        pass
+
+            review.review_note = "\n".join(line for line in lines if line not in test_lines) or None
+            # Only undo the value automation itself wrote. If the user changed rating
+            # after the test, current rating will differ from the marker and is kept.
+            if review.rating is not None and review.rating in marker_ratings:
+                review.rating = None
+                review.review_status = "pending"
+            summary.reviews_reset += 1
 
         commit_db_session(self.db)
         return summary
@@ -554,6 +589,7 @@ class PendingReviewInspectionService:
 
                 checked = self._inspect_existing(character, image)
                 summary.inspected += 1
+                summary.inspected_character_ids.append(character.id)
                 commit_db_session(self.db)
 
                 final_image = checked
