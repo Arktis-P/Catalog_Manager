@@ -12,9 +12,6 @@ from app.models.global_character_image import GlobalCharacterImage
 from app.models.global_character_review import GlobalCharacterReview
 from app.services.identity_checker import IDENTITY_CHECKER_VERSION
 from app.services.inspection_repair import (
-    STAGE_IDENTITY_EYE,
-    STAGE_IDENTITY_HAIR,
-    STAGE_IDENTITY_MULTICOLOR,
     STAGE_SEMANTIC_GALLERY,
     STAGE_SEMANTIC_OUTFIT,
 )
@@ -281,7 +278,7 @@ def test_repair_loop_reinspects_after_regeneration(db: Session, monkeypatch) -> 
     assert context.reinspection_completed >= 1
     assert context.regeneration_completed >= 2
     assert STAGE_SEMANTIC_GALLERY in context.attempted_stages
-    assert auto_zero is False or context.final_action in {"pass", "0성"}
+    assert context.final_action in {"pass", "artifact_limit"}
     assert final_image.id >= second.id
 
 
@@ -290,7 +287,7 @@ def test_semantic_gallery_persistent_reject_regenerates_exactly_twice(db: Sessio
     image = character.images[0]
     image.quality_status = "pass"
     image.identity_status = "reject"
-    image.identity_reasons = '["weak_print_gallery"]'
+    image.identity_reasons = '["printed_character_gallery"]'
     image.quality_checker_version = QUALITY_CHECKER_VERSION
     image.identity_checker_version = IDENTITY_CHECKER_VERSION
     db.commit()
@@ -307,9 +304,10 @@ def test_semantic_gallery_persistent_reject_regenerates_exactly_twice(db: Sessio
             image_path=f"output/generated_images/pending_review/gallery_cap_{len(calls)}.webp",
             quality_status="pass",
             identity_status="reject",
-            identity_reasons='["weak_print_gallery"]',
+            identity_reasons='["printed_character_gallery"]',
             quality_checker_version=QUALITY_CHECKER_VERSION,
             identity_checker_version=IDENTITY_CHECKER_VERSION,
+            generation_origin="auto_inspection_regen",
         )
         db.add(nxt)
         db.commit()
@@ -320,7 +318,7 @@ def test_semantic_gallery_persistent_reject_regenerates_exactly_twice(db: Sessio
     monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
 
     summary = PendingInspectionSummary(requested_limit=1)
-    _final, context, auto_zero = service._repair_with_stages(
+    _final, context, limit_hit = service._repair_with_stages(
         character,
         image,
         auto_regenerate=True,
@@ -331,12 +329,12 @@ def test_semantic_gallery_persistent_reject_regenerates_exactly_twice(db: Sessio
 
     assert calls == [1, 1]
     assert context.regeneration_completed == 2
-    assert context.attempted_stages.count(STAGE_SEMANTIC_GALLERY) == 2
-    assert auto_zero is True
-    assert context.final_action == "0성"
+    assert limit_hit is True
+    assert context.final_action == "artifact_limit"
 
 
-def test_quality_reject_persistent_regenerates_exactly_twice(db: Session, monkeypatch) -> None:
+def test_quality_reject_does_not_auto_regen(db: Session, monkeypatch) -> None:
+    # Quality-only rejects are outside the artifact-cleanup scope.
     character = add_character(db, tag="quality_cap", review_status="pending")
     image = character.images[0]
     image.quality_status = "reject"
@@ -346,61 +344,14 @@ def test_quality_reject_persistent_regenerates_exactly_twice(db: Session, monkey
     db.commit()
 
     service = PendingReviewInspectionService(db)
-    calls: list[int] = []
-
-    def fake_regen(character_obj, **kwargs):
-        from app.services.v2_generation_pipeline import V2PipelineResult
-
-        calls.append(int(kwargs.get("max_regenerations", -1)))
-        nxt = GlobalCharacterImage(
-            global_character_id=character_obj.id,
-            image_path=f"output/generated_images/pending_review/quality_cap_{len(calls)}.webp",
-            quality_status="reject",
-            identity_status=None,
-            quality_checker_version=QUALITY_CHECKER_VERSION,
-        )
-        db.add(nxt)
-        db.commit()
-        db.refresh(nxt)
-        return V2PipelineResult(character_obj.id, "generation_failed", len(calls), nxt.id), 1
-
-    monkeypatch.setattr(service, "_regenerate_capped", fake_regen)
-    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
-
-    summary = PendingInspectionSummary(requested_limit=1)
-    _final, context, auto_zero = service._repair_with_stages(
-        character,
-        image,
-        auto_regenerate=True,
-        max_regenerations=2,
-        cleanup_rejected=False,
-        summary=summary,
-    )
-
-    assert calls == [1, 1]
-    assert context.regeneration_completed == 2
-    assert auto_zero is True
-
-
-def test_stage_unavailable_does_not_consume_regeneration_budget(db: Session, monkeypatch) -> None:
-    character = add_character(db, tag="no_stage_data", review_status="pending")
-    image = character.images[0]
-    image.quality_status = "pass"
-    image.identity_status = "warning"
-    image.identity_reasons = '["character_tag_low_confidence"]'
-    image.quality_checker_version = QUALITY_CHECKER_VERSION
-    image.identity_checker_version = IDENTITY_CHECKER_VERSION
-    db.commit()
-
-    service = PendingReviewInspectionService(db)
 
     def fail_if_called(*_args, **_kwargs):
-        raise AssertionError("regeneration must not run when no collected stage data exists")
+        raise AssertionError("quality reject must not trigger artifact regen")
 
     monkeypatch.setattr(service, "_regenerate_capped", fail_if_called)
 
     summary = PendingInspectionSummary(requested_limit=1)
-    _final, context, auto_zero = service._repair_with_stages(
+    _final, context, limit_hit = service._repair_with_stages(
         character,
         image,
         auto_regenerate=True,
@@ -410,18 +361,12 @@ def test_stage_unavailable_does_not_consume_regeneration_budget(db: Session, mon
     )
 
     assert context.regeneration_requested == 0
-    assert summary.regeneration_requested == 0
-    assert auto_zero is True
-    assert context.final_action == "0성"
-    assert STAGE_IDENTITY_MULTICOLOR in context.unavailable_stages
-    assert STAGE_IDENTITY_EYE in context.unavailable_stages
+    assert limit_hit is False
+    assert context.final_action == "pass"
 
 
-def test_identity_persistent_failure_auto_zeros_without_semantic(db: Session, monkeypatch) -> None:
-    character = add_character(db, tag="identity_zero", review_status="pending")
-    character.gender = "1boy"
-    character.primary_hair_color = "blue_hair"
-    character.base_prompt = "head, blue hair"
+def test_identity_failure_does_not_auto_regen(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="identity_skip", review_status="pending")
     image = character.images[0]
     image.quality_status = "pass"
     image.identity_status = "warning"
@@ -430,29 +375,15 @@ def test_identity_persistent_failure_auto_zeros_without_semantic(db: Session, mo
     image.identity_checker_version = IDENTITY_CHECKER_VERSION
     db.commit()
 
-    def fake_regen(character_obj, **kwargs):
-        from app.services.v2_generation_pipeline import V2PipelineResult
-
-        nxt = GlobalCharacterImage(
-            global_character_id=character_obj.id,
-            image_path=f"output/generated_images/pending_review/identity_zero_{kwargs.get('repair_stage')}.webp",
-            quality_status="pass",
-            identity_status="warning",
-            identity_reasons='["hair_color_mismatch","character_tag_low_confidence"]',
-            quality_checker_version=QUALITY_CHECKER_VERSION,
-            identity_checker_version=IDENTITY_CHECKER_VERSION,
-        )
-        db.add(nxt)
-        db.commit()
-        db.refresh(nxt)
-        return V2PipelineResult(character_obj.id, "generation_failed", 1, nxt.id), 1
-
     service = PendingReviewInspectionService(db)
-    monkeypatch.setattr(service, "_regenerate_capped", fake_regen)
-    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("identity repair is disabled in artifact-cleanup mode")
+
+    monkeypatch.setattr(service, "_regenerate_capped", fail_if_called)
 
     summary = PendingInspectionSummary(requested_limit=1)
-    _final, context, auto_zero = service._repair_with_stages(
+    _final, context, limit_hit = service._repair_with_stages(
         character,
         image,
         auto_regenerate=True,
@@ -461,81 +392,168 @@ def test_identity_persistent_failure_auto_zeros_without_semantic(db: Session, mo
         summary=summary,
     )
 
-    assert auto_zero is True
-    assert context.final_action == "0성"
-    assert STAGE_IDENTITY_HAIR in context.attempted_stages
-    assert STAGE_SEMANTIC_OUTFIT not in context.attempted_stages
-    assert STAGE_SEMANTIC_GALLERY not in context.attempted_stages
+    assert context.regeneration_requested == 0
+    assert limit_hit is False
+    assert context.final_action == "pass"
 
 
-def _exhaust_repair(service: PendingReviewInspectionService, monkeypatch) -> None:
+def test_warning_suspect_does_not_auto_regen(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="suspect_skip", review_status="pending")
+    image = character.images[0]
+    image.identity_status = "warning"
+    image.identity_reasons = '["gallery_suspect:character_print:0.12"]'
+    db.commit()
+
+    service = PendingReviewInspectionService(db)
+    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("suspect/warning must not auto-regenerate")
+
+    monkeypatch.setattr(service, "_regenerate_capped", fail_if_called)
+
+    summary = service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
+    assert summary.regeneration_requested == 0
+    fields = PendingReviewInspectionService.parse_provenance(character.review.review_note)
+    assert fields is not None
+    assert fields["outcome"] == "pass"
+    assert fields["regen"] == "0"
+
+
+def _exhaust_artifact(service: PendingReviewInspectionService, monkeypatch) -> None:
     def fake_repair(character_obj, image_obj, **_kwargs):
         from app.services.inspection_repair import RepairContext
 
-        return image_obj, RepairContext(final_action="0성", latest_image_id=image_obj.id), True
+        return image_obj, RepairContext(final_action="artifact_limit", latest_image_id=image_obj.id), True
 
     monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
     monkeypatch.setattr(service, "_repair_with_stages", fake_repair)
 
 
-def test_exhausted_repair_prefills_zero_when_auto_complete_is_off(db: Session, monkeypatch) -> None:
-    # Page tests / pilots must not complete a review, but a refresh still has to show
-    # the 0-star verdict instead of an empty rating.
-    character = add_character(db, tag="zero_prefill", review_status="pending")
+def test_exhausted_artifact_does_not_auto_zero(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="limit_keep", review_status="pending")
     image = character.images[0]
     image.identity_status = "reject"
-    image.identity_reasons = '["multi_subject_output:multiple_girls:0.79"]'
+    image.identity_reasons = '["printed_character_gallery"]'
     db.commit()
 
     service = PendingReviewInspectionService(db)
-    _exhaust_repair(service, monkeypatch)
+    _exhaust_artifact(service, monkeypatch)
 
-    summary = service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
+    summary = service.inspect_batch(limit=5, auto_complete=True, cleanup_rejected=False, test_run=True)
     db.refresh(character.review)
 
-    assert summary.prefilled_pending == 1
     assert summary.auto_completed == 0
-    assert character.review.rating == 0
-    assert character.review.review_status == "pending"
-    assert "reason=regeneration_limit_exhausted" in (character.review.review_note or "")
+    assert character.review.rating is None
+    fields = PendingReviewInspectionService.parse_provenance(character.review.review_note)
+    assert fields is not None
+    assert fields["outcome"] == "artifact_regen_limit"
 
 
-def test_inspected_without_rating_candidate_is_marked_undecided(db: Session, monkeypatch) -> None:
-    character = add_character(db, tag="undecided_marker", review_status="pending")
-    image = character.images[0]
-    image.identity_status = "warning"
-    image.identity_reasons = '["character_tag_undetected", "gender_confidence_low:1girl:0.52"]'
+def test_gallery_pass_soft_deletes_prior_auto_regen(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="gallery_cleanup", review_status="pending")
+    initial = character.images[0]
+    initial.generation_origin = "initial"
+    initial.identity_status = "reject"
+    initial.identity_reasons = '["printed_character_gallery"]'
+    initial.auto_inspection_status = "reject_gallery"
     db.commit()
 
     service = PendingReviewInspectionService(db)
+    calls = {"n": 0}
+
+    def fake_regen(character_obj, **kwargs):
+        from app.services.v2_generation_pipeline import V2PipelineResult
+
+        calls["n"] += 1
+        if calls["n"] == 1:
+            nxt = GlobalCharacterImage(
+                global_character_id=character_obj.id,
+                image_path="output/generated_images/pending_review/gallery_cleanup_failed.webp",
+                quality_status="pass",
+                identity_status="reject",
+                identity_reasons='["printed_character_gallery"]',
+                quality_checker_version=QUALITY_CHECKER_VERSION,
+                identity_checker_version=IDENTITY_CHECKER_VERSION,
+            )
+            status = "generation_failed"
+        else:
+            nxt = GlobalCharacterImage(
+                global_character_id=character_obj.id,
+                image_path="output/generated_images/pending_review/gallery_cleanup_pass.webp",
+                quality_status="pass",
+                identity_status="pass",
+                identity_reasons="[]",
+                quality_checker_version=QUALITY_CHECKER_VERSION,
+                identity_checker_version=IDENTITY_CHECKER_VERSION,
+            )
+            status = "generated"
+        db.add(nxt)
+        db.commit()
+        db.refresh(nxt)
+        return V2PipelineResult(character_obj.id, status, calls["n"], nxt.id), 1
+
+    monkeypatch.setattr(service, "_regenerate_capped", fake_regen)
     monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
 
-    summary = service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
-    db.refresh(character.review)
+    summary = PendingInspectionSummary(requested_limit=1)
+    final_image, context, limit_hit = service._repair_with_stages(
+        character,
+        initial,
+        auto_regenerate=True,
+        max_regenerations=2,
+        cleanup_rejected=True,
+        summary=summary,
+    )
 
-    assert summary.undecided_pending == 1
-    assert character.review.rating is None
-    note = character.review.review_note or ""
-    assert "undecided=1" in note
-    assert "reason=gender_confidence_low:1girl:0.52" in note
+    autos = (
+        db.query(GlobalCharacterImage)
+        .filter(
+            GlobalCharacterImage.global_character_id == character.id,
+            GlobalCharacterImage.generation_origin == "auto_inspection_regen",
+        )
+        .all()
+    )
+    failed = next(img for img in autos if img.identity_status == "reject")
+    db.refresh(initial)
+    assert limit_hit is False
+    assert context.final_action == "pass"
+    assert final_image.identity_status == "pass"
+    assert failed.deleted_at is not None
+    assert failed.is_rejected is True
+    assert initial.deleted_at is None
+    assert initial.is_rejected is False
+    assert summary.rejected_files_removed == 1
 
 
-def test_undecided_marker_is_reverted_by_test_reset(db: Session, monkeypatch) -> None:
-    character = add_character(db, tag="undecided_reset", review_status="pending")
-    image = character.images[0]
-    image.identity_status = "warning"
-    image.identity_reasons = '["gender_confidence_low:1boy:0.37"]'
+def test_manual_regen_image_is_never_cleaned(db: Session) -> None:
+    character = add_character(db, tag="manual_keep", review_status="pending")
+    manual = character.images[0]
+    manual.generation_origin = "manual_regen"
+    manual.identity_status = "reject"
+    manual.identity_reasons = '["printed_character_gallery"]'
+    manual.auto_inspection_status = "reject_gallery"
+    manual.generation_chain_id = "chain-x"
+    keep = GlobalCharacterImage(
+        global_character_id=character.id,
+        image_path="output/generated_images/pending_review/manual_keep_pass.webp",
+        quality_status="pass",
+        identity_status="pass",
+        identity_reasons="[]",
+        generation_origin="auto_inspection_regen",
+        generation_chain_id="chain-x",
+        auto_inspection_status="pass",
+    )
+    db.add(keep)
     db.commit()
+    db.refresh(keep)
 
-    service = PendingReviewInspectionService(db)
-    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
-    service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
-
-    service.reset_test_results([character.id])
-    db.refresh(character.review)
-
-    assert "undecided=1" not in (character.review.review_note or "")
-    assert character.review.rating is None
+    removed = PendingReviewInspectionService(db)._cleanup_artifact_chain(
+        character.id, chain_id="chain-x", keep_image_id=keep.id
+    )
+    db.refresh(manual)
+    assert removed == 0
+    assert manual.deleted_at is None
 
 
 def test_provenance_marker_is_persisted_and_parsed(db: Session, monkeypatch) -> None:
@@ -555,43 +573,6 @@ def test_provenance_marker_is_persisted_and_parsed(db: Session, monkeypatch) -> 
     assert fields["outcome"] == "pass"
     assert fields["test"] == "1"
     assert summary.outcomes.get("pass") == 1
-
-
-def test_suspect_output_records_suspect_provenance(db: Session, monkeypatch) -> None:
-    character = add_character(db, tag="prov_suspect", review_status="pending")
-    image = character.images[0]
-    image.identity_status = "warning"
-    image.identity_reasons = '["gallery_suspect:character_print:0.12"]'
-    db.commit()
-
-    service = PendingReviewInspectionService(db)
-    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
-    service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
-    db.refresh(character.review)
-
-    fields = PendingReviewInspectionService.parse_provenance(character.review.review_note)
-    assert fields is not None
-    assert fields["outcome"] == "suspect"
-    assert fields["reason"] == "gallery_suspect:character_print:0.12"
-    # A suspect must never spend a regeneration.
-    assert fields["regen"] == "0"
-
-
-def test_auto_zero_records_provenance(db: Session, monkeypatch) -> None:
-    character = add_character(db, tag="prov_zero", review_status="pending")
-    image = character.images[0]
-    image.identity_status = "reject"
-    image.identity_reasons = '["multi_subject_output:multiple_girls:0.80"]'
-    db.commit()
-
-    service = PendingReviewInspectionService(db)
-    _exhaust_repair(service, monkeypatch)
-    service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
-    db.refresh(character.review)
-
-    fields = PendingReviewInspectionService.parse_provenance(character.review.review_note)
-    assert fields is not None
-    assert fields["outcome"] == "auto_zero"
 
 
 def test_provenance_marker_is_replaced_not_appended(db: Session, monkeypatch) -> None:
@@ -633,7 +614,6 @@ def test_local_review_marker_is_stored_and_parsed(db: Session) -> None:
 def test_test_local_review_marker_is_reverted_by_reset(db: Session) -> None:
     character = add_character(db, tag="local_review_reset", review_status="pending")
     service = PendingReviewInspectionService(db)
-    # Stamp a manual rating marker so reset has a test line to key on, plus a test local review.
     service._prefill_rating(character, rating=3, confidence=0.9, reason="test", test_run=True)
     service.set_local_review(character, status="needs_user", test_run=True)
     db.commit()
@@ -642,3 +622,4 @@ def test_test_local_review_marker_is_reverted_by_reset(db: Session) -> None:
     db.refresh(character.review)
 
     assert "inspection_local_review=" not in (character.review.review_note or "")
+    assert character.review.rating is None

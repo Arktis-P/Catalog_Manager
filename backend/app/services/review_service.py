@@ -490,12 +490,12 @@ class ReviewService:
     # Provenance filter (§6). Matches the compact review_note marker written by the
     # pending inspection service: `auto_inspection_result=v1;outcome=<x>;reason=...`.
     _INSPECTION_OUTCOME_GROUPS: dict[str, tuple[str, ...]] = {
-        "needs_user": ("suspect", "auto_zero", "auto_minus_one", "tagger_error", "undecided"),
+        "needs_user": ("tagger_error", "artifact_regen_limit"),
         "suspect": ("suspect",),
         "auto_zero": ("auto_zero",),
         "auto_minus_one": ("auto_minus_one",),
         "regenerated_pass": ("regenerated_pass",),
-        "auto_pass": ("pass", "prefill_three", "auto_one"),
+        "auto_pass": ("pass", "prefill_three"),
         "uninspected": (),  # special-cased below
     }
 

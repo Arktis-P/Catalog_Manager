@@ -46,6 +46,15 @@ class GlobalCharacterImage(Base):
     is_provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     is_rejected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_cover: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    # Artifact-cleanup provenance (§5). Soft-delete uses deleted_at + is_rejected.
+    generation_origin: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="initial", server_default="initial"
+    )
+    generation_chain_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    auto_inspection_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    auto_cleanup_candidate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    replaced_by_image_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False

@@ -709,6 +709,7 @@ class GenerationService:
         image_bytes: bytes,
         created_at: datetime | None = None,
         skip_checks: bool = False,
+        generation_origin: str = "initial",
     ) -> GlobalCharacterImage:
         pending_dir = self.get_pending_images_dir()
         pending_dir.mkdir(parents=True, exist_ok=True)
@@ -742,6 +743,7 @@ class GenerationService:
             eye_match=check.eye_match if check else None,
             gender_pred=check.gender_pred if check else None,
             cover_score=check.cover_score if check else None,
+            generation_origin=generation_origin or "initial",
         )
         generation_job.status = "completed"
         generation_job.output_path = rel_path
@@ -1084,6 +1086,7 @@ class GenerationService:
                 generation_job=generation_job,
                 image_bytes=image_bytes,
                 skip_checks=True,
+                generation_origin="manual_regen",
             )
 
             if progress_callback:

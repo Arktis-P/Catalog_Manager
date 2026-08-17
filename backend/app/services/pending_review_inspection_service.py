@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
@@ -15,18 +17,17 @@ from app.services.character_image_service import run_v2_quality_identity_checks
 from app.services.db_write_queue import commit_db_session
 from app.services.identity_checker import IDENTITY_CHECKER_VERSION, IdentityCheckResult, is_tagger_failure
 from app.services.inspection_repair import (
-    STAGE_AUTO_ZERO,
+    AUTO_STATUS_LIMIT,
+    AUTO_STATUS_PASS,
+    AUTO_STATUS_REJECT_GALLERY,
+    AUTO_STATUS_REJECT_SWIMWEAR,
+    GENERATION_ORIGIN_AUTO,
+    STAGE_ARTIFACT_LIMIT,
     STAGE_DONE,
-    STAGE_IDENTITY_EYE,
-    STAGE_IDENTITY_HAIR,
-    STAGE_IDENTITY_MULTICOLOR,
-    STAGE_QUALITY,
-    STAGE_SEMANTIC_GALLERY,
-    STAGE_SEMANTIC_OUTFIT,
     RepairContext,
-    decide_repair_stage,
-    identity_insufficient,
-    needs_identity_repair,
+    artifact_reject_status,
+    decide_artifact_repair_stage,
+    is_artifact_repair_reject,
 )
 from app.services.quality_checker import QUALITY_CHECKER_VERSION
 from app.services.reference_profile_service import REFERENCE_PROFILE_VERSION
@@ -34,25 +35,22 @@ from app.services.settings_service import SettingsService
 from app.services.v2_generation_job_manager import v2_generation_job_manager
 from app.services.v2_generation_pipeline import V2GenerationPipeline, V2PipelineResult
 
-PENDING_INSPECTION_VERSION = "v1.4"
+PENDING_INSPECTION_VERSION = "v1.5"
 # Compact, human-inspectable provenance line persisted to review_note. Survives page
 # reloads without a DB migration and is replaced (not appended) on each re-inspection.
 AUTO_INSPECTION_RESULT_VERSION = "v1"
 AUTO_INSPECTION_RESULT_PREFIX = "auto_inspection_result="
-# Outcomes the reviewer must still look at (suspect queue / user confirm queue).
-NEEDS_USER_REVIEW_OUTCOMES = frozenset(
-    {"suspect", "auto_zero", "auto_minus_one", "tagger_error", "undecided"}
-)
-# Local worker first-pass confirmation persisted alongside provenance (§7).
+# Outcomes still surfaced on the card after artifact-only narrowing.
+NEEDS_USER_REVIEW_OUTCOMES = frozenset({"tagger_error", "artifact_regen_limit"})
+# Local worker first-pass confirmation persisted alongside provenance (§7) — kept for
+# API compat but the UI no longer centres on the suspect queue.
 LOCAL_REVIEW_PREFIX = "inspection_local_review="
 LOCAL_REVIEW_STATUSES = frozenset({"confirmed", "false_positive", "missed_failure", "needs_user"})
 AUTO_RATING_CONFIDENCE = 0.85
 PREFILL_RATING_CONFIDENCE = 0.72
 DEFAULT_AUDIT_SAMPLE_RATE = 0.10
+# Initial image + up to two auto regenerations (§3).
 DEFAULT_MAX_REGENERATIONS = 2
-# Identity ladder (hair/multicolor/eye) plus up to two semantic passes needs headroom
-# beyond the historical per-character regeneration default of 2.
-MAX_STAGE_REGENERATIONS = 6
 MAX_TRACKED_TEST_CHARACTERS = 2000
 MAX_RESET_CHARACTERS = 1000
 
@@ -393,9 +391,8 @@ class PendingReviewInspectionService:
     ) -> tuple[str, str]:
         """Map the final inspection state onto a persisted provenance outcome.
 
-        Ordering favours the signal the reviewer most needs to see first: an actual
-        tagger failure, then an auto 0/-1 verdict, then a real regeneration that passed,
-        then the weak `suspect` queue, then benign prefills.
+        Artifact-cleanup mode: no auto_zero / auto_minus_one / suspect-centric outcomes.
+        Limit exhaustion records artifact_regen_limit and leaves the image for a human.
         """
         reasons = self._json_reason_list(final_image.identity_reasons)
         if is_tagger_failure(reasons):
@@ -404,38 +401,20 @@ class PendingReviewInspectionService:
         final_action = repair_context.final_action if repair_context else "pass"
         regen = repair_context.regeneration_completed if repair_context else 0
 
-        if regeneration_exhausted or final_action == "0성":
+        if regeneration_exhausted or final_action == "artifact_limit":
             reason = (
                 repair_context.reject_reason
                 if repair_context and repair_context.reject_reason
-                else "regeneration_limit_exhausted"
+                else "artifact_regen_limit"
             )
-            return "auto_zero", reason
-        if rating == -1:
-            return "auto_minus_one", "non_human_output"
+            return "artifact_regen_limit", reason
         if regen > 0 and final_action == "pass":
             stage = None
             if repair_context is not None:
-                stage = repair_context.semantic_repair_stage or repair_context.identity_repair_stage
+                stage = repair_context.semantic_repair_stage or "regenerated"
             return "regenerated_pass", stage or "regenerated"
-
-        suspect = next((r for r in reasons if r.startswith("gallery_suspect:")), None)
-        if suspect is not None:
-            return "suspect", suspect
-        if rating == 1:
-            return "auto_one", "male_output"
         if rating == 3:
             return "prefill_three", "confident_female_output"
-        if not rating_written:
-            undecided_reason = self._undecided_reason(final_image)
-            ambiguous = undecided_reason.startswith(
-                ("gender_confidence_low", "multi_subject_output", "tagger")
-            )
-            if ambiguous or final_image.identity_status == "warning":
-                return "undecided", undecided_reason
-            # Clean identity pass with nothing to auto-rate: a genuine auto pass, not an
-            # ambiguous item the user must adjudicate.
-            return "pass", "clean"
         return "pass", "clean"
 
     def _record_provenance(
@@ -739,7 +718,11 @@ class PendingReviewInspectionService:
     def _latest_image_for(self, character_id: int) -> GlobalCharacterImage | None:
         return (
             self.db.query(GlobalCharacterImage)
-            .filter(GlobalCharacterImage.global_character_id == character_id)
+            .filter(
+                GlobalCharacterImage.global_character_id == character_id,
+                GlobalCharacterImage.deleted_at.is_(None),
+                GlobalCharacterImage.is_rejected.is_(False),
+            )
             .order_by(GlobalCharacterImage.id.desc())
             .first()
         )
@@ -776,16 +759,19 @@ class PendingReviewInspectionService:
         cleanup_rejected: bool,
         summary: PendingInspectionSummary,
     ) -> tuple[GlobalCharacterImage, RepairContext, bool]:
-        """Identity-first repair loop with explicit reinspection of each new latest image."""
+        """Artifact-only repair loop: gallery/swimwear rejects only, max N regenerations.
+
+        Returns (latest_image, context, limit_exhausted). Limit exhaustion leaves the
+        current image in place — it does NOT auto-zero.
+        """
+        chain_id = image.generation_chain_id or f"ai-{character.id}-{image.id}-{uuid.uuid4().hex[:8]}"
         context = RepairContext(
             latest_image_id=image.id,
             image_count=self._image_count_for(character.id),
         )
         current = image
-        stage_budget = max(max_regenerations, MAX_STAGE_REGENERATIONS)
-        auto_zero = False
-        precheck_pipeline = V2GenerationPipeline(self.db)
-        identity_stages = {STAGE_IDENTITY_HAIR, STAGE_IDENTITY_MULTICOLOR, STAGE_IDENTITY_EYE}
+        self._stamp_inspection_status(current)
+        budget = max(1, min(max_regenerations, DEFAULT_MAX_REGENERATIONS))
 
         while True:
             reasons = self._json_reason_list(current.identity_reasons)
@@ -796,58 +782,47 @@ class PendingReviewInspectionService:
                 context.final_action = "manual"
                 return current, context, False
 
-            stage = decide_repair_stage(
-                gender=character.gender,
-                quality_status=current.quality_status,
+            stage = decide_artifact_repair_stage(
                 identity_status=current.identity_status,
                 reasons=reasons,
                 context=context,
+                max_regenerations=budget,
             )
 
             if stage == STAGE_DONE:
+                current.auto_inspection_status = AUTO_STATUS_PASS
+                current.auto_cleanup_candidate = False
                 context.final_action = "pass"
                 context.identity_ok = True
+                if cleanup_rejected and context.regeneration_completed > 0:
+                    summary.rejected_files_removed += self._cleanup_artifact_chain(
+                        character.id,
+                        chain_id=chain_id,
+                        keep_image_id=current.id,
+                    )
+                self.db.flush()
                 return current, context, False
 
-            if stage == STAGE_AUTO_ZERO:
-                context.final_action = "0성"
-                context.mark(STAGE_AUTO_ZERO)
+            if stage == STAGE_ARTIFACT_LIMIT:
+                current.auto_inspection_status = AUTO_STATUS_LIMIT
+                context.final_action = "artifact_limit"
+                context.mark(STAGE_ARTIFACT_LIMIT)
+                self.db.flush()
                 return current, context, True
 
             if not auto_regenerate:
                 context.final_action = "manual"
                 return current, context, False
 
-            if context.regeneration_requested >= stage_budget:
-                context.final_action = "0성"
-                return current, context, True
+            if not is_artifact_repair_reject(reasons):
+                context.final_action = "pass"
+                return current, context, False
 
-            identity_snapshot = self._identity_snapshot_from_image(current)
-
-            # Skip identity stages that have no actionable collected data. This must not
-            # spend a regeneration on an unchanged prompt; marking the stage lets
-            # decide_repair_stage advance to the next stage (or auto-zero).
-            if stage in identity_stages:
-                stage_variant = precheck_pipeline.build_stage_variant(
-                    character, stage=stage, identity=identity_snapshot
-                )
-                if stage_variant is None:
-                    context.mark_unavailable(stage)
-                    context.record_event(
-                        {
-                            "stage": stage,
-                            "status": "unavailable",
-                            "before_base_prompt": character.base_prompt,
-                        }
-                    )
-                    continue
-
-            # Outer stage loop owns retry counts. Each stage job generates at most one
-            # image; semantic/quality may run the stage itself up to twice via RepairContext.
             context.mark(stage)
             summary.regeneration_requested += 1
             context.regeneration_requested += 1
             before_prompt = character.base_prompt
+            identity_snapshot = self._identity_snapshot_from_image(current)
             result, generated = self._regenerate_capped(
                 character,
                 max_regenerations=1,
@@ -862,12 +837,18 @@ class PendingReviewInspectionService:
 
             latest = self._latest_image_for(character.id)
             if latest is None:
-                context.final_action = "0성"
+                context.final_action = "artifact_limit"
                 return current, context, True
 
-            # New latest must be inspected even when the generation job already stamped
-            # checker versions — force a fresh pass when the pipeline skipped identity
-            # (quality reject) or left an older stamp somehow.
+            if latest.id != current.id:
+                # Stamp the failed predecessor as a cleanup candidate (never the initial).
+                if current.generation_origin == GENERATION_ORIGIN_AUTO:
+                    current.auto_cleanup_candidate = True
+                    current.replaced_by_image_id = latest.id
+                latest.generation_origin = GENERATION_ORIGIN_AUTO
+                latest.generation_chain_id = chain_id
+                latest.auto_cleanup_candidate = False
+
             if (
                 latest.id != current.id
                 or latest.identity_checker_version != IDENTITY_CHECKER_VERSION
@@ -885,12 +866,7 @@ class PendingReviewInspectionService:
                 summary.inspected += 1
                 self._record_inspection_diagnostics(summary, latest)
 
-            if cleanup_rejected:
-                summary.rejected_files_removed += self._cleanup_superseded_rejects(
-                    character.id,
-                    keep_image_id=latest.id,
-                )
-
+            self._stamp_inspection_status(latest)
             self.db.refresh(character)
             context.record_event(
                 {
@@ -902,49 +878,85 @@ class PendingReviewInspectionService:
                     "identity_status": latest.identity_status,
                     "identity_reasons": self._json_reason_list(latest.identity_reasons),
                     "pipeline_status": result.generation_status if result is not None else None,
+                    "chain_id": chain_id,
                 }
             )
-
             current = latest
             commit_db_session(self.db)
 
-            if result is not None and result.generation_status == "generated":
-                # Pipeline reported success; still re-evaluate stages in case a warning
-                # identity repair remains (should be rare with external_stage_control).
-                continue
+        return current, context, False
 
-            # generation_failed / cancelled / exhausted — let decide_repair_stage choose
-            # the next identity/semantic stage or auto-zero on the reinpected latest.
-            continue
+    def _stamp_inspection_status(self, image: GlobalCharacterImage) -> None:
+        reasons = self._json_reason_list(image.identity_reasons)
+        status = artifact_reject_status(reasons)
+        if status is not None:
+            image.auto_inspection_status = status
+        elif image.identity_status == "pass" and image.quality_status != "reject":
+            image.auto_inspection_status = AUTO_STATUS_PASS
 
-        return current, context, auto_zero
+    def _cleanup_artifact_chain(
+        self,
+        character_id: int,
+        *,
+        chain_id: str,
+        keep_image_id: int,
+    ) -> int:
+        """Soft-delete failed auto_inspection_regen images in the same chain only.
 
-    def _cleanup_superseded_rejects(self, character_id: int, *, keep_image_id: int) -> int:
-        """Keep one latest result and remove older unselected rejects to cap storage growth."""
+        Never touches initial / manual_regen / cover / review-selected images. File
+        unlink failures are swallowed so the inspection flow itself cannot fail.
+        """
+        review = (
+            self.db.query(GlobalCharacterReview)
+            .filter(GlobalCharacterReview.global_character_id == character_id)
+            .first()
+        )
+        cover_id = review.cover_image_id if review else None
         rows = (
             self.db.query(GlobalCharacterImage)
             .filter(
                 GlobalCharacterImage.global_character_id == character_id,
                 GlobalCharacterImage.id != keep_image_id,
-                GlobalCharacterImage.is_cover.is_(False),
-                GlobalCharacterImage.is_provisional.is_(False),
-                or_(
-                    GlobalCharacterImage.quality_status == "reject",
-                    GlobalCharacterImage.identity_status == "reject",
+                GlobalCharacterImage.generation_origin == GENERATION_ORIGIN_AUTO,
+                GlobalCharacterImage.generation_chain_id == chain_id,
+                GlobalCharacterImage.auto_inspection_status.in_(
+                    (AUTO_STATUS_REJECT_GALLERY, AUTO_STATUS_REJECT_SWIMWEAR)
                 ),
+                GlobalCharacterImage.is_cover.is_(False),
+                GlobalCharacterImage.deleted_at.is_(None),
             )
             .all()
         )
         removed = 0
+        now = datetime.now()
         for image in rows:
-            path = settings.project_root / image.image_path
-            if path.is_file():
-                path.unlink()
-            self.db.delete(image)
+            if cover_id is not None and image.id == cover_id:
+                continue
+            image.is_rejected = True
+            image.deleted_at = now
+            image.auto_cleanup_candidate = False
+            image.replaced_by_image_id = keep_image_id
+            try:
+                path = settings.project_root / image.image_path
+                if path.is_file():
+                    path.unlink()
+            except OSError:
+                pass
             removed += 1
         if removed:
             self.db.flush()
         return removed
+
+    def _cleanup_superseded_rejects(self, character_id: int, *, keep_image_id: int) -> int:
+        """Backward-compat shim — prefer chain-scoped soft delete via _cleanup_artifact_chain."""
+        latest = self.db.get(GlobalCharacterImage, keep_image_id)
+        if latest is None or not latest.generation_chain_id:
+            return 0
+        return self._cleanup_artifact_chain(
+            character_id,
+            chain_id=latest.generation_chain_id,
+            keep_image_id=keep_image_id,
+        )
 
     @staticmethod
     def _clear_image_inspection(image: GlobalCharacterImage) -> None:
@@ -1097,23 +1109,17 @@ class PendingReviewInspectionService:
 
                 was_reject = checked.quality_status == "reject" or checked.identity_status == "reject"
                 reasons = self._json_reason_list(checked.identity_reasons)
-                needs_repair = (
-                    was_reject
-                    or needs_identity_repair(reasons)
-                    or identity_insufficient(reasons)
-                )
+                # Artifact-cleanup only: gallery/swimwear rejects. Identity/quality/suspect
+                # never spend regeneration budget.
+                needs_repair = is_artifact_repair_reject(reasons) and checked.identity_status == "reject"
 
                 final_image = checked
                 regeneration_exhausted = False
                 repair_context: RepairContext | None = None
 
                 if needs_repair and not is_tagger_failure(reasons):
-                    if was_reject:
-                        summary.rejected += 1
-                    elif checked.quality_status == "warning" or checked.identity_status == "warning":
-                        summary.warnings += 1
-
-                    final_image, repair_context, auto_zero = self._repair_with_stages(
+                    summary.rejected += 1
+                    final_image, repair_context, limit_hit = self._repair_with_stages(
                         character,
                         checked,
                         auto_regenerate=auto_regenerate,
@@ -1121,7 +1127,7 @@ class PendingReviewInspectionService:
                         cleanup_rejected=cleanup_rejected,
                         summary=summary,
                     )
-                    regeneration_exhausted = auto_zero or repair_context.final_action == "0성"
+                    regeneration_exhausted = limit_hit or repair_context.final_action == "artifact_limit"
                     if repair_context.final_action == "pass":
                         summary.passed += 1
                 elif checked.quality_status == "warning" or checked.identity_status == "warning":
@@ -1130,7 +1136,7 @@ class PendingReviewInspectionService:
                         latest_image_id=checked.id,
                         image_count=self._image_count_for(character.id),
                         final_action="pass",
-                        identity_ok=not identity_insufficient(reasons),
+                        identity_ok=True,
                         reject_reason=reasons[0] if reasons else None,
                     )
                 else:
@@ -1154,9 +1160,8 @@ class PendingReviewInspectionService:
 
                 rating, confidence = self._candidate_from_reasons(final_image)
                 rating_written = False
+                # Broad auto rating (-1 / 0 / 1) is disabled. Keep only the 3-star prefill.
                 if rating == 3 and confidence is not None and confidence >= PREFILL_RATING_CONFIDENCE:
-                    # 3 is never auto-completed: prefill it so normal female results
-                    # usually need only Enter while favorites can still be promoted.
                     if self._prefill_rating(
                         character,
                         rating=3,
@@ -1167,85 +1172,16 @@ class PendingReviewInspectionService:
                         summary.prefilled_pending += 1
                     summary.suggested_only += 1
                     rating_written = True
-                elif rating in {-1, 1} and confidence is not None:
-                    if auto_complete and confidence >= AUTO_RATING_CONFIDENCE:
-                        outcome = self._apply_auto_rating(
-                            character,
-                            rating=rating,
-                            confidence=confidence,
-                            audit_sample_rate=audit_sample_rate,
-                            reason="local_prior_and_output_agree",
-                            test_run=test_run,
-                        )
-                        if outcome == "completed":
-                            summary.auto_completed += 1
-                        elif outcome == "audit":
-                            summary.audit_kept_pending += 1
-                        if outcome in {"completed", "audit"}:
-                            key = str(rating)
-                            summary.ratings[key] = summary.ratings.get(key, 0) + 1
-                        rating_written = outcome in {"completed", "audit"}
-                    elif confidence >= PREFILL_RATING_CONFIDENCE:
-                        if self._prefill_rating(
-                            character,
-                            rating=rating,
-                            confidence=confidence,
-                            reason="conservative_rating_prefill",
-                            test_run=test_run,
-                        ):
-                            summary.prefilled_pending += 1
-                        rating_written = True
-
-                if auto_regenerate and regeneration_exhausted:
-                    # 0-star is decided only when this inspection run actually exhausted
-                    # its capped regeneration budget. Do not reuse a stale
-                    # generation_failed state from an earlier run/reset.
-                    if auto_complete:
-                        outcome = self._apply_auto_rating(
-                            character,
-                            rating=0,
-                            confidence=1.0,
-                            audit_sample_rate=audit_sample_rate,
-                            reason="regeneration_limit_exhausted",
-                            test_run=test_run,
-                        )
-                        if outcome == "completed":
-                            summary.auto_completed += 1
-                        elif outcome == "audit":
-                            summary.audit_kept_pending += 1
-                        if outcome in {"completed", "audit"}:
-                            summary.ratings["0"] = summary.ratings.get("0", 0) + 1
-                        rating_written = rating_written or outcome in {"completed", "audit"}
-                    else:
-                        # Page tests / pilots must not complete a review, but the 0-star
-                        # verdict still has to be visible after a refresh.
-                        if self._prefill_rating(
-                            character,
-                            rating=0,
-                            confidence=1.0,
-                            reason="regeneration_limit_exhausted",
-                            test_run=test_run,
-                        ):
-                            summary.prefilled_pending += 1
-                        rating_written = True
 
                 # Persist one provenance line so a page reload still shows what the
-                # automation decided and why (small-face suspect vs auto-zero vs pass).
+                # automation decided (artifact regen vs clean pass vs limit).
                 outcome, provenance_reason = self._determine_outcome(
                     final_image,
                     repair_context,
-                    rating=rating,
+                    rating=rating if rating_written else None,
                     rating_written=rating_written,
                     regeneration_exhausted=regeneration_exhausted,
                 )
-
-                if outcome == "undecided" and not rating_written:
-                    if self._note_undecided(
-                        character,
-                        reason=provenance_reason,
-                        test_run=test_run,
-                    ):
-                        summary.undecided_pending += 1
                 self._record_provenance(
                     character,
                     outcome=outcome,

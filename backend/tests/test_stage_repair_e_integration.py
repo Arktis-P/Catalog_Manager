@@ -11,18 +11,12 @@ from app.models.appearance_tag_relevance import CharacterAppearanceTagRelevance
 from app.models.global_character import GlobalCharacter
 from app.models.global_character_image import GlobalCharacterImage
 from app.models.global_character_review import GlobalCharacterReview
-from app.services.identity_checker import IDENTITY_CHECKER_VERSION, IdentityCheckResult
-from app.services.inspection_repair import (
-    STAGE_IDENTITY_EYE,
-    STAGE_IDENTITY_HAIR,
-    STAGE_IDENTITY_MULTICOLOR,
-)
+from app.services.identity_checker import IDENTITY_CHECKER_VERSION
 from app.services.pending_review_inspection_service import (
     PendingInspectionSummary,
     PendingReviewInspectionService,
 )
 from app.services.quality_checker import QUALITY_CHECKER_VERSION
-from app.services.v2_generation_pipeline import V2GenerationPipeline, V2PipelineResult
 
 
 @pytest.fixture()
@@ -48,7 +42,7 @@ def _female_with_relevance(db: Session) -> GlobalCharacter:
         post_count=50,
         gender="1girl",
         primary_hair_color="blue_hair",
-        base_prompt="1.2::e stage female::, blue hair",
+        base_prompt="head, blue hair",
         generation_status="generated",
     )
     character.images.append(
@@ -71,14 +65,12 @@ def _female_with_relevance(db: Session) -> GlobalCharacter:
                 tag="gradient_hair",
                 tag_category="multicolor",
                 relevance_score=0.9,
-                is_prompt_candidate=True,
             ),
             CharacterAppearanceTagRelevance(
                 global_character_id=character.id,
                 tag="red_eyes",
                 tag_category="eye_color",
-                relevance_score=0.8,
-                is_prompt_candidate=True,
+                relevance_score=0.9,
             ),
         ]
     )
@@ -87,51 +79,19 @@ def _female_with_relevance(db: Session) -> GlobalCharacter:
     return character
 
 
-def test_female_lowconf_runs_multicolor_then_eye_with_real_relevance(db: Session, monkeypatch) -> None:
+def test_female_lowconf_does_not_run_identity_stages(db: Session, monkeypatch) -> None:
+    """Artifact-cleanup mode: identity low-confidence must not spend regeneration budget."""
     character = _female_with_relevance(db)
     service = PendingReviewInspectionService(db)
-    prompts: list[tuple[str, str | None, str | None]] = []
 
-    def fake_regen(character_obj, **kwargs):
-        stage = kwargs.get("repair_stage")
-        pipeline = V2GenerationPipeline(db)
-        snap = kwargs.get("identity_snapshot")
-        variant = pipeline.build_stage_variant(character_obj, stage=stage, identity=snap)
-        assert variant is not None, f"stage {stage} must have collected data"
-        before = character_obj.base_prompt
-        pipeline.apply_variant_to_character(character_obj, variant)
-        prompts.append((stage, before, character_obj.base_prompt))
-        # Keep actionable low-confidence until eye stage has been applied.
-        reasons = (
-            '["character_tag_low_confidence"]'
-            if stage != STAGE_IDENTITY_EYE
-            else "[]"
-        )
-        status = "warning" if reasons != "[]" else "pass"
-        nxt = GlobalCharacterImage(
-            global_character_id=character_obj.id,
-            image_path=f"output/generated_images/pending_review/e_{stage}.webp",
-            quality_status="pass",
-            identity_status=status,
-            identity_reasons=reasons,
-            quality_checker_version=QUALITY_CHECKER_VERSION,
-            identity_checker_version=IDENTITY_CHECKER_VERSION,
-        )
-        db.add(nxt)
-        db.commit()
-        db.refresh(nxt)
-        return V2PipelineResult(
-            character_obj.id,
-            "generated" if status == "pass" else "generation_failed",
-            1,
-            nxt.id,
-        ), 1
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("identity stages are disabled")
 
-    monkeypatch.setattr(service, "_regenerate_capped", fake_regen)
+    monkeypatch.setattr(service, "_regenerate_capped", fail_if_called)
     monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
 
     summary = PendingInspectionSummary(requested_limit=1)
-    _final, context, auto_zero = service._repair_with_stages(
+    _final, context, limit_hit = service._repair_with_stages(
         character,
         character.images[0],
         auto_regenerate=True,
@@ -140,42 +100,29 @@ def test_female_lowconf_runs_multicolor_then_eye_with_real_relevance(db: Session
         summary=summary,
     )
 
-    assert [stage for stage, _, _ in prompts] == [
-        STAGE_IDENTITY_MULTICOLOR,
-        STAGE_IDENTITY_EYE,
-    ]
-    assert STAGE_IDENTITY_HAIR not in context.attempted_stages
-    assert "gradient hair" in (prompts[0][2] or "")
-    assert "red eyes" in (prompts[1][2] or "")
-    assert context.regeneration_completed == 2
-    assert context.unavailable_stages == []
-    assert auto_zero is False
+    assert context.regeneration_requested == 0
+    assert context.attempted_stages == []
+    assert limit_hit is False
     assert context.final_action == "pass"
 
 
-def test_female_lowconf_skips_missing_multicolor_without_budget(db: Session, monkeypatch) -> None:
+def test_swimwear_reject_still_regenerates(db: Session, monkeypatch) -> None:
     character = _female_with_relevance(db)
-    # Remove multicolor; keep eye only.
-    db.query(CharacterAppearanceTagRelevance).filter(
-        CharacterAppearanceTagRelevance.tag_category == "multicolor"
-    ).delete()
+    image = character.images[0]
+    image.identity_status = "reject"
+    image.identity_reasons = '["atypical_swimwear:bikini:0.88"]'
     db.commit()
 
     service = PendingReviewInspectionService(db)
-    stages: list[str] = []
+    calls = {"n": 0}
 
     def fake_regen(character_obj, **kwargs):
-        stage = kwargs["repair_stage"]
-        stages.append(stage)
-        pipeline = V2GenerationPipeline(db)
-        variant = pipeline.build_stage_variant(
-            character_obj, stage=stage, identity=kwargs.get("identity_snapshot")
-        )
-        assert variant is not None
-        pipeline.apply_variant_to_character(character_obj, variant)
+        from app.services.v2_generation_pipeline import V2PipelineResult
+
+        calls["n"] += 1
         nxt = GlobalCharacterImage(
             global_character_id=character_obj.id,
-            image_path=f"output/generated_images/pending_review/e_skip_{stage}.webp",
+            image_path="output/generated_images/pending_review/e_swim_pass.webp",
             quality_status="pass",
             identity_status="pass",
             identity_reasons="[]",
@@ -191,15 +138,17 @@ def test_female_lowconf_skips_missing_multicolor_without_budget(db: Session, mon
     monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
 
     summary = PendingInspectionSummary(requested_limit=1)
-    _final, context, _auto_zero = service._repair_with_stages(
+    final_image, context, limit_hit = service._repair_with_stages(
         character,
-        character.images[0],
+        image,
         auto_regenerate=True,
         max_regenerations=2,
         cleanup_rejected=False,
         summary=summary,
     )
 
-    assert STAGE_IDENTITY_MULTICOLOR in context.unavailable_stages
-    assert stages == [STAGE_IDENTITY_EYE]
-    assert context.regeneration_completed == 1
+    assert calls["n"] == 1
+    assert context.semantic_repair_stage == "semantic_outfit"
+    assert limit_hit is False
+    assert context.final_action == "pass"
+    assert final_image.identity_status == "pass"

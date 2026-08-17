@@ -2491,10 +2491,6 @@ export function V2ReviewPanel() {
             onChange={(event) => setInspectionOutcome(event.target.value)}
           >
             <option value="">전체</option>
-            <option value="needs_user">사용자 확인 필요</option>
-            <option value="suspect">작은 얼굴/프린트 의심</option>
-            <option value="auto_zero">0성 자동판정</option>
-            <option value="auto_minus_one">-1 자동판정</option>
             <option value="regenerated_pass">재생성 후 통과</option>
             <option value="auto_pass">자동 통과</option>
             <option value="uninspected">미검사/태거오류</option>

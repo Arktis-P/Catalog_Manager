@@ -57,8 +57,33 @@ SEMANTIC_GALLERY_PREFIXES = (
     "multi_subject_output:",
 )
 
+# Artifact-cleanup mode (§2): only gallery/print/panel/collage and atypical swimwear/
+# underwear spend regeneration budget. Identity/gender/non-human reasons are excluded.
+ARTIFACT_GALLERY_PREFIXES = (
+    "embedded_gallery:",
+    "printed_character_gallery",
+    "goods_or_screen_character_gallery",
+    "poster_or_collage_with_text",
+    "weak_print_gallery",
+    "multi_subject_output:",
+)
+ARTIFACT_OUTFIT_PREFIXES = SEMANTIC_OUTFIT_PREFIXES
+ARTIFACT_REPAIR_PREFIXES = ARTIFACT_OUTFIT_PREFIXES + ARTIFACT_GALLERY_PREFIXES
+
 # Keep in sync with v2_generation_pipeline.SEMANTIC_REGEN_REASON_PREFIXES consumers.
 ALL_SEMANTIC_REPAIR_PREFIXES = SEMANTIC_OUTFIT_PREFIXES + SEMANTIC_GALLERY_PREFIXES
+
+STAGE_ARTIFACT_LIMIT = "artifact_regen_limit"
+
+# Auto-inspection status stamps on GlobalCharacterImage.auto_inspection_status.
+AUTO_STATUS_REJECT_GALLERY = "reject_gallery"
+AUTO_STATUS_REJECT_SWIMWEAR = "reject_swimwear"
+AUTO_STATUS_PASS = "pass"
+AUTO_STATUS_LIMIT = "artifact_regen_limit"
+
+GENERATION_ORIGIN_INITIAL = "initial"
+GENERATION_ORIGIN_MANUAL = "manual_regen"
+GENERATION_ORIGIN_AUTO = "auto_inspection_regen"
 
 
 @dataclass
@@ -153,6 +178,56 @@ def is_semantic_gallery_reject(reasons: Iterable[str] | None) -> bool:
 
 def is_semantic_repair_reject(reasons: Iterable[str] | None) -> bool:
     return is_semantic_outfit_reject(reasons) or is_semantic_gallery_reject(reasons)
+
+
+def is_artifact_gallery_reject(reasons: Iterable[str] | None) -> bool:
+    return bool(reasons) and _has_prefix(reasons, ARTIFACT_GALLERY_PREFIXES)
+
+
+def is_artifact_swimwear_reject(reasons: Iterable[str] | None) -> bool:
+    return bool(reasons) and _has_prefix(reasons, ARTIFACT_OUTFIT_PREFIXES)
+
+
+def is_artifact_repair_reject(reasons: Iterable[str] | None) -> bool:
+    """True only for gallery/print/panel/collage or atypical swimwear/underwear."""
+    return is_artifact_gallery_reject(reasons) or is_artifact_swimwear_reject(reasons)
+
+
+def artifact_reject_status(reasons: Iterable[str] | None) -> str | None:
+    """Map reasons onto the compact auto_inspection_status stamp."""
+    if is_artifact_gallery_reject(reasons):
+        return AUTO_STATUS_REJECT_GALLERY
+    if is_artifact_swimwear_reject(reasons):
+        return AUTO_STATUS_REJECT_SWIMWEAR
+    return None
+
+
+def decide_artifact_repair_stage(
+    *,
+    identity_status: str | None,
+    reasons: Iterable[str] | None,
+    context: RepairContext,
+    max_regenerations: int = 2,
+) -> str:
+    """Artifact-cleanup stage decision: gallery/swimwear only, no identity ladder.
+
+    Warning/suspect never enters here (caller must not invoke when status != reject).
+    Exhausted budget returns STAGE_ARTIFACT_LIMIT — leave the image, no auto-zero.
+    """
+    reason_list = [str(item) for item in (reasons or [])]
+
+    # A clean (or non-artifact) latest image always wins, even if the regen budget is full.
+    needs_gallery = identity_status == "reject" and is_artifact_gallery_reject(reason_list)
+    needs_swimwear = identity_status == "reject" and is_artifact_swimwear_reject(reason_list)
+    if not needs_gallery and not needs_swimwear:
+        return STAGE_DONE
+
+    if context.regeneration_completed >= max_regenerations:
+        return STAGE_ARTIFACT_LIMIT
+
+    if needs_swimwear:
+        return STAGE_SEMANTIC_OUTFIT
+    return STAGE_SEMANTIC_GALLERY
 
 
 def decide_repair_stage(

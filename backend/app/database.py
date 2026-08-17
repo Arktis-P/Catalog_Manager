@@ -191,6 +191,24 @@ def _migrate_global_character_image_columns() -> None:
         "is_provisional": (
             "ALTER TABLE global_character_images ADD COLUMN is_provisional BOOLEAN NOT NULL DEFAULT 0"
         ),
+        "generation_origin": (
+            "ALTER TABLE global_character_images "
+            "ADD COLUMN generation_origin VARCHAR(50) NOT NULL DEFAULT 'initial'"
+        ),
+        "generation_chain_id": (
+            "ALTER TABLE global_character_images ADD COLUMN generation_chain_id VARCHAR(64)"
+        ),
+        "auto_inspection_status": (
+            "ALTER TABLE global_character_images ADD COLUMN auto_inspection_status VARCHAR(50)"
+        ),
+        "auto_cleanup_candidate": (
+            "ALTER TABLE global_character_images "
+            "ADD COLUMN auto_cleanup_candidate BOOLEAN NOT NULL DEFAULT 0"
+        ),
+        "replaced_by_image_id": (
+            "ALTER TABLE global_character_images ADD COLUMN replaced_by_image_id INTEGER"
+        ),
+        "deleted_at": "ALTER TABLE global_character_images ADD COLUMN deleted_at DATETIME",
     }
     with engine.begin() as connection:
         for column_name, statement in migrations.items():

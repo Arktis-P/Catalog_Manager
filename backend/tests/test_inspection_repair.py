@@ -246,3 +246,65 @@ def test_pass_returns_done() -> None:
         )
         == STAGE_DONE
     )
+
+
+def test_artifact_gallery_and_swimwear_stages() -> None:
+    from app.services.inspection_repair import (
+        STAGE_ARTIFACT_LIMIT,
+        decide_artifact_repair_stage,
+    )
+
+    ctx = RepairContext()
+    assert (
+        decide_artifact_repair_stage(
+            identity_status="reject",
+            reasons=["printed_character_gallery"],
+            context=ctx,
+        )
+        == STAGE_SEMANTIC_GALLERY
+    )
+    assert (
+        decide_artifact_repair_stage(
+            identity_status="reject",
+            reasons=["atypical_swimwear:bikini:0.9"],
+            context=ctx,
+        )
+        == STAGE_SEMANTIC_OUTFIT
+    )
+    # Warnings / identity mismatches never spend artifact budget.
+    assert (
+        decide_artifact_repair_stage(
+            identity_status="warning",
+            reasons=["gallery_suspect:character_print:0.12"],
+            context=ctx,
+        )
+        == STAGE_DONE
+    )
+    assert (
+        decide_artifact_repair_stage(
+            identity_status="warning",
+            reasons=["hair_color_mismatch"],
+            context=ctx,
+        )
+        == STAGE_DONE
+    )
+    ctx.regeneration_completed = 2
+    assert (
+        decide_artifact_repair_stage(
+            identity_status="reject",
+            reasons=["printed_character_gallery"],
+            context=ctx,
+            max_regenerations=2,
+        )
+        == STAGE_ARTIFACT_LIMIT
+    )
+    # A final pass always wins even when the budget is full.
+    assert (
+        decide_artifact_repair_stage(
+            identity_status="pass",
+            reasons=[],
+            context=ctx,
+            max_regenerations=2,
+        )
+        == STAGE_DONE
+    )

@@ -31,9 +31,11 @@ from app.services.identity_checker import (
     is_tagger_failure,
 )
 from app.services.inspection_repair import (
+    ARTIFACT_REPAIR_PREFIXES,
     STAGE_IDENTITY_EYE,
     STAGE_IDENTITY_HAIR,
     STAGE_IDENTITY_MULTICOLOR,
+    is_artifact_repair_reject,
     is_semantic_repair_reject,
     needs_identity_repair,
 )
@@ -44,18 +46,9 @@ from app.services.settings_service import SettingsService
 ImageBytesGenerator = Callable[[str, str], bytes]
 CancelCheck = Callable[[], bool]
 
-SEMANTIC_REGEN_REASON_PREFIXES = (
-    "embedded_gallery:",
-    "goods_or_screen_character_gallery",
-    "printed_character_gallery",
-    "poster_or_collage_with_text",
-    "weak_print_gallery",
-    "atypical_swimwear:",
-    "atypical_underwear:",
-    "unexpected_non_human_output",
-    "unexpected_male_output",
-    "multi_subject_output:",
-)
+# Artifact-cleanup only: gallery/print/panel/collage + atypical swimwear/underwear.
+# Identity/gender/non-human auto regenerations are intentionally excluded.
+SEMANTIC_REGEN_REASON_PREFIXES = ARTIFACT_REPAIR_PREFIXES
 
 
 class V2PipelineCancelled(RuntimeError):
@@ -375,7 +368,7 @@ class V2GenerationPipeline:
         if (
             identity is not None
             and identity.status != "reject"
-            and not needs_identity_repair(identity.reasons)
+            and not is_artifact_repair_reject(identity.reasons)
         ):
             if state.revision_index >= 0:
                 variant = state.current_variant
@@ -391,58 +384,21 @@ class V2GenerationPipeline:
         commit_db_session(self.db)
 
         if external_stage_control:
-            # Outer pending-inspection loop owns identity/semantic stage progression.
+            # Outer pending-inspection loop owns artifact stage progression.
             result = self._async_final_result(character, image, "generation_failed")
             return V2AsyncCheckResult(state, result, False)
 
-        # Identity/appearance repairs always win over semantic same-prompt retries.
-        # Otherwise atypical_swimwear/gallery rejects permanently skip hair/multicolor/eye.
-        if identity is not None and needs_identity_repair(identity.reasons):
-            cutoff = str(self._public_settings()["v2_recent_character_cutoff"])
-            if state.revision_index < 0 and self._is_recent(character, cutoff):
-                result = self._async_final_result(character, image, "likely_untrained")
-                return V2AsyncCheckResult(state, result, False)
-            if state.revision_index < 0:
-                state.revision_variants = tuple(
-                    self._revision_variants(character, state.initial_variant, identity)
-                )
-                if not state.revision_variants:
-                    result = self._async_final_result(character, image, "generation_failed")
-                    return V2AsyncCheckResult(state, result, False)
-                state.revision_index = 0
-                state.current_variant = state.revision_variants[0]
-                state.attempt_in_variant = 0
-                return V2AsyncCheckResult(state, None, True)
-            return advance_revision()
-
-        if _is_semantic_generation_reject(identity):
-            # Collage/goods/outfit/gender-output failures are stochastic generation
-            # failures, not evidence that hair/eye prompt tags are wrong. Retry the same
-            # prompt; changing appearance tags here would waste generations and can
-            # damage an otherwise correct character identity.
+        # Artifact-cleanup mode: only gallery/swimwear rejects spend same-prompt retries.
+        # Identity hair/multicolor/eye auto repair is disabled — leave those for humans.
+        if identity is not None and is_artifact_repair_reject(identity.reasons):
             if state.attempt_in_variant < state.retry_max:
                 return V2AsyncCheckResult(state, None, True)
-            result = self._async_final_result(character, image, "generation_failed")
+            result = self._async_final_result(character, image, "generated")
             return V2AsyncCheckResult(state, result, False)
 
-        cutoff = str(self._public_settings()["v2_recent_character_cutoff"])
-        if state.revision_index < 0 and self._is_recent(character, cutoff):
-            result = self._async_final_result(character, image, "likely_untrained")
-            return V2AsyncCheckResult(state, result, False)
-        if identity is None:
-            raise RuntimeError("quality 통과 이미지에 identity 검사 결과가 없습니다.")
-        if state.revision_index < 0:
-            state.revision_variants = tuple(
-                self._revision_variants(character, state.initial_variant, identity)
-            )
-            if not state.revision_variants:
-                result = self._async_final_result(character, image, "generation_failed")
-                return V2AsyncCheckResult(state, result, False)
-            state.revision_index = 0
-            state.current_variant = state.revision_variants[0]
-            state.attempt_in_variant = 0
-            return V2AsyncCheckResult(state, None, True)
-        return advance_revision()
+        # Non-artifact identity/quality warnings or rejects: keep the image, no auto regen.
+        result = self._async_final_result(character, image, "generated")
+        return V2AsyncCheckResult(state, result, False)
 
     def build_stage_variant(
         self,
