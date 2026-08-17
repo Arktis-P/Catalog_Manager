@@ -75,6 +75,9 @@ class RepairContext:
     reinspection_completed: int = 0
     identity_repair_stage: str | None = None
     semantic_repair_stage: str | None = None
+    unavailable_stages: list[str] = field(default_factory=list)
+    # Compact per-stage prompt/inspection diffs for page-test diagnostics (never secrets).
+    stage_events: list[dict[str, object]] = field(default_factory=list)
 
     def mark(self, stage: str) -> None:
         self.attempted_stages.append(stage)
@@ -83,8 +86,17 @@ class RepairContext:
         if stage.startswith("semantic_"):
             self.semantic_repair_stage = stage
 
+    def mark_unavailable(self, stage: str) -> None:
+        """Record a stage that had no actionable collected data (no budget spent)."""
+        self.mark(stage)
+        if stage not in self.unavailable_stages:
+            self.unavailable_stages.append(stage)
+
     def already(self, stage: str) -> bool:
         return stage in self.attempted_stages
+
+    def record_event(self, event: dict[str, object]) -> None:
+        self.stage_events.append(event)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -99,6 +111,8 @@ class RepairContext:
             "regeneration_requested": self.regeneration_requested,
             "regeneration_completed": self.regeneration_completed,
             "reinspection_completed": self.reinspection_completed,
+            "unavailable_stages": list(self.unavailable_stages),
+            "stage_events": list(self.stage_events),
         }
 
 

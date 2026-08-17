@@ -67,6 +67,10 @@ type InspectionResetSummary = {
 type RunScope = "all" | "page" | null;
 
 const BATCH_SIZE = 10;
+// Page tests resolve every repair stage for one character synchronously per request, so
+// request one character at a time to keep the top-level progress bar moving (1/30, 2/30…)
+// and let a stop request take effect quickly.
+const PAGE_TEST_BATCH_SIZE = 1;
 const PAGE_TEST_LIMIT = 30;
 const TEST_RESET_ENABLED = true;
 const inspectionStopRequests = new Set<string>();
@@ -357,7 +361,7 @@ export function PendingInspectionPanel() {
 
     try {
       let processed = 0;
-      for (let index = 0; index < characterIds.length; index += BATCH_SIZE) {
+      for (let index = 0; index < characterIds.length; index += PAGE_TEST_BATCH_SIZE) {
         if (inspectionStopRequests.has(task.job_id)) {
           task = finishInspectionJob(
             task,
@@ -370,7 +374,7 @@ export function PendingInspectionPanel() {
           return;
         }
 
-        const chunk = characterIds.slice(index, index + BATCH_SIZE);
+        const chunk = characterIds.slice(index, index + PAGE_TEST_BATCH_SIZE);
         const query = inspectionQuery(undefined, {
           force_recheck: "true",
           // Page tests keep rejected files for diagnosis unless the operator asks otherwise.

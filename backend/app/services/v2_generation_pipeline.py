@@ -451,30 +451,96 @@ class V2GenerationPipeline:
         stage: str,
         identity: IdentityCheckResult | None = None,
     ) -> PromptVariant | None:
-        """Build a single prompt variant for an explicit pending-inspection repair stage."""
-        multicolor = tuple(v2_multicolor_prompt_candidates(self.db, character.id))
-        initial = PromptVariant(
-            base_prompt=character.base_prompt or "",
-            primary_hair_color=character.primary_hair_color,
-            multicolor_tags=multicolor,
-        )
-        if identity is None:
-            identity = IdentityCheckResult(
-                status="warning",
-                character_confidence=None,
-                hair_color_confidence=None,
-                conflicting_character_tag=None,
-                conflicting_character_confidence=None,
-                reasons=[],
-                suggested_multicolor_tags=[],
-            )
-        variants = self._revision_variants(character, initial, identity)
+        """Build the prompt variant for one explicit pending-inspection identity stage.
+
+        Unlike the generic revision ladder, stage repair reinforces the *collected*
+        appearance rather than swapping to alternate tags. Returns ``None`` when the
+        stage has no actionable collected data so the caller can skip it without wasting
+        a regeneration on an unchanged prompt.
+        """
+        base_prompt = character.base_prompt or ""
+        _, existing_tags = _split_prompt(base_prompt)
+        existing_keys = {_tag_key(tag) for tag in existing_tags}
+
         if stage == STAGE_IDENTITY_HAIR:
-            return next((item for item in variants if item.revision_level == 1), None)
+            hair_rows = self._relevance_rows(character.id, "hair_color")
+            expected = hair_rows[0].tag if hair_rows else character.primary_hair_color
+            if not expected:
+                return None
+            expected_key = _tag_key(expected)
+            primary_key = _tag_key(character.primary_hair_color or "")
+            if expected_key in existing_keys and expected_key == primary_key:
+                # Collected hair is already in the prompt; the generator simply produced
+                # the wrong colour. Keep the expected hair and regenerate once instead of
+                # substituting a second-choice alternate colour.
+                return PromptVariant(
+                    base_prompt=base_prompt,
+                    primary_hair_color=character.primary_hair_color,
+                    multicolor_tags=(),
+                    revision_level=1,
+                    revision_reason=f"reinforce_hair:{expected}",
+                )
+            new_prompt = _replace_prompt_tags(
+                base_prompt,
+                remove=(character.primary_hair_color or "",),
+                add=(expected,),
+            )
+            if new_prompt == base_prompt and expected_key == primary_key:
+                return None
+            return PromptVariant(
+                base_prompt=new_prompt,
+                primary_hair_color=expected,
+                multicolor_tags=(),
+                revision_level=1,
+                revision_reason=f"expected_hair:{character.primary_hair_color}->{expected}",
+            )
+
         if stage == STAGE_IDENTITY_MULTICOLOR:
-            return next((item for item in variants if item.revision_level == 2), None)
+            # Conservatively ADD one collected multicolor tag; never remove existing ones.
+            candidates: list[str] = []
+            if identity is not None:
+                candidates.extend(identity.suggested_multicolor_tags)
+            candidates.extend(
+                row.tag
+                for row in self._relevance_rows(character.id, "multicolor")
+                if row.is_prompt_candidate
+            )
+            addition = next(
+                (tag for tag in candidates if tag and _tag_key(tag) not in existing_keys),
+                None,
+            )
+            if not addition:
+                return None
+            new_prompt = _replace_prompt_tags(base_prompt, add=(addition,))
+            if new_prompt == base_prompt:
+                return None
+            return PromptVariant(
+                base_prompt=new_prompt,
+                primary_hair_color=character.primary_hair_color,
+                multicolor_tags=(addition,),
+                revision_level=2,
+                revision_reason=f"add_multicolor:{addition}",
+            )
+
         if stage == STAGE_IDENTITY_EYE:
-            return next((item for item in variants if item.revision_level == 3), None)
+            eye_rows = self._relevance_rows(character.id, "eye_color")
+            addition = next(
+                (row.tag for row in eye_rows if _tag_key(row.tag) not in existing_keys),
+                None,
+            )
+            if not addition:
+                return None
+            new_prompt = _replace_prompt_tags(base_prompt, add=(addition,))
+            if new_prompt == base_prompt:
+                return None
+            return PromptVariant(
+                base_prompt=new_prompt,
+                primary_hair_color=character.primary_hair_color,
+                multicolor_tags=(),
+                revision_level=3,
+                revision_reason=f"add_eye_color:{addition}",
+            )
+
         return None
 
     def apply_variant_to_character(self, character: GlobalCharacter, variant: PromptVariant) -> None:
@@ -619,9 +685,16 @@ class V2GenerationPipeline:
         if image.quality_status == "reject":
             reasons = json.loads(image.quality_reasons or "[]")
             return f"quality_reject:{','.join(str(reason) for reason in reasons)}"
-        if identity is not None and identity.status == "reject":
+        # identity_result_missing must only describe a genuinely absent identity check.
+        # Stage repair legitimately acts on identity *warnings* (hair_color_mismatch,
+        # character_tag_low_confidence), so those must record their real reasons.
+        if identity is None:
+            return "identity_result_missing"
+        if identity.status == "reject":
             return f"identity_reject:{','.join(str(reason) for reason in identity.reasons)}"
-        return "identity_result_missing"
+        if identity.status == "warning":
+            return f"identity_warning:{','.join(str(reason) for reason in identity.reasons)}"
+        return "identity_pass"
 
     def _run_variant(
         self,

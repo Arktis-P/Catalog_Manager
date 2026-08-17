@@ -482,20 +482,27 @@ class PendingReviewInspectionService:
                     last_failure_reason=character.last_failure_reason,
                 )
                 if checked.result is not None:
-                    final_status = (
-                        "completed" if checked.result.generation_status == "generated" else "failed"
-                    )
+                    passed = checked.result.generation_status == "generated"
+                    # Under external stage control a non-"generated" result is a normal
+                    # hand-off to the outer stage loop (image was produced and inspected),
+                    # not a real generation failure. Only exceptions/cancels are failures.
+                    handoff = external_stage_control and generated > 0 and not passed
+                    final_status = "completed" if (passed or handoff) else "failed"
+                    stage_label = f" · {repair_stage}" if repair_stage else ""
+                    if passed:
+                        message = f"자동 검사 재생성 완료 · {character.character_tag}{stage_label} · {generated}/{attempts}"
+                    elif handoff:
+                        message = (
+                            f"자동 검사 재생성 단계 완료 · {character.character_tag}{stage_label}"
+                            f" · 다음 판정 대기 · {generated}/{attempts}"
+                        )
+                    else:
+                        message = f"자동 검사 재생성 실패 · {character.character_tag}{stage_label} · {generated}/{attempts}"
                     v2_generation_job_manager.finish_inspection_regeneration(
                         tracked_job.job_id,
                         status=final_status,
-                        message=(
-                            f"자동 검사 재생성 완료 · {character.character_tag} · {generated}/{attempts}"
-                            if final_status == "completed"
-                            else f"자동 검사 재생성 실패 · {character.character_tag} · {generated}/{attempts}"
-                        ),
-                        failure_reason=(
-                            None if final_status == "completed" else character.last_failure_reason
-                        ),
+                        message=message,
+                        failure_reason=(None if final_status == "completed" else character.last_failure_reason),
                     )
                     return checked.result, generated
                 if not checked.needs_generation:
@@ -574,6 +581,8 @@ class PendingReviewInspectionService:
         current = image
         stage_budget = max(max_regenerations, MAX_STAGE_REGENERATIONS)
         auto_zero = False
+        precheck_pipeline = V2GenerationPipeline(self.db)
+        identity_stages = {STAGE_IDENTITY_HAIR, STAGE_IDENTITY_MULTICOLOR, STAGE_IDENTITY_EYE}
 
         while True:
             reasons = self._json_reason_list(current.identity_reasons)
@@ -610,6 +619,26 @@ class PendingReviewInspectionService:
                 context.final_action = "0성"
                 return current, context, True
 
+            identity_snapshot = self._identity_snapshot_from_image(current)
+
+            # Skip identity stages that have no actionable collected data. This must not
+            # spend a regeneration on an unchanged prompt; marking the stage lets
+            # decide_repair_stage advance to the next stage (or auto-zero).
+            if stage in identity_stages:
+                stage_variant = precheck_pipeline.build_stage_variant(
+                    character, stage=stage, identity=identity_snapshot
+                )
+                if stage_variant is None:
+                    context.mark_unavailable(stage)
+                    context.record_event(
+                        {
+                            "stage": stage,
+                            "status": "unavailable",
+                            "before_base_prompt": character.base_prompt,
+                        }
+                    )
+                    continue
+
             # Identity stages generate once; semantic/quality may use the configured cap
             # for same-prompt stochastic retries inside the generation job.
             per_job_attempts = (
@@ -620,7 +649,7 @@ class PendingReviewInspectionService:
             context.mark(stage)
             summary.regeneration_requested += 1
             context.regeneration_requested += 1
-            identity_snapshot = self._identity_snapshot_from_image(current)
+            before_prompt = character.base_prompt
             result, generated = self._regenerate_capped(
                 character,
                 max_regenerations=per_job_attempts,
@@ -663,6 +692,20 @@ class PendingReviewInspectionService:
                     character.id,
                     keep_image_id=latest.id,
                 )
+
+            self.db.refresh(character)
+            context.record_event(
+                {
+                    "stage": stage,
+                    "status": "regenerated",
+                    "before_base_prompt": before_prompt,
+                    "after_base_prompt": character.base_prompt,
+                    "generated_image_id": latest.id,
+                    "identity_status": latest.identity_status,
+                    "identity_reasons": self._json_reason_list(latest.identity_reasons),
+                    "pipeline_status": result.generation_status if result is not None else None,
+                }
+            )
 
             current = latest
             commit_db_session(self.db)
