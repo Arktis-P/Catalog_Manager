@@ -345,6 +345,91 @@ export function PendingInspectionPanel() {
     }
   }, [loadStats, running, upsertLocalV2Job]);
 
+  const runPilot = useCallback(async (pilotLimit: number) => {
+    if (running) return;
+    setRunScope("all");
+    setError(null);
+
+    let task: V2GenerationJobState | null = null;
+    try {
+      let current = await loadStats();
+      if (current.remaining <= 0) {
+        setMessage("파일럿 검사할 Pending 이미지가 없습니다.");
+        return;
+      }
+
+      const total = Math.min(pilotLimit, current.remaining);
+      task = makeInspectionJob("all", total);
+      task = {
+        ...task,
+        message: `Pending ${total.toLocaleString()}개 파일럿 · 0/${total.toLocaleString()}`,
+      };
+      upsertLocalV2Job(task);
+      setMessage(task.message);
+      let processed = 0;
+
+      while (processed < total && current.remaining > 0) {
+        if (inspectionStopRequests.has(task.job_id)) {
+          task = finishInspectionJob(
+            task,
+            "cancelled",
+            `사용자 중지 · ${task.current.toLocaleString()}/${task.total.toLocaleString()} 처리`,
+          );
+          inspectionStopRequests.delete(task.job_id);
+          upsertLocalV2Job(task);
+          setMessage(task.message);
+          return;
+        }
+
+        const batch = Math.min(BATCH_SIZE, total - processed);
+        const query = inspectionQuery(batch, {
+          auto_complete: "false",
+          cleanup_rejected: "false",
+        });
+        const response = await fetch(`/api/review/v2/pending-inspection/run?${query.toString()}`, {
+          method: "POST",
+        });
+        const result = await readJson<InspectionSummary>(response);
+        processed = Math.min(total, processed + Math.max(result.inspected, 1));
+        current = await loadStats();
+        const metrics = task.prompt_variant_attempts;
+        const inspected = (metrics.inspected ?? 0) + result.inspected;
+        const regenerated = (metrics.regenerated ?? 0) + result.characters_regenerated;
+        task = addInspectionResult(
+          task,
+          result,
+          processed,
+          `Pending ${total.toLocaleString()}개 파일럿 · ${processed.toLocaleString()}/${total.toLocaleString()} · 검사 ${inspected.toLocaleString()} · 재생성 ${regenerated.toLocaleString()}`,
+        );
+        upsertLocalV2Job(task);
+        setMessage(task.message);
+
+        if (result.inspected <= 0 && result.errors.length === 0) {
+          break;
+        }
+      }
+
+      const metrics = task.prompt_variant_attempts;
+      task = finishInspectionJob(
+        task,
+        "completed",
+        `파일럿 완료 · ${task.current.toLocaleString()}/${task.total.toLocaleString()} · 검사 ${(metrics.inspected ?? 0).toLocaleString()} · 재생성 ${(metrics.regenerated ?? 0).toLocaleString()}`,
+      );
+      upsertLocalV2Job(task);
+      setMessage(task.message);
+    } catch (err) {
+      const failure = err instanceof Error ? err.message : "파일럿 검사 중 오류가 발생했습니다.";
+      if (task) {
+        task = finishInspectionJob(task, "failed", "파일럿 검사 실패", failure);
+        upsertLocalV2Job(task);
+      }
+      setError(failure);
+      await loadStats().catch(() => undefined);
+    } finally {
+      setRunScope(null);
+    }
+  }, [loadStats, running, upsertLocalV2Job]);
+
   const runCurrentPage = useCallback(async () => {
     if (running) return;
     const characterIds = currentPageCharacterIds();
@@ -547,6 +632,14 @@ export function PendingInspectionPanel() {
                 title="아래 V2 검수 화면에 현재 표시된 카드 중 최대 30개만 먼저 검사합니다."
               >
                 현재 페이지 최대 30개 테스트
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void runPilot(100)}
+                title="전체 큐가 아니라 Pending 중 최대 100개만 파일럿 검사합니다. auto_complete=false."
+              >
+                100개 파일럿
               </button>
               <button
                 type="button"
