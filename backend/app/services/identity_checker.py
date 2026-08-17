@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.integrations.danbooru.appearance_extractor import (
+    HAIR_COLORS,
     MULTI_COLOR_HAIR_FALLBACK,
     MULTI_COLOR_HAIR_PRIORITY,
     STREAK_COLOR_TAGS,
@@ -19,7 +20,7 @@ from app.services.semantic_image_checker import SEMANTIC_CHECKER_VERSION, evalua
 
 # Base identity logic version. Effective stored version also embeds the semantic
 # ruleset so pending images are requeued when only semantic rules change.
-IDENTITY_CHECKER_BASE_VERSION = "v3.4"
+IDENTITY_CHECKER_BASE_VERSION = "v3.5"
 IDENTITY_CHECKER_VERSION = f"{IDENTITY_CHECKER_BASE_VERSION}+semantic-{SEMANTIC_CHECKER_VERSION}"
 
 TAGGER_FAILURE_REASONS = frozenset(
@@ -42,6 +43,9 @@ CHARACTER_CONFLICT_THRESHOLD = 0.75    # 다른 캐릭터 태그 고신뢰 판�
 CHARACTER_DETECT_THRESHOLD = 0.35      # 캐릭터 태그 검출 최소 기준(미만이면 미검출)
 CHARACTER_CONFIDENT_THRESHOLD = 0.5    # "고신뢰 검출" 기준 (pass 후보에 필요)
 HAIR_COLOR_MATCH_THRESHOLD = 0.30
+# Strong alternate hair evidence used only when the expected primary colour is weak.
+# Tuned conservatively so hats/occlusion do not flood regeneration.
+HAIR_COLOR_CONFLICT_THRESHOLD = 0.55
 MULTICOLOR_SUGGEST_THRESHOLD = 0.5
 
 BOY_GENDER = "1boy"
@@ -62,6 +66,8 @@ MULTICOLOR_TAG_VOCABULARY: frozenset[str] = frozenset(
 def _normalize_tag(value: str) -> str:
     return re.sub(r"\s+", "_", value.strip().lower())
 
+
+HAIR_COLOR_VOCABULARY: frozenset[str] = frozenset(_normalize_tag(tag) for tag in HAIR_COLORS)
 
 @dataclass(frozen=True)
 class IdentityCheckResult:
@@ -96,6 +102,51 @@ def _suggest_multicolor_tags(
         and score >= MULTICOLOR_SUGGEST_THRESHOLD
     }
     return sorted(suggestions)
+
+
+def _strongest_conflicting_hair(
+    tag_scores: dict[str, float],
+    *,
+    expected_hair_tags: set[str],
+) -> tuple[str, float] | None:
+    """Return the strongest non-expected hair colour at/above the conflict threshold."""
+    best: tuple[str, float] | None = None
+    for tag in HAIR_COLOR_VOCABULARY:
+        if tag in expected_hair_tags:
+            continue
+        score = tag_scores.get(tag, 0.0)
+        if score < HAIR_COLOR_CONFLICT_THRESHOLD:
+            continue
+        if best is None or score > best[1]:
+            best = (tag, score)
+    return best
+
+
+def _append_hair_appearance_reasons(
+    reasons: list[str],
+    *,
+    normalized_scores: dict[str, float],
+    expected_hair_tags: set[str],
+    hair_color_confidence: float | None,
+) -> None:
+    """Evaluate hair independently of character-tag detection.
+
+    character_tag_undetected must not hide an actionable hair mismatch, but weak/absent
+    hair evidence alone must not trigger regeneration (hats, occlusion, low light).
+    """
+    if not expected_hair_tags:
+        return
+    if hair_color_confidence is not None:
+        return
+    conflict = _strongest_conflicting_hair(
+        normalized_scores, expected_hair_tags=expected_hair_tags
+    )
+    if conflict is not None:
+        conflict_tag, conflict_score = conflict
+        reasons.append("hair_color_mismatch")
+        reasons.append(f"hair_color_conflict:{conflict_tag}:{conflict_score:.2f}")
+        return
+    reasons.append("hair_color_unknown")
 
 
 def evaluate_identity(
@@ -141,12 +192,21 @@ def evaluate_identity(
     elif character_confidence < CHARACTER_CONFIDENT_THRESHOLD:
         reasons.append("character_tag_low_confidence")
         status = "warning"
-    elif expected_hair_tags and hair_color_confidence is None:
-        reasons.append("hair_color_mismatch")
-        status = "warning"
     else:
         reasons.append("character_tag_confident")
         status = "pass"
+
+    # Hair is judged after character status so WD-vocabulary misses still surface
+    # clear collected-hair conflicts.
+    before_hair = len(reasons)
+    _append_hair_appearance_reasons(
+        reasons,
+        normalized_scores=normalized_scores,
+        expected_hair_tags=expected_hair_tags,
+        hair_color_confidence=hair_color_confidence,
+    )
+    if any(str(item).startswith("hair_color_mismatch") or item == "hair_color_mismatch" for item in reasons[before_hair:]):
+        status = "warning"
 
     return IdentityCheckResult(
         status=status,

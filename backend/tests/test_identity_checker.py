@@ -72,15 +72,54 @@ def test_confident_character_tag_with_matching_hair_passes() -> None:
 
 
 def test_confident_character_tag_without_expected_hair_color_evidence_warns() -> None:
+    # No strong alternate hair → do not spend regeneration budget on weak/absent hair.
     result = evaluate_identity(
         {"hakurei_reimu": 0.95},
         character_tag="hakurei_reimu",
         primary_hair_color="black_hair",
         known_character_tags=[],
     )
-    assert result.status == "warning"
+    assert result.status == "pass"
     assert result.hair_color_confidence is None
+    assert "hair_color_unknown" in result.reasons
+    assert "hair_color_mismatch" not in result.reasons
+
+
+def test_undetected_character_with_strong_wrong_hair_is_mismatch() -> None:
+    result = evaluate_identity(
+        {"blonde_hair": 0.72, "1girl": 0.9},
+        character_tag="unknown_wd_character",
+        primary_hair_color="black_hair",
+        gender="1girl",
+    )
+    assert result.status == "warning"
+    assert "character_tag_undetected" in result.reasons
     assert "hair_color_mismatch" in result.reasons
+    assert any(r.startswith("hair_color_conflict:blonde_hair:") for r in result.reasons)
+
+
+def test_undetected_character_with_matching_hair_is_not_mismatch() -> None:
+    result = evaluate_identity(
+        {"black_hair": 0.55, "1girl": 0.9},
+        character_tag="unknown_wd_character",
+        primary_hair_color="black_hair",
+        gender="1girl",
+    )
+    assert "character_tag_undetected" in result.reasons
+    assert "hair_color_mismatch" not in result.reasons
+    assert result.hair_color_confidence == 0.55
+
+
+def test_undetected_character_with_weak_hair_is_not_mismatch() -> None:
+    result = evaluate_identity(
+        {"blonde_hair": 0.40, "hat": 0.8},
+        character_tag="unknown_wd_character",
+        primary_hair_color="black_hair",
+        gender="1girl",
+    )
+    assert "character_tag_undetected" in result.reasons
+    assert "hair_color_mismatch" not in result.reasons
+    assert "hair_color_unknown" in result.reasons
 
 
 def test_low_confidence_character_tag_warns() -> None:

@@ -639,20 +639,15 @@ class PendingReviewInspectionService:
                     )
                     continue
 
-            # Identity stages generate once; semantic/quality may use the configured cap
-            # for same-prompt stochastic retries inside the generation job.
-            per_job_attempts = (
-                max(1, max_regenerations)
-                if stage in {STAGE_SEMANTIC_OUTFIT, STAGE_SEMANTIC_GALLERY, STAGE_QUALITY}
-                else 1
-            )
+            # Outer stage loop owns retry counts. Each stage job generates at most one
+            # image; semantic/quality may run the stage itself up to twice via RepairContext.
             context.mark(stage)
             summary.regeneration_requested += 1
             context.regeneration_requested += 1
             before_prompt = character.base_prompt
             result, generated = self._regenerate_capped(
                 character,
-                max_regenerations=per_job_attempts,
+                max_regenerations=1,
                 external_stage_control=True,
                 repair_stage=stage,
                 identity_snapshot=identity_snapshot,

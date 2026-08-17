@@ -285,6 +285,103 @@ def test_repair_loop_reinspects_after_regeneration(db: Session, monkeypatch) -> 
     assert final_image.id >= second.id
 
 
+def test_semantic_gallery_persistent_reject_regenerates_exactly_twice(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="gallery_cap", review_status="pending")
+    image = character.images[0]
+    image.quality_status = "pass"
+    image.identity_status = "reject"
+    image.identity_reasons = '["weak_print_gallery"]'
+    image.quality_checker_version = QUALITY_CHECKER_VERSION
+    image.identity_checker_version = IDENTITY_CHECKER_VERSION
+    db.commit()
+
+    service = PendingReviewInspectionService(db)
+    calls: list[int] = []
+
+    def fake_regen(character_obj, **kwargs):
+        from app.services.v2_generation_pipeline import V2PipelineResult
+
+        calls.append(int(kwargs.get("max_regenerations", -1)))
+        nxt = GlobalCharacterImage(
+            global_character_id=character_obj.id,
+            image_path=f"output/generated_images/pending_review/gallery_cap_{len(calls)}.webp",
+            quality_status="pass",
+            identity_status="reject",
+            identity_reasons='["weak_print_gallery"]',
+            quality_checker_version=QUALITY_CHECKER_VERSION,
+            identity_checker_version=IDENTITY_CHECKER_VERSION,
+        )
+        db.add(nxt)
+        db.commit()
+        db.refresh(nxt)
+        return V2PipelineResult(character_obj.id, "generation_failed", len(calls), nxt.id), 1
+
+    monkeypatch.setattr(service, "_regenerate_capped", fake_regen)
+    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
+
+    summary = PendingInspectionSummary(requested_limit=1)
+    _final, context, auto_zero = service._repair_with_stages(
+        character,
+        image,
+        auto_regenerate=True,
+        max_regenerations=2,
+        cleanup_rejected=False,
+        summary=summary,
+    )
+
+    assert calls == [1, 1]
+    assert context.regeneration_completed == 2
+    assert context.attempted_stages.count(STAGE_SEMANTIC_GALLERY) == 2
+    assert auto_zero is True
+    assert context.final_action == "0성"
+
+
+def test_quality_reject_persistent_regenerates_exactly_twice(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="quality_cap", review_status="pending")
+    image = character.images[0]
+    image.quality_status = "reject"
+    image.identity_status = None
+    image.identity_reasons = None
+    image.quality_checker_version = QUALITY_CHECKER_VERSION
+    db.commit()
+
+    service = PendingReviewInspectionService(db)
+    calls: list[int] = []
+
+    def fake_regen(character_obj, **kwargs):
+        from app.services.v2_generation_pipeline import V2PipelineResult
+
+        calls.append(int(kwargs.get("max_regenerations", -1)))
+        nxt = GlobalCharacterImage(
+            global_character_id=character_obj.id,
+            image_path=f"output/generated_images/pending_review/quality_cap_{len(calls)}.webp",
+            quality_status="reject",
+            identity_status=None,
+            quality_checker_version=QUALITY_CHECKER_VERSION,
+        )
+        db.add(nxt)
+        db.commit()
+        db.refresh(nxt)
+        return V2PipelineResult(character_obj.id, "generation_failed", len(calls), nxt.id), 1
+
+    monkeypatch.setattr(service, "_regenerate_capped", fake_regen)
+    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
+
+    summary = PendingInspectionSummary(requested_limit=1)
+    _final, context, auto_zero = service._repair_with_stages(
+        character,
+        image,
+        auto_regenerate=True,
+        max_regenerations=2,
+        cleanup_rejected=False,
+        summary=summary,
+    )
+
+    assert calls == [1, 1]
+    assert context.regeneration_completed == 2
+    assert auto_zero is True
+
+
 def test_stage_unavailable_does_not_consume_regeneration_budget(db: Session, monkeypatch) -> None:
     character = add_character(db, tag="no_stage_data", review_status="pending")
     image = character.images[0]

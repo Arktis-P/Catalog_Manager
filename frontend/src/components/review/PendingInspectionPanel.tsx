@@ -377,7 +377,8 @@ export function PendingInspectionPanel() {
         const chunk = characterIds.slice(index, index + PAGE_TEST_BATCH_SIZE);
         const query = inspectionQuery(undefined, {
           force_recheck: "true",
-          // Page tests keep rejected files for diagnosis unless the operator asks otherwise.
+          // Page tests validate inspection/repair logic; do not auto-complete ratings.
+          auto_complete: "false",
           cleanup_rejected: "false",
         });
         const response = await fetch(`/api/review/v2/pending-inspection/run-selected?${query.toString()}`, {
