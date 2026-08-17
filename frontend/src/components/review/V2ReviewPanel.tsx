@@ -373,6 +373,11 @@ export function V2ReviewPanel() {
     itemsRef.current = items;
   }, [items]);
 
+  const dirtyIdsRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    dirtyIdsRef.current = dirtyIds;
+  }, [dirtyIds]);
+
   useEffect(() => {
     focusIndexRef.current = focusIndex;
   }, [focusIndex]);
@@ -489,8 +494,15 @@ export function V2ReviewPanel() {
         }
         return Math.min(current, Math.max(0, merged.length - 1));
       });
+      // Only unsaved user edits survive a reload. Otherwise the stale draft would hide
+      // server-side values such as an automatic 0/-1 rating written by pending inspection.
       setDrafts((current) =>
-        Object.fromEntries(merged.map((item) => [item.id, current[item.id] ?? createV2DraftForItem(item)])),
+        Object.fromEntries(
+          merged.map((item) => [
+            item.id,
+            (dirtyIdsRef.current.has(item.id) ? current[item.id] : undefined) ?? createV2DraftForItem(item),
+          ]),
+        ),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "V2 리뷰 목록을 불러오지 못했습니다.");

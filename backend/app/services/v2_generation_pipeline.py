@@ -335,9 +335,10 @@ class V2GenerationPipeline:
     ) -> V2AsyncCheckResult:
         """Check one image and decide whether its state needs another generation task.
 
-        When ``external_stage_control`` is True (pending-inspection stage loop), this
-        method does not advance identity prompt revisions. Same-prompt quality/semantic
-        retries remain allowed; identity/semantic stage progression is owned outside.
+        When ``external_stage_control`` is True (pending-inspection stage loop), every
+        checked image is handed back immediately: that loop budgets one generation per
+        stage job and owns all retry/stage progression, so requesting another generation
+        here could never be satisfied.
         """
         character = self.db.get(GlobalCharacter, state.character_id)
         image = self.db.get(GlobalCharacterImage, image_id)
@@ -359,11 +360,11 @@ class V2GenerationPipeline:
             return V2AsyncCheckResult(state, result, False)
 
         def retry_quality_or_advance() -> V2AsyncCheckResult:
-            if state.attempt_in_variant < state.retry_max:
-                return V2AsyncCheckResult(state, None, True)
             if external_stage_control:
                 result = self._async_final_result(character, image, "generation_failed")
                 return V2AsyncCheckResult(state, result, False)
+            if state.attempt_in_variant < state.retry_max:
+                return V2AsyncCheckResult(state, None, True)
             return advance_revision()
 
         if image.quality_status == "reject":
@@ -391,8 +392,6 @@ class V2GenerationPipeline:
 
         if external_stage_control:
             # Outer pending-inspection loop owns identity/semantic stage progression.
-            if _is_semantic_generation_reject(identity) and state.attempt_in_variant < state.retry_max:
-                return V2AsyncCheckResult(state, None, True)
             result = self._async_final_result(character, image, "generation_failed")
             return V2AsyncCheckResult(state, result, False)
 

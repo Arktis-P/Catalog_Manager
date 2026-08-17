@@ -6,7 +6,7 @@ from typing import Mapping
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.services.reference_profile_service import CharacterReferenceProfile
 
-SEMANTIC_CHECKER_VERSION = "v1.6"
+SEMANTIC_CHECKER_VERSION = "v1.7"
 
 HARD_LAYOUT_TAGS = frozenset(
     {
@@ -93,6 +93,22 @@ UNDERWEAR_TAGS = frozenset(
     }
 )
 NON_HUMAN_OUTPUT_TAGS = frozenset({"no_humans", "animal_focus", "creature", "monster", "feral"})
+# Mascots, machines and equipment are catalogued like creatures: they are never a human
+# cover. These are deliberately kept out of NON_HUMAN_OUTPUT_TAGS because a girl holding
+# a large weapon or posing with a mecha must not be treated as a wrong-subject reject.
+# They only contribute to the -1 suggestion, which additionally requires no human subject.
+NON_HUMAN_SUBJECT_TAGS = NON_HUMAN_OUTPUT_TAGS | frozenset(
+    {
+        "mecha",
+        "mecha_focus",
+        "robot",
+        "machine",
+        "machinery",
+        "vehicle_focus",
+        "weapon_focus",
+        "still_life",
+    }
+)
 
 HARD_LAYOUT_REJECT = 0.58
 # Combination-only soft thresholds: neither signal alone is enough.
@@ -215,11 +231,19 @@ def _apply_gender_prior(
             return status, 3, confidence
         _append_low_gender_confidence(reasons, status, gender, output_girl)
 
-    # A high existing non-human candidate score is useful supporting evidence, but
-    # female-like candidates are intentionally not auto-deleted; the dedicated
-    # non-human workflow already treats them conservatively.
-    if gender != "1girl" and non_human_candidate_score >= 0.85 and non_human_output >= GENDER_CONFIDENT:
-        confidence = min(non_human_candidate_score, non_human_output)
+    # Creature / mascot / machine output with no human subject is a -1 catalogue entry,
+    # not a generation failure. Female-like candidates are intentionally excluded: the
+    # dedicated non-human workflow keeps those at 3 until a human decides.
+    non_human_subject = _max_score(scores, NON_HUMAN_SUBJECT_TAGS)
+    if (
+        gender != "1girl"
+        and non_human_subject >= GENDER_CONFIDENT
+        and max(output_girl, output_boy) < 0.35
+    ):
+        confidence = min(
+            LOCAL_GENDER_PRIOR_CONFIDENCE,
+            max(non_human_subject, min(non_human_candidate_score, 1.0)),
+        )
         reasons.append(f"auto_rating_candidate:-1:{confidence:.2f}")
         return status, -1, confidence
 

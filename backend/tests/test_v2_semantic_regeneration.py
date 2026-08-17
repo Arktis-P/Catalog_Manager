@@ -163,3 +163,26 @@ def test_async_semantic_reject_retries_same_variant_then_accepts_clean_image(
     assert len(prompts) == 2
     assert prompts[0] == prompts[1]
     assert character.prompt_revision_level is None
+
+
+def test_external_stage_control_never_requests_another_generation(db: Session) -> None:
+    # The pending-inspection stage loop budgets one generation per stage job, so an
+    # inner retry request could only end as a false regeneration-limit failure.
+    character = make_character(db)
+    identities = iter([semantic_reject("multi_subject_output:multiple_girls:0.79")])
+
+    pipeline = V2GenerationPipeline(
+        db,
+        image_bytes_generator=lambda _prompt, _negative: generated_bytes(),
+        quality_checker=lambda _path: PASS_QUALITY,
+        identity_checker=lambda *_args, **_kwargs: next(identities),
+        wait_between_generations=lambda: 0.0,
+    )
+    state = pipeline.prepare_async_character(character.id)
+    image_id = pipeline.generate_async_attempt(state, should_cancel=lambda: False)
+
+    checked = pipeline.check_async_attempt(state, image_id, external_stage_control=True)
+
+    assert checked.needs_generation is False
+    assert checked.result is not None
+    assert checked.result.generation_status == "generation_failed"

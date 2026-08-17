@@ -250,6 +250,57 @@ def test_ambiguous_gender_output_reports_low_confidence_reason() -> None:
     assert "gender_confidence_low:1boy:0.50" in result.reasons
 
 
+def test_creature_output_without_human_subject_suggests_minus_one() -> None:
+    result = evaluate_semantic_tags(
+        {"monster": 0.88, "1girl": 0.05},
+        gender_prior=None,
+    )
+    assert result.suggested_rating == -1
+
+
+def test_robot_output_without_human_subject_suggests_minus_one() -> None:
+    result = evaluate_semantic_tags(
+        {"mecha": 0.91, "robot": 0.74},
+        gender_prior=None,
+        non_human_candidate_score=0.6,
+    )
+    assert result.suggested_rating == -1
+
+
+def test_equipment_only_output_suggests_minus_one() -> None:
+    result = evaluate_semantic_tags(
+        {"weapon_focus": 0.80, "1girl": 0.10},
+        gender_prior=None,
+    )
+    assert result.suggested_rating == -1
+
+
+def test_human_labelled_character_is_never_auto_minus_one() -> None:
+    # Gendered characters stay a human decision even when the output looks mechanical.
+    for gender in ("1girl", "1boy"):
+        result = evaluate_semantic_tags({"mecha": 0.91, "1girl": 0.05}, gender_prior=gender)
+        assert result.suggested_rating != -1
+
+
+def test_creature_output_with_human_subject_does_not_suggest_minus_one() -> None:
+    # A girl standing next to a monster must stay a human decision.
+    result = evaluate_semantic_tags(
+        {"monster": 0.80, "1girl": 0.88, "solo": 0.80},
+        gender_prior=None,
+    )
+    assert result.suggested_rating != -1
+
+
+def test_female_character_with_creature_output_is_rejected_not_auto_zeroed() -> None:
+    result = evaluate_semantic_tags(
+        {"monster": 0.90, "1girl": 0.10},
+        gender_prior="1girl",
+    )
+    assert result.status == "reject"
+    assert "unexpected_non_human_output" in result.reasons
+    assert result.suggested_rating is None
+
+
 def test_low_confidence_reason_is_not_added_to_rejected_output() -> None:
     result = evaluate_semantic_tags(
         {"1girl": 0.17, "multiple_girls": 0.79},
