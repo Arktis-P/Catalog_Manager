@@ -54,6 +54,7 @@ SEMANTIC_REGEN_REASON_PREFIXES = (
     "atypical_underwear:",
     "unexpected_non_human_output",
     "unexpected_male_output",
+    "multi_subject_output:",
 )
 
 

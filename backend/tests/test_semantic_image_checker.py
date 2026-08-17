@@ -200,3 +200,60 @@ def test_female_reference_with_confident_male_output_is_rejected() -> None:
     )
     assert result.status == "reject"
     assert "unexpected_male_output" in result.reasons
+
+
+def test_split_multi_subject_output_is_rejected() -> None:
+    # Observed pending-queue failure: the solo score is split across subjects, so no
+    # rating candidate was produced and the card stayed silently unrated.
+    result = evaluate_semantic_tags(
+        {"1girl": 0.52, "multiple_girls": 0.48, "solo": 0.20},
+        gender_prior="1girl",
+    )
+    assert result.status == "reject"
+    assert any(reason.startswith("multi_subject_output:multiple_girls:") for reason in result.reasons)
+
+
+def test_dominant_multi_subject_output_is_rejected_for_male_character() -> None:
+    result = evaluate_semantic_tags(
+        {"1boy": 0.17, "multiple_girls": 0.85, "multiple_boys": 0.53},
+        gender_prior="1boy",
+    )
+    assert result.status == "reject"
+    assert any(reason.startswith("multi_subject_output:multiple_girls:") for reason in result.reasons)
+
+
+def test_confident_solo_output_with_weak_multi_hint_still_passes() -> None:
+    result = evaluate_semantic_tags(
+        {"1girl": 0.81, "multiple_girls": 0.16, "solo": 0.57},
+        gender_prior="1girl",
+    )
+    assert result.status == "pass"
+    assert result.suggested_rating == 3
+    assert not any(reason.startswith("multi_subject_output:") for reason in result.reasons)
+
+
+def test_confident_solo_tag_outranks_multi_subject_signal() -> None:
+    result = evaluate_semantic_tags(
+        {"1girl": 0.90, "multiple_girls": 0.34, "solo": 0.88},
+        gender_prior="1girl",
+    )
+    assert result.status == "pass"
+    assert not any(reason.startswith("multi_subject_output:") for reason in result.reasons)
+
+
+def test_ambiguous_gender_output_reports_low_confidence_reason() -> None:
+    result = evaluate_semantic_tags(
+        {"1girl": 0.50, "1boy": 0.37, "solo": 0.69},
+        gender_prior="1boy",
+    )
+    assert result.suggested_rating is None
+    assert "gender_confidence_low:1boy:0.50" in result.reasons
+
+
+def test_low_confidence_reason_is_not_added_to_rejected_output() -> None:
+    result = evaluate_semantic_tags(
+        {"1girl": 0.17, "multiple_girls": 0.79},
+        gender_prior="1girl",
+    )
+    assert result.status == "reject"
+    assert not any(reason.startswith("gender_confidence_low:") for reason in result.reasons)

@@ -54,6 +54,7 @@ SEMANTIC_GALLERY_PREFIXES = (
     "weak_print_gallery",
     "unexpected_non_human_output",
     "unexpected_male_output",
+    "multi_subject_output:",
 )
 
 # Keep in sync with v2_generation_pipeline.SEMANTIC_REGEN_REASON_PREFIXES consumers.

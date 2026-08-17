@@ -466,3 +466,73 @@ def test_identity_persistent_failure_auto_zeros_without_semantic(db: Session, mo
     assert STAGE_IDENTITY_HAIR in context.attempted_stages
     assert STAGE_SEMANTIC_OUTFIT not in context.attempted_stages
     assert STAGE_SEMANTIC_GALLERY not in context.attempted_stages
+
+
+def _exhaust_repair(service: PendingReviewInspectionService, monkeypatch) -> None:
+    def fake_repair(character_obj, image_obj, **_kwargs):
+        from app.services.inspection_repair import RepairContext
+
+        return image_obj, RepairContext(final_action="0성", latest_image_id=image_obj.id), True
+
+    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
+    monkeypatch.setattr(service, "_repair_with_stages", fake_repair)
+
+
+def test_exhausted_repair_prefills_zero_when_auto_complete_is_off(db: Session, monkeypatch) -> None:
+    # Page tests / pilots must not complete a review, but a refresh still has to show
+    # the 0-star verdict instead of an empty rating.
+    character = add_character(db, tag="zero_prefill", review_status="pending")
+    image = character.images[0]
+    image.identity_status = "reject"
+    image.identity_reasons = '["multi_subject_output:multiple_girls:0.79"]'
+    db.commit()
+
+    service = PendingReviewInspectionService(db)
+    _exhaust_repair(service, monkeypatch)
+
+    summary = service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
+    db.refresh(character.review)
+
+    assert summary.prefilled_pending == 1
+    assert summary.auto_completed == 0
+    assert character.review.rating == 0
+    assert character.review.review_status == "pending"
+    assert "reason=regeneration_limit_exhausted" in (character.review.review_note or "")
+
+
+def test_inspected_without_rating_candidate_is_marked_undecided(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="undecided_marker", review_status="pending")
+    image = character.images[0]
+    image.identity_status = "warning"
+    image.identity_reasons = '["character_tag_undetected", "gender_confidence_low:1girl:0.52"]'
+    db.commit()
+
+    service = PendingReviewInspectionService(db)
+    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
+
+    summary = service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
+    db.refresh(character.review)
+
+    assert summary.undecided_pending == 1
+    assert character.review.rating is None
+    note = character.review.review_note or ""
+    assert "undecided=1" in note
+    assert "reason=gender_confidence_low:1girl:0.52" in note
+
+
+def test_undecided_marker_is_reverted_by_test_reset(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="undecided_reset", review_status="pending")
+    image = character.images[0]
+    image.identity_status = "warning"
+    image.identity_reasons = '["gender_confidence_low:1boy:0.37"]'
+    db.commit()
+
+    service = PendingReviewInspectionService(db)
+    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
+    service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
+
+    service.reset_test_results([character.id])
+    db.refresh(character.review)
+
+    assert "undecided=1" not in (character.review.review_note or "")
+    assert character.review.rating is None

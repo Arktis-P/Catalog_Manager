@@ -34,7 +34,7 @@ from app.services.settings_service import SettingsService
 from app.services.v2_generation_job_manager import v2_generation_job_manager
 from app.services.v2_generation_pipeline import V2GenerationPipeline, V2PipelineResult
 
-PENDING_INSPECTION_VERSION = "v1.3"
+PENDING_INSPECTION_VERSION = "v1.4"
 AUTO_RATING_CONFIDENCE = 0.85
 PREFILL_RATING_CONFIDENCE = 0.72
 DEFAULT_AUDIT_SAMPLE_RATE = 0.10
@@ -61,6 +61,9 @@ class PendingInspectionSummary:
     audit_kept_pending: int = 0
     prefilled_pending: int = 0
     suggested_only: int = 0
+    # Inspected but no rating could be derived; the review row is still stamped so the
+    # UI can tell "needs a human decision" apart from "never inspected".
+    undecided_pending: int = 0
     ratings: dict[str, int] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
     # Only characters that actually completed _inspect_existing in this batch.
@@ -247,6 +250,16 @@ class PendingReviewInspectionService:
                 continue
         return None, None
 
+    @classmethod
+    def _undecided_reason(cls, image: GlobalCharacterImage) -> str:
+        """Pick the most informative reason for leaving the rating to a human."""
+        reasons = cls._json_reason_list(image.identity_reasons)
+        for prefix in ("gender_confidence_low:", "multi_subject_output:", "tagger_"):
+            for reason in reasons:
+                if reason.startswith(prefix):
+                    return reason
+        return reasons[0] if reasons else "no_rating_candidate"
+
     @staticmethod
     def _is_audit_sample(character_id: int, rate: float) -> bool:
         bounded = max(0.0, min(rate, 1.0))
@@ -322,6 +335,27 @@ class PendingReviewInspectionService:
             (
                 f"auto_inspection={PENDING_INSPECTION_VERSION};prefill=1;rating={rating};"
                 f"confidence={confidence:.2f};reason={reason}"
+                f"{self._auto_marker_suffix(test_run=test_run)}"
+            ),
+        )
+        self.db.flush()
+        return True
+
+    def _note_undecided(
+        self,
+        character: GlobalCharacter,
+        *,
+        reason: str,
+        test_run: bool = False,
+    ) -> bool:
+        """Stamp an inspected-but-undecided marker without touching the rating."""
+        review = self._review_for(character)
+        if review.rating is not None:
+            return False
+        self._append_auto_note(
+            review,
+            (
+                f"auto_inspection={PENDING_INSPECTION_VERSION};undecided=1;reason={reason}"
                 f"{self._auto_marker_suffix(test_run=test_run)}"
             ),
         )
@@ -950,6 +984,7 @@ class PendingReviewInspectionService:
                     )
 
                 rating, confidence = self._candidate_from_reasons(final_image)
+                rating_written = False
                 if rating == 3 and confidence is not None and confidence >= PREFILL_RATING_CONFIDENCE:
                     # 3 is never auto-completed: prefill it so normal female results
                     # usually need only Enter while favorites can still be promoted.
@@ -962,6 +997,7 @@ class PendingReviewInspectionService:
                     ):
                         summary.prefilled_pending += 1
                     summary.suggested_only += 1
+                    rating_written = True
                 elif rating in {-1, 1} and confidence is not None:
                     if auto_complete and confidence >= AUTO_RATING_CONFIDENCE:
                         outcome = self._apply_auto_rating(
@@ -979,6 +1015,7 @@ class PendingReviewInspectionService:
                         if outcome in {"completed", "audit"}:
                             key = str(rating)
                             summary.ratings[key] = summary.ratings.get(key, 0) + 1
+                        rating_written = outcome in {"completed", "audit"}
                     elif confidence >= PREFILL_RATING_CONFIDENCE:
                         if self._prefill_rating(
                             character,
@@ -988,25 +1025,49 @@ class PendingReviewInspectionService:
                             test_run=test_run,
                         ):
                             summary.prefilled_pending += 1
+                        rating_written = True
 
-                if auto_complete and auto_regenerate and regeneration_exhausted:
-                    # 0-star is automatic only when this inspection run actually
-                    # exhausted its capped regeneration budget. Do not reuse a stale
+                if auto_regenerate and regeneration_exhausted:
+                    # 0-star is decided only when this inspection run actually exhausted
+                    # its capped regeneration budget. Do not reuse a stale
                     # generation_failed state from an earlier run/reset.
-                    outcome = self._apply_auto_rating(
+                    if auto_complete:
+                        outcome = self._apply_auto_rating(
+                            character,
+                            rating=0,
+                            confidence=1.0,
+                            audit_sample_rate=audit_sample_rate,
+                            reason="regeneration_limit_exhausted",
+                            test_run=test_run,
+                        )
+                        if outcome == "completed":
+                            summary.auto_completed += 1
+                        elif outcome == "audit":
+                            summary.audit_kept_pending += 1
+                        if outcome in {"completed", "audit"}:
+                            summary.ratings["0"] = summary.ratings.get("0", 0) + 1
+                        rating_written = rating_written or outcome in {"completed", "audit"}
+                    else:
+                        # Page tests / pilots must not complete a review, but the 0-star
+                        # verdict still has to be visible after a refresh.
+                        if self._prefill_rating(
+                            character,
+                            rating=0,
+                            confidence=1.0,
+                            reason="regeneration_limit_exhausted",
+                            test_run=test_run,
+                        ):
+                            summary.prefilled_pending += 1
+                        rating_written = True
+
+                if not rating_written:
+                    undecided_reason = self._undecided_reason(final_image)
+                    if self._note_undecided(
                         character,
-                        rating=0,
-                        confidence=1.0,
-                        audit_sample_rate=audit_sample_rate,
-                        reason="regeneration_limit_exhausted",
+                        reason=undecided_reason,
                         test_run=test_run,
-                    )
-                    if outcome == "completed":
-                        summary.auto_completed += 1
-                    elif outcome == "audit":
-                        summary.audit_kept_pending += 1
-                    if outcome in {"completed", "audit"}:
-                        summary.ratings["0"] = summary.ratings.get("0", 0) + 1
+                    ):
+                        summary.undecided_pending += 1
 
                 commit_db_session(self.db)
             except Exception as exc:

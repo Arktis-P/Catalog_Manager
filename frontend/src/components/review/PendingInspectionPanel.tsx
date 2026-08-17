@@ -27,6 +27,7 @@ type InspectionSummary = {
   audit_kept_pending: number;
   prefilled_pending: number;
   suggested_only: number;
+  undecided_pending?: number;
   ratings: Record<string, number>;
   errors: string[];
   inspected_character_ids?: number[];
@@ -183,6 +184,7 @@ function addInspectionResult(
       audit: (metrics.audit ?? 0) + result.audit_kept_pending,
       files_removed: (metrics.files_removed ?? 0) + result.rejected_files_removed,
       errors: (metrics.errors ?? 0) + result.errors.length,
+      undecided: ((metrics.undecided as number | undefined) ?? 0) + (result.undecided_pending ?? 0),
     },
     errors: [...job.errors, ...nextErrors],
     message,
@@ -485,11 +487,12 @@ export function PendingInspectionPanel() {
           0,
         );
         const autoZero = (result.character_diagnostics ?? []).filter((row) => row.final_action === "0성").length;
+        const undecided = ((metrics.undecided as number | undefined) ?? 0) + (result.undecided_pending ?? 0);
         task = addInspectionResult(
           task,
           result,
           processed,
-          `현재 페이지 Pending 자동 검사 · ${processed.toLocaleString()}/${characterIds.length.toLocaleString()} · 실제 검사 ${inspected.toLocaleString()} · tagger ${taggerOk}/${taggerErr} · reject ${semanticReject.toLocaleString()} · 재생성 ${regenerated.toLocaleString()} · 재검사 ${reinpected.toLocaleString()} · 0성 ${autoZero.toLocaleString()} · 자동완료 ${autoCompleted.toLocaleString()}`,
+          `현재 페이지 Pending 자동 검사 · ${processed.toLocaleString()}/${characterIds.length.toLocaleString()} · 실제 검사 ${inspected.toLocaleString()} · tagger ${taggerOk}/${taggerErr} · reject ${semanticReject.toLocaleString()} · 재생성 ${regenerated.toLocaleString()} · 재검사 ${reinpected.toLocaleString()} · 0성 ${autoZero.toLocaleString()} · 레이팅 미결정 ${undecided.toLocaleString()} · 자동완료 ${autoCompleted.toLocaleString()}`,
         );
         task = {
           ...task,

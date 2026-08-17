@@ -163,6 +163,20 @@ def test_semantic_gallery_only_when_identity_ok() -> None:
     )
 
 
+def test_multi_subject_output_uses_semantic_gallery_stage() -> None:
+    ctx = RepairContext()
+    assert (
+        decide_repair_stage(
+            gender="1girl",
+            quality_status="pass",
+            identity_status="reject",
+            reasons=["multi_subject_output:multiple_girls:0.48"],
+            context=ctx,
+        )
+        == STAGE_SEMANTIC_GALLERY
+    )
+
+
 def test_tag_undetected_can_still_repair_semantic_gallery() -> None:
     ctx = RepairContext()
     assert (

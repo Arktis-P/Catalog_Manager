@@ -6,7 +6,7 @@ from typing import Mapping
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.services.reference_profile_service import CharacterReferenceProfile
 
-SEMANTIC_CHECKER_VERSION = "v1.5"
+SEMANTIC_CHECKER_VERSION = "v1.6"
 
 HARD_LAYOUT_TAGS = frozenset(
     {
@@ -111,6 +111,10 @@ GOODS_SIGNAL = 0.48
 OUTFIT_REFERENCE_SIGNAL = 0.55
 OUTFIT_REJECT = 0.67
 GENDER_CONFIDENT = 0.72
+# A cover image must show one subject. Measured separation on the pending queue: solo
+# outputs score multiple_girls <= 0.16 with 1girl >= 0.81, while multi-subject outputs
+# split the solo score below GENDER_CONFIDENT and push a multi tag past this floor.
+MULTI_SUBJECT_REJECT = 0.30
 LOCAL_GENDER_PRIOR_CONFIDENCE = 0.90
 LOCAL_NO_HUMANS_PRIOR_CONFIDENCE = 0.80
 REFERENCE_STABLE_RATIO = 0.72
@@ -151,6 +155,22 @@ class SemanticCheckResult:
     suggested_rating_confidence: float | None = None
 
 
+def _append_low_gender_confidence(
+    reasons: list[str],
+    status: str,
+    gender: str,
+    score: float,
+) -> None:
+    """Explain why no rating candidate was produced for a known gender prior.
+
+    Without this the pending card keeps an empty rating and no note, which is
+    indistinguishable from an item that was never inspected.
+    """
+    if status == "reject":
+        return
+    reasons.append(f"gender_confidence_low:{gender}:{score:.2f}")
+
+
 def _apply_gender_prior(
     scores: Mapping[str, float],
     *,
@@ -179,6 +199,7 @@ def _apply_gender_prior(
             confidence = min(LOCAL_GENDER_PRIOR_CONFIDENCE, output_girl)
             reasons.append(f"auto_rating_candidate:3:{confidence:.2f}")
             return status, 3, confidence
+        _append_low_gender_confidence(reasons, status, gender, max(output_boy, output_girl))
         return status, None, None
 
     if gender == "1girl":
@@ -192,6 +213,7 @@ def _apply_gender_prior(
             confidence = min(LOCAL_GENDER_PRIOR_CONFIDENCE, output_girl)
             reasons.append(f"auto_rating_candidate:3:{confidence:.2f}")
             return status, 3, confidence
+        _append_low_gender_confidence(reasons, status, gender, output_girl)
 
     # A high existing non-human candidate score is useful supporting evidence, but
     # female-like candidates are intentionally not auto-deleted; the dedicated
@@ -297,6 +319,18 @@ def evaluate_semantic_tags(
     elif goods and print_signals and status != "reject":
         status = "warning"
         reasons.append("printed_character_or_goods_possible")
+
+    if status != "reject" and multi_score >= MULTI_SUBJECT_REJECT:
+        solo_score = max(
+            scores.get("solo", 0.0),
+            scores.get("1girl", 0.0),
+            scores.get("1boy", 0.0),
+        )
+        if solo_score < GENDER_CONFIDENT:
+            multi_tags = _active(scores, MULTI_SUBJECT_TAGS, MULTI_SUBJECT_REJECT)
+            top_tag = max(multi_tags, key=lambda tag: scores.get(tag, 0.0), default="multiple")
+            status = "reject"
+            reasons.append(f"multi_subject_output:{top_tag}:{multi_score:.2f}")
 
     status, suggested_rating, suggested_confidence = _apply_gender_prior(
         scores,
