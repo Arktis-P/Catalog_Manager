@@ -16,6 +16,7 @@ from app.integrations.image_tagger.hf_wd_tagger import (
 )
 from app.services.identity_checker import IDENTITY_CHECKER_VERSION
 from app.services.pending_review_inspection_service import (
+    LOCAL_REVIEW_STATUSES,
     MAX_RESET_CHARACTERS,
     PendingReviewInspectionService,
 )
@@ -34,6 +35,17 @@ class PendingInspectionSelection(BaseModel):
 class PendingInspectionResetSelection(BaseModel):
     # Empty means "use the character ids this server recorded during page tests".
     character_ids: list[int] = []
+
+
+class LocalReviewRequest(BaseModel):
+    character_id: int
+    status: str
+    note: str | None = None
+
+
+class LocalReviewResponse(BaseModel):
+    character_id: int
+    local_review: str
 
 
 def _active_v2_generation_exists() -> bool:
@@ -209,6 +221,26 @@ def run_selected_pending_inspection(
     result = summary.as_dict()
     result["skipped_current_version"] = skipped_current_version
     return result
+
+
+@router.post("/local-review", response_model=LocalReviewResponse)
+def record_local_review(
+    payload: LocalReviewRequest,
+    db: Session = Depends(get_db),
+):
+    """Store a local worker's first-pass confirmation for a suspect/0/-1 item (§7)."""
+    if payload.status not in LOCAL_REVIEW_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of {', '.join(sorted(LOCAL_REVIEW_STATUSES))}",
+        )
+    character = db.query(GlobalCharacter).filter(GlobalCharacter.id == payload.character_id).first()
+    if character is None:
+        raise HTTPException(status_code=404, detail="캐릭터를 찾을 수 없습니다.")
+    service = PendingReviewInspectionService(db)
+    status = service.set_local_review(character, status=payload.status, note=payload.note)
+    db.commit()
+    return LocalReviewResponse(character_id=character.id, local_review=status)
 
 
 @router.post("/reset-selected")

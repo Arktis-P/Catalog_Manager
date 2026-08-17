@@ -487,6 +487,36 @@ class ReviewService:
         items = query.order_by(*ordering).offset(skip).limit(limit).all()
         return items, total
 
+    # Provenance filter (§6). Matches the compact review_note marker written by the
+    # pending inspection service: `auto_inspection_result=v1;outcome=<x>;reason=...`.
+    _INSPECTION_OUTCOME_GROUPS: dict[str, tuple[str, ...]] = {
+        "needs_user": ("suspect", "auto_zero", "auto_minus_one", "tagger_error", "undecided"),
+        "suspect": ("suspect",),
+        "auto_zero": ("auto_zero",),
+        "auto_minus_one": ("auto_minus_one",),
+        "regenerated_pass": ("regenerated_pass",),
+        "auto_pass": ("pass", "prefill_three", "auto_one"),
+        "uninspected": (),  # special-cased below
+    }
+
+    def _inspection_outcome_filter(self, value: str):
+        if value not in self._INSPECTION_OUTCOME_GROUPS:
+            raise ValueError(
+                "inspection_outcome must be one of "
+                + ", ".join(sorted(self._INSPECTION_OUTCOME_GROUPS))
+            )
+        note = GlobalCharacterReview.review_note
+        if value == "uninspected":
+            # No provenance marker at all, or the tagger failed to inspect it.
+            return or_(
+                GlobalCharacterReview.id.is_(None),
+                note.is_(None),
+                not_(note.like("%auto_inspection_result=%")),
+                note.like("%outcome=tagger_error;%"),
+            )
+        outcomes = self._INSPECTION_OUTCOME_GROUPS[value]
+        return or_(*(note.like(f"%outcome={outcome};%") for outcome in outcomes))
+
     def list_v2_review_characters(
         self,
         *,
@@ -500,6 +530,7 @@ class ReviewService:
         series_id: int | None = None,
         multicolor: str | None = None,
         prompt_modified: bool | None = None,
+        inspection_outcome: str | None = None,
         search: str | None = None,
         skip: int = 0,
         limit: int = 30,
@@ -617,6 +648,9 @@ class ReviewService:
                     GlobalCharacter.base_prompt == GlobalCharacter.previous_base_prompt,
                 )
             )
+        if inspection_outcome:
+            query = query.filter(self._inspection_outcome_filter(inspection_outcome))
+
         if search:
             pattern = f"%{search.strip()}%"
             query = query.filter(

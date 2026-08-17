@@ -536,3 +536,109 @@ def test_undecided_marker_is_reverted_by_test_reset(db: Session, monkeypatch) ->
 
     assert "undecided=1" not in (character.review.review_note or "")
     assert character.review.rating is None
+
+
+def test_provenance_marker_is_persisted_and_parsed(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="prov_pass", review_status="pending")
+    image = character.images[0]
+    image.identity_status = "pass"
+    image.identity_reasons = "[]"
+    db.commit()
+
+    service = PendingReviewInspectionService(db)
+    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
+    summary = service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
+    db.refresh(character.review)
+
+    fields = PendingReviewInspectionService.parse_provenance(character.review.review_note)
+    assert fields is not None
+    assert fields["outcome"] == "pass"
+    assert fields["test"] == "1"
+    assert summary.outcomes.get("pass") == 1
+
+
+def test_suspect_output_records_suspect_provenance(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="prov_suspect", review_status="pending")
+    image = character.images[0]
+    image.identity_status = "warning"
+    image.identity_reasons = '["gallery_suspect:character_print:0.12"]'
+    db.commit()
+
+    service = PendingReviewInspectionService(db)
+    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
+    service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
+    db.refresh(character.review)
+
+    fields = PendingReviewInspectionService.parse_provenance(character.review.review_note)
+    assert fields is not None
+    assert fields["outcome"] == "suspect"
+    assert fields["reason"] == "gallery_suspect:character_print:0.12"
+    # A suspect must never spend a regeneration.
+    assert fields["regen"] == "0"
+
+
+def test_auto_zero_records_provenance(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="prov_zero", review_status="pending")
+    image = character.images[0]
+    image.identity_status = "reject"
+    image.identity_reasons = '["multi_subject_output:multiple_girls:0.80"]'
+    db.commit()
+
+    service = PendingReviewInspectionService(db)
+    _exhaust_repair(service, monkeypatch)
+    service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
+    db.refresh(character.review)
+
+    fields = PendingReviewInspectionService.parse_provenance(character.review.review_note)
+    assert fields is not None
+    assert fields["outcome"] == "auto_zero"
+
+
+def test_provenance_marker_is_replaced_not_appended(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="prov_replace", review_status="pending")
+    image = character.images[0]
+    image.identity_status = "pass"
+    image.identity_reasons = "[]"
+    db.commit()
+
+    service = PendingReviewInspectionService(db)
+    monkeypatch.setattr(service, "_inspect_existing", lambda c, i: i)
+    service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
+    service.inspect_batch(limit=5, auto_complete=False, cleanup_rejected=False, test_run=True)
+    db.refresh(character.review)
+
+    note = character.review.review_note or ""
+    assert note.count("auto_inspection_result=") == 1
+
+
+def test_local_review_marker_is_stored_and_parsed(db: Session) -> None:
+    character = add_character(db, tag="local_review", review_status="pending")
+    service = PendingReviewInspectionService(db)
+
+    service.set_local_review(character, status="confirmed", note="looks bad")
+    db.commit()
+    db.refresh(character.review)
+
+    assert PendingReviewInspectionService.parse_local_review(character.review.review_note) == "confirmed"
+
+    service.set_local_review(character, status="false_positive")
+    db.commit()
+    db.refresh(character.review)
+
+    note = character.review.review_note or ""
+    assert note.count("inspection_local_review=") == 1
+    assert PendingReviewInspectionService.parse_local_review(note) == "false_positive"
+
+
+def test_test_local_review_marker_is_reverted_by_reset(db: Session) -> None:
+    character = add_character(db, tag="local_review_reset", review_status="pending")
+    service = PendingReviewInspectionService(db)
+    # Stamp a manual rating marker so reset has a test line to key on, plus a test local review.
+    service._prefill_rating(character, rating=3, confidence=0.9, reason="test", test_run=True)
+    service.set_local_review(character, status="needs_user", test_run=True)
+    db.commit()
+
+    service.reset_test_results([character.id])
+    db.refresh(character.review)
+
+    assert "inspection_local_review=" not in (character.review.review_note or "")

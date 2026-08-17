@@ -180,6 +180,50 @@ function humanizeTag(tag: string): string {
   return tag.replace(/_/g, " ");
 }
 
+export interface V2ProvenanceBadge {
+  label: string;
+  className: string;
+  title: string;
+}
+
+const LOCAL_REVIEW_LABELS: Record<string, string> = {
+  confirmed: "작업자 확인됨",
+  false_positive: "오탐(작업자)",
+  missed_failure: "놓친 실패(작업자)",
+  needs_user: "사용자 필요(작업자)",
+};
+
+// §5: 자동 검사 판정 근거를 카드에서 바로 구별할 수 있게 compact badge로 노출한다.
+// 특히 0성 카드에는 반드시 "0성 사유: ..."가 title에 보이도록 한다.
+export function provenanceBadge(item: V2ReviewCharacter): V2ProvenanceBadge | null {
+  const outcome = item.auto_inspection_outcome;
+  if (!outcome) {
+    return null;
+  }
+  const reason = item.auto_inspection_reason ?? "-";
+  const regen = item.auto_inspection_regen_count;
+  const localReview = item.auto_inspection_local_review
+    ? ` · ${LOCAL_REVIEW_LABELS[item.auto_inspection_local_review] ?? item.auto_inspection_local_review}`
+    : "";
+  const map: Record<string, { label: string; className: string }> = {
+    pass: { label: "자동통과", className: "badge badge-muted" },
+    regenerated_pass: { label: `재생성 ${regen} → 통과`, className: "badge badge-success" },
+    suspect: { label: "확인필요 · 작은 얼굴/프린트 의심", className: "badge badge-warning" },
+    auto_zero: { label: "0성 · 재생성 소진", className: "badge badge-danger" },
+    auto_minus_one: { label: "-1 · 비인물", className: "badge badge-danger" },
+    auto_one: { label: "1성 · 남성", className: "badge badge-muted" },
+    prefill_three: { label: "3성 후보", className: "badge badge-muted" },
+    undecided: { label: "판정 보류", className: "badge badge-warning" },
+    tagger_error: { label: "태거 오류", className: "badge badge-danger" },
+  };
+  const entry = map[outcome] ?? { label: outcome, className: "badge badge-muted" };
+  const title =
+    outcome === "auto_zero"
+      ? `0성 사유: ${reason}${localReview}`
+      : `자동검사: ${outcome} · ${reason} · 재생성 ${regen}${localReview}`;
+  return { label: `${entry.label}${localReview}`, className: entry.className, title };
+}
+
 interface V2ReviewRowProps {
   item: V2ReviewCharacter;
   rowIndex: number;
@@ -237,6 +281,7 @@ export function V2ReviewRow({
   );
   const featureRowChips = chips.filter((chip) => (chip.group === "eyes" || chip.group === "features") && !chip.optional);
   const genStatusBadge = generationStatusBadge(item.generation_status);
+  const inspectionBadge = provenanceBadge(item);
   const currentImage = item.images[draft.imageIndex] ?? null;
   const hasMultipleImages = item.images.length > 1;
   const displayName = humanizeTag(item.display_name || item.character_tag);
@@ -352,6 +397,11 @@ export function V2ReviewRow({
           {genStatusBadge ? <span className={genStatusBadge.className}>{genStatusBadge.label}</span> : null}
           {item.prompt_modified ? <span className="badge badge-warning">프롬프트 보정됨</span> : null}
           {item.primary_hair_needs_review ? <span className="badge badge-warning">대표 머리색 확인 필요</span> : null}
+          {inspectionBadge ? (
+            <span className={inspectionBadge.className} title={inspectionBadge.title}>
+              {inspectionBadge.label}
+            </span>
+          ) : null}
         </div>
 
         <ReviewRatingStars rating={draft.rating} onRate={locked ? () => undefined : onRate} />

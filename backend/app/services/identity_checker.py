@@ -39,6 +39,9 @@ def is_tagger_failure(reasons: Iterable[str] | None) -> bool:
     return any(str(reason) in TAGGER_FAILURE_REASONS for reason in reasons)
 
 # ── 임계값 (조정 가능) ──────────────────────────────────────────────
+# Raw WD prediction floor. Deliberately below the semantic suspect thresholds
+# (WEAK_CHARACTER_PRINT = 0.10 등) so those compound rules can see the tags at all.
+WD_PREDICTION_THRESHOLD = 0.10
 CHARACTER_CONFLICT_THRESHOLD = 0.75    # 다른 캐릭터 태그 고신뢰 판정 → reject
 CHARACTER_DETECT_THRESHOLD = 0.35      # 캐릭터 태그 검출 최소 기준(미만이면 미검출)
 CHARACTER_CONFIDENT_THRESHOLD = 0.5    # "고신뢰 검출" 기준 (pass 후보에 필요)
@@ -329,9 +332,12 @@ def check_identity(
         )
 
     model = hf_wd_model or DEFAULT_HF_WD_MODEL
-    # Keep weak-but-useful gallery/text signals (often 0.15–0.30). Character/hair
-    # identity still applies its own thresholds on the returned score map.
-    threshold = 0.15
+    # Weak gallery/print/small-face cues live around 0.08–0.15 and must survive the raw
+    # prediction cut for the semantic suspect rules to ever fire. Identity/hair/gender and
+    # semantic reject thresholds are applied later on this score map, so lowering only the
+    # raw floor cannot make automatic rejection more aggressive. Local ONNX computes all
+    # logits regardless, so the CPU cost of keeping more low-score tags is negligible.
+    threshold = WD_PREDICTION_THRESHOLD
     predictions, error = predict_tags_via_hf(
         image_path,
         hf_token=hf_token,

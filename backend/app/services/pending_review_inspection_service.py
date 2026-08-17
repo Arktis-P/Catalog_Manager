@@ -35,6 +35,17 @@ from app.services.v2_generation_job_manager import v2_generation_job_manager
 from app.services.v2_generation_pipeline import V2GenerationPipeline, V2PipelineResult
 
 PENDING_INSPECTION_VERSION = "v1.4"
+# Compact, human-inspectable provenance line persisted to review_note. Survives page
+# reloads without a DB migration and is replaced (not appended) on each re-inspection.
+AUTO_INSPECTION_RESULT_VERSION = "v1"
+AUTO_INSPECTION_RESULT_PREFIX = "auto_inspection_result="
+# Outcomes the reviewer must still look at (suspect queue / user confirm queue).
+NEEDS_USER_REVIEW_OUTCOMES = frozenset(
+    {"suspect", "auto_zero", "auto_minus_one", "tagger_error", "undecided"}
+)
+# Local worker first-pass confirmation persisted alongside provenance (§7).
+LOCAL_REVIEW_PREFIX = "inspection_local_review="
+LOCAL_REVIEW_STATUSES = frozenset({"confirmed", "false_positive", "missed_failure", "needs_user"})
 AUTO_RATING_CONFIDENCE = 0.85
 PREFILL_RATING_CONFIDENCE = 0.72
 DEFAULT_AUDIT_SAMPLE_RATE = 0.10
@@ -64,6 +75,8 @@ class PendingInspectionSummary:
     # Inspected but no rating could be derived; the review row is still stamped so the
     # UI can tell "needs a human decision" apart from "never inspected".
     undecided_pending: int = 0
+    # Provenance outcome tally for this batch (pass/regenerated_pass/suspect/auto_zero/...).
+    outcomes: dict[str, int] = field(default_factory=dict)
     ratings: dict[str, int] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
     # Only characters that actually completed _inspect_existing in this batch.
@@ -310,9 +323,16 @@ class PendingReviewInspectionService:
 
     @classmethod
     def _is_test_auto_marker(cls, line: str) -> bool:
-        if not line.startswith("auto_inspection="):
-            return False
-        return cls._auto_marker_fields(line).get("test") == "1"
+        # Rating/prefill/undecided markers (auto_inspection=) and provenance markers
+        # (auto_inspection_result=) both carry a trailing ;test=1 during page tests.
+        if line.startswith("auto_inspection="):
+            return cls._auto_marker_fields(line).get("test") == "1"
+        if line.startswith(AUTO_INSPECTION_RESULT_PREFIX):
+            fields = cls.parse_provenance(line)
+            return bool(fields) and fields.get("test") == "1"
+        if line.startswith(LOCAL_REVIEW_PREFIX):
+            return line.rstrip().endswith(";test=1")
+        return False
 
     def _prefill_rating(
         self,
@@ -361,6 +381,155 @@ class PendingReviewInspectionService:
         )
         self.db.flush()
         return True
+
+    def _determine_outcome(
+        self,
+        final_image: GlobalCharacterImage,
+        repair_context: RepairContext | None,
+        *,
+        rating: int | None,
+        rating_written: bool,
+        regeneration_exhausted: bool,
+    ) -> tuple[str, str]:
+        """Map the final inspection state onto a persisted provenance outcome.
+
+        Ordering favours the signal the reviewer most needs to see first: an actual
+        tagger failure, then an auto 0/-1 verdict, then a real regeneration that passed,
+        then the weak `suspect` queue, then benign prefills.
+        """
+        reasons = self._json_reason_list(final_image.identity_reasons)
+        if is_tagger_failure(reasons):
+            return "tagger_error", reasons[0] if reasons else "tagger_error"
+
+        final_action = repair_context.final_action if repair_context else "pass"
+        regen = repair_context.regeneration_completed if repair_context else 0
+
+        if regeneration_exhausted or final_action == "0성":
+            reason = (
+                repair_context.reject_reason
+                if repair_context and repair_context.reject_reason
+                else "regeneration_limit_exhausted"
+            )
+            return "auto_zero", reason
+        if rating == -1:
+            return "auto_minus_one", "non_human_output"
+        if regen > 0 and final_action == "pass":
+            stage = None
+            if repair_context is not None:
+                stage = repair_context.semantic_repair_stage or repair_context.identity_repair_stage
+            return "regenerated_pass", stage or "regenerated"
+
+        suspect = next((r for r in reasons if r.startswith("gallery_suspect:")), None)
+        if suspect is not None:
+            return "suspect", suspect
+        if rating == 1:
+            return "auto_one", "male_output"
+        if rating == 3:
+            return "prefill_three", "confident_female_output"
+        if not rating_written:
+            undecided_reason = self._undecided_reason(final_image)
+            ambiguous = undecided_reason.startswith(
+                ("gender_confidence_low", "multi_subject_output", "tagger")
+            )
+            if ambiguous or final_image.identity_status == "warning":
+                return "undecided", undecided_reason
+            # Clean identity pass with nothing to auto-rate: a genuine auto pass, not an
+            # ambiguous item the user must adjudicate.
+            return "pass", "clean"
+        return "pass", "clean"
+
+    def _record_provenance(
+        self,
+        character: GlobalCharacter,
+        *,
+        outcome: str,
+        reason: str,
+        regen: int,
+        image_id: int,
+        test_run: bool = False,
+    ) -> None:
+        """Persist a single provenance line, replacing any prior one of the same kind."""
+        review = self._review_for(character)
+        marker = (
+            f"{AUTO_INSPECTION_RESULT_PREFIX}{AUTO_INSPECTION_RESULT_VERSION};"
+            f"outcome={outcome};reason={reason};regen={regen};image={image_id};"
+            f"checker={IDENTITY_CHECKER_VERSION}"
+            f"{self._auto_marker_suffix(test_run=test_run)}"
+        )
+        existing = review.review_note or ""
+        kept = [
+            line
+            for line in existing.splitlines()
+            if line.strip() and not line.startswith(AUTO_INSPECTION_RESULT_PREFIX)
+        ]
+        kept.append(marker)
+        review.review_note = "\n".join(kept)
+        self.db.flush()
+
+    @staticmethod
+    def parse_provenance(review_note: str | None) -> dict[str, str] | None:
+        """Return the fields of the last auto_inspection_result= marker, if any."""
+        if not review_note:
+            return None
+        latest: str | None = None
+        for line in review_note.splitlines():
+            if line.startswith(AUTO_INSPECTION_RESULT_PREFIX):
+                latest = line
+        if latest is None:
+            return None
+        fields: dict[str, str] = {}
+        body = latest[len(AUTO_INSPECTION_RESULT_PREFIX) :]
+        parts = body.split(";")
+        if parts:
+            fields["version"] = parts[0].strip()
+        for part in parts[1:]:
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            fields[key.strip()] = value.strip()
+        return fields
+
+    @staticmethod
+    def parse_local_review(review_note: str | None) -> str | None:
+        """Return the latest local-worker review status marker, if any."""
+        if not review_note:
+            return None
+        latest: str | None = None
+        for line in review_note.splitlines():
+            if line.startswith(LOCAL_REVIEW_PREFIX):
+                value = line[len(LOCAL_REVIEW_PREFIX) :].split(";", 1)[0].strip()
+                if value in LOCAL_REVIEW_STATUSES:
+                    latest = value
+        return latest
+
+    def set_local_review(
+        self,
+        character: GlobalCharacter,
+        *,
+        status: str,
+        note: str | None = None,
+        test_run: bool = False,
+    ) -> str:
+        """Persist a local-worker first-pass decision, replacing any prior one."""
+        if status not in LOCAL_REVIEW_STATUSES:
+            raise ValueError(f"invalid local review status: {status}")
+        review = self._review_for(character)
+        marker = f"{LOCAL_REVIEW_PREFIX}{status}"
+        if note:
+            safe = note.replace(";", ",").replace("\n", " ").strip()[:120]
+            if safe:
+                marker += f";note={safe}"
+        marker += self._auto_marker_suffix(test_run=test_run)
+        existing = review.review_note or ""
+        kept = [
+            line
+            for line in existing.splitlines()
+            if line.strip() and not line.startswith(LOCAL_REVIEW_PREFIX)
+        ]
+        kept.append(marker)
+        review.review_note = "\n".join(kept)
+        self.db.flush()
+        return status
 
     def _apply_auto_rating(
         self,
@@ -1060,14 +1229,32 @@ class PendingReviewInspectionService:
                             summary.prefilled_pending += 1
                         rating_written = True
 
-                if not rating_written:
-                    undecided_reason = self._undecided_reason(final_image)
+                # Persist one provenance line so a page reload still shows what the
+                # automation decided and why (small-face suspect vs auto-zero vs pass).
+                outcome, provenance_reason = self._determine_outcome(
+                    final_image,
+                    repair_context,
+                    rating=rating,
+                    rating_written=rating_written,
+                    regeneration_exhausted=regeneration_exhausted,
+                )
+
+                if outcome == "undecided" and not rating_written:
                     if self._note_undecided(
                         character,
-                        reason=undecided_reason,
+                        reason=provenance_reason,
                         test_run=test_run,
                     ):
                         summary.undecided_pending += 1
+                self._record_provenance(
+                    character,
+                    outcome=outcome,
+                    reason=provenance_reason,
+                    regen=repair_context.regeneration_completed if repair_context else 0,
+                    image_id=final_image.id,
+                    test_run=test_run,
+                )
+                summary.outcomes[outcome] = summary.outcomes.get(outcome, 0) + 1
 
                 commit_db_session(self.db)
             except Exception as exc:

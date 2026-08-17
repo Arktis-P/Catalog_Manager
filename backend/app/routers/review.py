@@ -53,6 +53,11 @@ from app.services.review_catalog_serializer import (
     to_catalog_item_global,
 )
 from app.services.non_human_review_service import NonHumanReviewService, recalculate_non_human_candidates
+from app.services.pending_review_inspection_service import (
+    LOCAL_REVIEW_STATUSES,
+    NEEDS_USER_REVIEW_OUTCOMES,
+    PendingReviewInspectionService,
+)
 from app.services.review_regenerate_job_manager import (
     ReviewRegenerateJobState,
     review_regenerate_job_manager,
@@ -173,7 +178,38 @@ def _to_v2_review_character(character) -> V2ReviewCharacterResponse:
         non_human_suggested_rating=character.non_human_suggested_rating,
         non_human_review_status=character.non_human_review_status,
         non_human_evidence=parse_json_reason_list(character.non_human_evidence),
+        **_provenance_fields(review.review_note if review else None),
     )
+
+
+def _provenance_fields(review_note: str | None) -> dict[str, object]:
+    """Derive the V2 auto-inspection provenance fields from the review_note marker."""
+    fields = PendingReviewInspectionService.parse_provenance(review_note)
+    local_review = PendingReviewInspectionService.parse_local_review(review_note)
+    if not fields:
+        return {
+            "auto_inspection_outcome": None,
+            "auto_inspection_reason": None,
+            "auto_inspection_regen_count": 0,
+            "auto_inspection_needs_user_review": False,
+            "auto_inspection_local_review": local_review,
+        }
+    outcome = fields.get("outcome")
+    try:
+        regen = int(fields.get("regen", "0"))
+    except ValueError:
+        regen = 0
+    needs_user = outcome in NEEDS_USER_REVIEW_OUTCOMES and local_review not in {
+        "confirmed",
+        "false_positive",
+    }
+    return {
+        "auto_inspection_outcome": outcome,
+        "auto_inspection_reason": fields.get("reason"),
+        "auto_inspection_regen_count": regen,
+        "auto_inspection_needs_user_review": needs_user,
+        "auto_inspection_local_review": local_review,
+    }
 
 
 def _job_to_response(job: ReviewRegenerateJobState) -> ReviewRegenerateJobResponse:
@@ -214,6 +250,10 @@ def list_v2_review_characters(
     series_id: int | None = Query(default=None, ge=1),
     multicolor: str | None = Query(default=None, pattern="^(has|suggested)$"),
     prompt_modified: bool | None = None,
+    inspection_outcome: str | None = Query(
+        default=None,
+        pattern="^(needs_user|suspect|auto_zero|auto_minus_one|regenerated_pass|auto_pass|uninspected)$",
+    ),
     search: str | None = None,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=30, ge=1, le=100),
@@ -231,6 +271,7 @@ def list_v2_review_characters(
             series_id=series_id,
             multicolor=multicolor,
             prompt_modified=prompt_modified,
+            inspection_outcome=inspection_outcome,
             search=search,
             skip=skip,
             limit=limit,

@@ -129,6 +129,7 @@ def test_v2_review_list_filters_and_returns_preview_metadata(db: Session) -> Non
         series_id=series.id,
         multicolor="suggested",
         prompt_modified=None,
+        inspection_outcome=None,
         search=None,
         skip=0,
         limit=30,
@@ -159,7 +160,7 @@ def test_v2_review_list_partitions_by_persisted_non_human_candidate_score(db: Se
     common = dict(
         review_status=None, rating=None, quality_status=None, identity_status=None,
         generation_status=None, gender=None, series_id=None, multicolor=None,
-        prompt_modified=None, search=None, skip=0, limit=30, service=service,
+        prompt_modified=None, inspection_outcome=None, search=None, skip=0, limit=30, service=service,
     )
 
     all_response = review_router.list_v2_review_characters(non_human="all", **common)
@@ -200,6 +201,7 @@ def test_v2_review_completed_recent_filters_completed_and_orders_by_review_updat
         series_id=None,
         multicolor=None,
         prompt_modified=None,
+        inspection_outcome=None,
         search=None,
         skip=0,
         limit=30,
@@ -227,6 +229,7 @@ def test_v2_review_list_includes_merge_status_fields(db: Session) -> None:
         series_id=None,
         multicolor=None,
         prompt_modified=None,
+        inspection_outcome=None,
         search=None,
         skip=0,
         limit=30,
@@ -325,6 +328,7 @@ def test_v2_review_images_ordered_by_creation_and_preview_falls_back_to_latest(d
         series_id=None,
         multicolor=None,
         prompt_modified=None,
+        inspection_outcome=None,
         search="ordered_images",
         skip=0,
         limit=30,
@@ -374,6 +378,7 @@ def test_v2_review_preview_image_uses_cover_when_set(db: Session) -> None:
         series_id=None,
         multicolor=None,
         prompt_modified=None,
+        inspection_outcome=None,
         search="cover_images",
         skip=0,
         limit=30,
@@ -387,3 +392,65 @@ def test_v2_review_preview_image_uses_cover_when_set(db: Session) -> None:
     assert item["images"][-1]["id"] != first_image.id
     # preview_image should be the cover, not the last (most recent) image
     assert item["preview_image"]["id"] == first_image.id
+
+
+def _list_all(db: Session, **overrides):
+    common = dict(
+        review_status=None, rating=None, quality_status=None, identity_status=None,
+        generation_status=None, gender=None, non_human=None, series_id=None,
+        multicolor=None, prompt_modified=None, inspection_outcome=None, search=None,
+        skip=0, limit=30, service=ReviewService(db),
+    )
+    common.update(overrides)
+    return review_router.list_v2_review_characters(**common)
+
+
+def test_v2_response_exposes_inspection_provenance_fields(db: Session) -> None:
+    character = make_character(db, tag="suspect_small_face", review_status="pending")
+    character.review.review_note = (
+        "auto_inspection_result=v1;outcome=suspect;"
+        "reason=gallery_suspect:character_print:0.12;regen=0;image=42;checker=v3.5"
+    )
+    db.commit()
+
+    response = _list_all(db)
+    item = next(i for i in response.items if i.character_tag == "suspect_small_face")
+    assert item.auto_inspection_outcome == "suspect"
+    assert item.auto_inspection_reason == "gallery_suspect:character_print:0.12"
+    assert item.auto_inspection_regen_count == 0
+    assert item.auto_inspection_needs_user_review is True
+
+
+def test_confirmed_local_review_clears_needs_user_review(db: Session) -> None:
+    character = make_character(db, tag="zero_confirmed", review_status="pending", rating=0)
+    character.review.review_note = (
+        "auto_inspection_result=v1;outcome=auto_zero;reason=regeneration_limit_exhausted;"
+        "regen=2;image=7;checker=v3.5\ninspection_local_review=confirmed"
+    )
+    db.commit()
+
+    item = next(i for i in _list_all(db).items if i.character_tag == "zero_confirmed")
+    assert item.auto_inspection_outcome == "auto_zero"
+    assert item.auto_inspection_local_review == "confirmed"
+    assert item.auto_inspection_needs_user_review is False
+
+
+def test_inspection_outcome_filter_selects_matching_markers(db: Session) -> None:
+    suspect = make_character(db, tag="f_suspect", review_status="pending")
+    suspect.review.review_note = "auto_inspection_result=v1;outcome=suspect;reason=x;regen=0;image=1;checker=v"
+    zero = make_character(db, tag="f_zero", review_status="pending", rating=0)
+    zero.review.review_note = "auto_inspection_result=v1;outcome=auto_zero;reason=x;regen=2;image=2;checker=v"
+    clean = make_character(db, tag="f_pass", review_status="pending")
+    clean.review.review_note = "auto_inspection_result=v1;outcome=pass;reason=clean;regen=0;image=3;checker=v"
+    make_character(db, tag="f_uninspected", review_status="pending")
+    db.commit()
+
+    suspect_only = _list_all(db, inspection_outcome="suspect")
+    assert {i.character_tag for i in suspect_only.items} == {"f_suspect"}
+
+    needs_user = _list_all(db, inspection_outcome="needs_user")
+    assert {i.character_tag for i in needs_user.items} == {"f_suspect", "f_zero"}
+
+    uninspected = _list_all(db, inspection_outcome="uninspected")
+    assert "f_uninspected" in {i.character_tag for i in uninspected.items}
+    assert "f_pass" not in {i.character_tag for i in uninspected.items}

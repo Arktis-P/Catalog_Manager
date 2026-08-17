@@ -706,6 +706,12 @@ export interface V2ReviewCharacter {
   non_human_suggested_rating: number | null;
   non_human_review_status: string;
   non_human_evidence: string[];
+  // 자동 검사 provenance (§4·§5). review_note marker에서 파생된 판정 근거.
+  auto_inspection_outcome: string | null;
+  auto_inspection_reason: string | null;
+  auto_inspection_regen_count: number;
+  auto_inspection_needs_user_review: boolean;
+  auto_inspection_local_review: string | null;
 }
 
 export interface V2ReviewCharacterListResponse {
@@ -800,6 +806,14 @@ export interface V2ReviewReferenceImagesResponse {
 
 export type V2ReviewStatus = "pending" | "in_progress" | "completed" | "completed_recent";
 export type V2NonHumanFilter = "all" | "human" | "non_human";
+export type V2InspectionOutcomeFilter =
+  | "needs_user"
+  | "suspect"
+  | "auto_zero"
+  | "auto_minus_one"
+  | "regenerated_pass"
+  | "auto_pass"
+  | "uninspected";
 
 export interface V2ReviewFilters {
   review_status?: V2ReviewStatus;
@@ -812,6 +826,7 @@ export interface V2ReviewFilters {
   series_id?: number;
   multicolor?: string;
   prompt_modified?: boolean;
+  inspection_outcome?: V2InspectionOutcomeFilter;
   search?: string;
   skip?: number;
   limit?: number;

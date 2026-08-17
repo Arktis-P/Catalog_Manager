@@ -220,6 +220,36 @@ def test_check_identity_uses_mocked_tagger_predictions(monkeypatch, tmp_path: Pa
     assert result.character_confidence == 0.92
 
 
+def test_check_identity_requests_low_prediction_threshold(monkeypatch, tmp_path: Path) -> None:
+    # §1: the raw WD floor must stay <= 0.10 so weak gallery/print/small-face cues reach
+    # the semantic suspect rules. Identity thresholds are applied separately on the map.
+    from app.integrations.image_tagger.hf_wd_tagger import TagPrediction
+    from app.services.identity_checker import WD_PREDICTION_THRESHOLD
+
+    assert WD_PREDICTION_THRESHOLD <= 0.10
+
+    image_path = tmp_path / "image.png"
+    image_path.write_bytes(b"placeholder")
+    seen: dict[str, float] = {}
+
+    def fake_predict(*args, **kwargs):
+        seen["threshold"] = kwargs.get("threshold")
+        return ([TagPrediction(tag="hakurei_reimu", confidence=0.92)], None)
+
+    monkeypatch.setattr(
+        "app.integrations.image_tagger.hf_wd_tagger.predict_tags_via_hf", fake_predict
+    )
+
+    check_identity(
+        image_path,
+        character_tag="hakurei_reimu",
+        known_character_tags=[],
+        hf_token="fake-token",
+    )
+    assert seen["threshold"] == WD_PREDICTION_THRESHOLD
+    assert seen["threshold"] <= 0.10
+
+
 def test_check_identity_returns_warning_on_tagger_error(monkeypatch, tmp_path: Path) -> None:
     image_path = tmp_path / "image.png"
     image_path.write_bytes(b"placeholder")

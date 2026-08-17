@@ -303,6 +303,7 @@ export function V2ReviewPanel() {
   const [seriesId, setSeriesId] = useState<number | "">("");
   const [multicolorFilter, setMulticolorFilter] = useState("");
   const [promptModifiedOnly, setPromptModifiedOnly] = useState(false);
+  const [inspectionOutcome, setInspectionOutcome] = useState("");
   const [search, setSearch] = useState("");
 
   const [skip, setSkip] = useState(0);
@@ -466,6 +467,7 @@ export function V2ReviewPanel() {
         series_id: seriesId || undefined,
         multicolor: multicolorFilter || undefined,
         prompt_modified: promptModifiedOnly ? true : undefined,
+        inspection_outcome: (inspectionOutcome || undefined) as V2ReviewFilters["inspection_outcome"],
         search: search || undefined,
         skip,
         limit: PAGE_SIZE,
@@ -520,6 +522,7 @@ export function V2ReviewPanel() {
     seriesId,
     multicolorFilter,
     promptModifiedOnly,
+    inspectionOutcome,
     search,
     skip,
   ]);
@@ -1238,6 +1241,7 @@ export function V2ReviewPanel() {
     seriesId,
     multicolorFilter,
     promptModifiedOnly,
+    inspectionOutcome,
     search,
   ]);
 
@@ -1496,6 +1500,7 @@ export function V2ReviewPanel() {
       series_id: seriesId || undefined,
       multicolor: multicolorFilter || undefined,
       prompt_modified: promptModifiedOnly ? true : undefined,
+      inspection_outcome: (inspectionOutcome || undefined) as V2ReviewFilters["inspection_outcome"],
       search: search || undefined,
     }),
     [
@@ -1509,6 +1514,7 @@ export function V2ReviewPanel() {
       seriesId,
       multicolorFilter,
       promptModifiedOnly,
+      inspectionOutcome,
       search,
     ],
   );
@@ -2475,6 +2481,23 @@ export function V2ReviewPanel() {
             <option value="">전체</option>
             <option value="has">보유</option>
             <option value="suggested">추천 있음</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="v2-review-inspection-outcome">자동검사</label>
+          <select
+            id="v2-review-inspection-outcome"
+            value={inspectionOutcome}
+            onChange={(event) => setInspectionOutcome(event.target.value)}
+          >
+            <option value="">전체</option>
+            <option value="needs_user">사용자 확인 필요</option>
+            <option value="suspect">작은 얼굴/프린트 의심</option>
+            <option value="auto_zero">0성 자동판정</option>
+            <option value="auto_minus_one">-1 자동판정</option>
+            <option value="regenerated_pass">재생성 후 통과</option>
+            <option value="auto_pass">자동 통과</option>
+            <option value="uninspected">미검사/태거오류</option>
           </select>
         </div>
         <div className="field review-series-field">

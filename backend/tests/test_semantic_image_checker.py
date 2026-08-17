@@ -66,7 +66,9 @@ def test_single_weak_print_shirt_is_not_hard_reject() -> None:
     assert result.status == "pass"
 
 
-def test_weak_print_plus_character_print_is_reject() -> None:
+def test_weak_print_plus_character_print_is_suspect_not_reject() -> None:
+    # §2: a weak print_* + weak character_print pair is no longer strong enough to burn
+    # a regeneration. It becomes a human-confirm suspect (warning) instead.
     result = evaluate_semantic_tags(
         {
             "print_shirt": 0.30,
@@ -74,23 +76,26 @@ def test_weak_print_plus_character_print_is_reject() -> None:
             "1girl": 0.9,
         }
     )
-    assert result.status == "reject"
-    assert "weak_print_gallery" in result.reasons
+    assert result.status == "warning"
+    assert any(reason.startswith("gallery_suspect:character_print") for reason in result.reasons)
 
 
-def test_weak_print_plus_multi_is_reject() -> None:
+def test_weak_print_plus_multi_is_suspect_not_reject() -> None:
+    # Confident single subject (1girl high) so the strong multi_subject_output reject does
+    # not fire; the weak print + mild multi hint should only raise a suspect.
     result = evaluate_semantic_tags(
         {
             "print_dress": 0.32,
-            "multiple_girls": 0.30,
-            "1girl": 0.7,
+            "multiple_girls": 0.27,
+            "1girl": 0.9,
+            "solo": 0.85,
         }
     )
-    assert result.status == "reject"
-    assert "weak_print_gallery" in result.reasons
+    assert result.status == "warning"
+    assert any(reason.startswith("gallery_suspect:") for reason in result.reasons)
 
 
-def test_side_panel_multiple_views_plus_print_is_reject() -> None:
+def test_side_panel_multiple_views_plus_print_is_suspect_not_reject() -> None:
     result = evaluate_semantic_tags(
         {
             "multiple_views": 0.33,
@@ -98,8 +103,8 @@ def test_side_panel_multiple_views_plus_print_is_reject() -> None:
             "1girl": 0.8,
         }
     )
-    assert result.status == "reject"
-    assert "embedded_gallery:side_panel" in result.reasons
+    assert result.status == "warning"
+    assert any(reason.startswith("gallery_suspect:") for reason in result.reasons)
 
 
 def test_multiple_goods_and_character_cards_are_rejected() -> None:
@@ -114,12 +119,26 @@ def test_multiple_goods_and_character_cards_are_rejected() -> None:
     assert "goods_or_screen_character_gallery" in result.reasons
 
 
+def test_lone_weak_character_print_is_suspect() -> None:
+    # A raw character_print around 0.10–0.15 (only reachable after lowering the WD
+    # prediction floor) must surface as a suspect, never a silent pass or a reject.
+    result = evaluate_semantic_tags({"character_print": 0.12, "1girl": 0.92, "solo": 0.88})
+    assert result.status == "warning"
+    assert "gallery_suspect:character_print:0.12" in result.reasons
+
+
+def test_lone_weak_multiple_views_is_suspect() -> None:
+    result = evaluate_semantic_tags({"multiple_views": 0.34, "1girl": 0.9})
+    assert result.status == "warning"
+    assert any(reason.startswith("gallery_suspect:multiple_views") for reason in result.reasons)
+
+
 def test_single_print_signal_is_warning_not_hard_reject() -> None:
     result = evaluate_semantic_tags(
         {"print_shirt": 0.75, "text": 0.7, "1girl": 0.9}
     )
     assert result.status == "warning"
-    assert "printed_character_or_goods_possible" in result.reasons
+    assert any(reason.startswith("gallery_suspect:") for reason in result.reasons)
 
 
 def test_normal_output_does_not_need_danbooru_outfit_reference() -> None:

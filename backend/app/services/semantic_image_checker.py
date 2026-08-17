@@ -6,7 +6,7 @@ from typing import Mapping
 from app.integrations.danbooru.appearance_extractor import normalize_gender
 from app.services.reference_profile_service import CharacterReferenceProfile
 
-SEMANTIC_CHECKER_VERSION = "v1.7"
+SEMANTIC_CHECKER_VERSION = "v1.8"
 
 HARD_LAYOUT_TAGS = frozenset(
     {
@@ -118,12 +118,18 @@ POSTER_MULTI_REJECT = 0.70
 POSTER_TEXT_REJECT = 0.15
 CHARACTER_PRINT_REJECT = 0.45
 PRINT_WITH_CHARACTER_PRINT = 0.25
-# Weaker compound gallery signals for print/side-panel misses.
+# Weaker single/compound gallery signals. These no longer auto-reject: they raise a
+# `gallery_suspect:*` warning so a human confirms before any regeneration is spent.
 WEAK_PRINT_CLOTHING = 0.28
 WEAK_CHARACTER_PRINT = 0.10
 WEAK_MULTI_WITH_PRINT = 0.25
 WEAK_SIDE_PANEL_VIEWS = 0.30
+# A lone card/poster/screen cue below GOODS_SIGNAL is a suspect, not a reject.
+WEAK_GOODS_SUSPECT = 0.30
+# A weak clothing print becomes a suspect only when paired with a mild text/writing cue.
+WEAK_TEXT_SUSPECT = 0.20
 GOODS_SIGNAL = 0.48
+GOODS_SCREEN_CARD_TAGS = frozenset({"poster_(object)", "trading_card", "card", "monitor", "screen"})
 OUTFIT_REFERENCE_SIGNAL = 0.55
 OUTFIT_REJECT = 0.67
 GENDER_CONFIDENT = 0.72
@@ -286,6 +292,7 @@ def evaluate_semantic_tags(
         status = "reject"
         reasons.append("poster_or_collage_with_text")
 
+    # ── Strong / compound print evidence → automatic reject ────────────────────
     character_print = scores.get("character_print", 0.0)
     print_clothing = _active(scores, PRINT_CLOTHING_TAGS, GOODS_SIGNAL)
     weak_print_clothing = _active(scores, PRINT_CLOTHING_TAGS, WEAK_PRINT_CLOTHING)
@@ -294,55 +301,44 @@ def evaluate_semantic_tags(
     ):
         status = "reject"
         reasons.append("printed_character_gallery")
-    elif status != "reject" and weak_print_clothing and character_print >= WEAK_CHARACTER_PRINT:
-        # Weak print_* alone is not enough; require a second print-face cue.
-        status = "reject"
-        reasons.append("weak_print_gallery")
-    elif status != "reject" and weak_print_clothing and multi_score >= WEAK_MULTI_WITH_PRINT:
-        status = "reject"
-        reasons.append("weak_print_gallery")
-    elif (
-        status != "reject"
-        and soft_layout >= WEAK_SIDE_PANEL_VIEWS
-        and (
-            character_print >= WEAK_CHARACTER_PRINT
-            or multi_score >= WEAK_MULTI_WITH_PRINT
-            or bool(weak_print_clothing)
-        )
-    ):
-        # Side-panel / small-face collage often tags as mild multiple_views plus a
-        # weak print or multi-subject cue rather than a hard collage label.
-        status = "reject"
-        reasons.append("embedded_gallery:side_panel")
-    elif (
-        status != "reject"
-        and scores.get("clothes_writing", 0.0) >= WEAK_PRINT_CLOTHING
-        and weak_print_clothing
-        and multi_score >= WEAK_MULTI_WITH_PRINT
-    ):
-        status = "reject"
-        reasons.append("weak_print_gallery")
 
     goods = _active(scores, GOODS_OR_SCREEN_TAGS, GOODS_SIGNAL)
     multi = _active(scores, MULTI_SUBJECT_TAGS, GOODS_SIGNAL)
     print_signals = _active(scores, TEXT_OR_PRINT_TAGS, GOODS_SIGNAL)
+    card_screen = _max_score(scores, GOODS_SCREEN_CARD_TAGS)
     if status != "reject" and (len(goods) >= 2 or (goods and multi)):
         status = "reject"
         reasons.append("goods_or_screen_character_gallery")
     elif status != "reject" and print_clothing and multi:
         status = "reject"
         reasons.append("goods_or_screen_character_gallery")
-    elif (
-        status != "reject"
-        and _max_score(scores, frozenset({"poster_(object)", "trading_card", "card", "monitor", "screen"}))
-        >= GOODS_SIGNAL
-        and text_score >= POSTER_TEXT_REJECT
-    ):
+    elif status != "reject" and card_screen >= GOODS_SIGNAL and text_score >= POSTER_TEXT_REJECT:
         status = "reject"
         reasons.append("poster_or_collage_with_text")
-    elif goods and print_signals and status != "reject":
-        status = "warning"
-        reasons.append("printed_character_or_goods_possible")
+
+    # ── Weak single/compound cues → suspect queue (never auto-reject) ──────────
+    # These match small-face / clothing-print / side-panel misses that are too weak to
+    # burn a regeneration on. A human confirms via the suspect queue instead.
+    if status != "reject":
+        weak_text = max(text_score, scores.get("clothes_writing", 0.0)) >= WEAK_TEXT_SUSPECT
+        suspect: str | None = None
+        if weak_print_clothing and character_print >= WEAK_CHARACTER_PRINT:
+            suspect = f"gallery_suspect:character_print:{character_print:.2f}"
+        elif weak_print_clothing and (multi_score >= WEAK_MULTI_WITH_PRINT or weak_text):
+            # A weak clothing print alone is noise; pair it with a weak text or multi cue.
+            top = max(weak_print_clothing, key=lambda tag: scores.get(tag, 0.0))
+            suspect = f"gallery_suspect:{top}:{scores.get(top, 0.0):.2f}"
+        elif WEAK_CHARACTER_PRINT <= character_print < CHARACTER_PRINT_REJECT:
+            suspect = f"gallery_suspect:character_print:{character_print:.2f}"
+        elif soft_layout >= WEAK_SIDE_PANEL_VIEWS:
+            suspect = f"gallery_suspect:multiple_views:{soft_layout:.2f}"
+        elif WEAK_GOODS_SUSPECT <= card_screen < GOODS_SIGNAL:
+            suspect = f"gallery_suspect:panel_or_goods:{card_screen:.2f}"
+        elif goods and print_signals:
+            suspect = "gallery_suspect:panel_or_goods"
+        if suspect is not None:
+            status = "warning"
+            reasons.append(suspect)
 
     if status != "reject" and multi_score >= MULTI_SUBJECT_REJECT:
         solo_score = max(

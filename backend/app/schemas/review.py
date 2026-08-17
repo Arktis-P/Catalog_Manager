@@ -330,6 +330,12 @@ class V2ReviewCharacterResponse(BaseModel):
     non_human_suggested_rating: int | None = None
     non_human_review_status: str = "pending"
     non_human_evidence: list[str] = Field(default_factory=list)
+    # 자동 검사 provenance (§4). review_note의 auto_inspection_result= marker에서 파생.
+    auto_inspection_outcome: str | None = None
+    auto_inspection_reason: str | None = None
+    auto_inspection_regen_count: int = 0
+    auto_inspection_needs_user_review: bool = False
+    auto_inspection_local_review: str | None = None
 
 
 class V2ReviewCharacterListResponse(BaseModel):
