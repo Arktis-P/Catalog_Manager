@@ -130,9 +130,16 @@ def test_own_character_tag_is_never_treated_as_conflict() -> None:
     assert result.conflicting_character_tag is None
 
 
-def test_check_identity_returns_warning_when_hf_token_missing(tmp_path: Path) -> None:
+def test_check_identity_returns_warning_when_hf_token_missing(monkeypatch, tmp_path: Path) -> None:
     image_path = tmp_path / "image.png"
     image_path.write_bytes(b"placeholder")
+
+    # Force the "no token and no local WD" path deterministically: on machines that have
+    # the local ONNX model cached, the tokenless path would instead run local inference.
+    monkeypatch.setattr(
+        "app.integrations.image_tagger.hf_wd_tagger.local_wd_available",
+        lambda: False,
+    )
 
     result = check_identity(
         image_path,

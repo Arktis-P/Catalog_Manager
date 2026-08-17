@@ -177,6 +177,49 @@ def test_tag_undetected_can_still_repair_semantic_gallery() -> None:
     )
 
 
+def test_female_undetected_tag_only_is_not_actionable() -> None:
+    ctx = RepairContext()
+    assert (
+        decide_repair_stage(
+            gender="1girl",
+            quality_status="pass",
+            identity_status="warning",
+            reasons=["character_tag_undetected"],
+            context=ctx,
+        )
+        == STAGE_DONE
+    )
+    assert ctx.regeneration_requested == 0
+
+
+def test_male_undetected_tag_only_is_not_actionable() -> None:
+    ctx = RepairContext()
+    assert (
+        decide_repair_stage(
+            gender="1boy",
+            quality_status="pass",
+            identity_status="warning",
+            reasons=["boy_character_tag_undetected"],
+            context=ctx,
+        )
+        == STAGE_DONE
+    )
+
+
+def test_undetected_tag_with_semantic_gallery_still_repairs_gallery() -> None:
+    ctx = RepairContext()
+    assert (
+        decide_repair_stage(
+            gender="1girl",
+            quality_status="pass",
+            identity_status="reject",
+            reasons=["character_tag_undetected", "weak_print_gallery"],
+            context=ctx,
+        )
+        == STAGE_SEMANTIC_GALLERY
+    )
+
+
 def test_pass_returns_done() -> None:
     ctx = RepairContext()
     assert (

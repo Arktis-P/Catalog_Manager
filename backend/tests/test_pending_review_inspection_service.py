@@ -12,7 +12,9 @@ from app.models.global_character_image import GlobalCharacterImage
 from app.models.global_character_review import GlobalCharacterReview
 from app.services.identity_checker import IDENTITY_CHECKER_VERSION
 from app.services.inspection_repair import (
+    STAGE_IDENTITY_EYE,
     STAGE_IDENTITY_HAIR,
+    STAGE_IDENTITY_MULTICOLOR,
     STAGE_SEMANTIC_GALLERY,
     STAGE_SEMANTIC_OUTFIT,
 )
@@ -283,9 +285,46 @@ def test_repair_loop_reinspects_after_regeneration(db: Session, monkeypatch) -> 
     assert final_image.id >= second.id
 
 
+def test_stage_unavailable_does_not_consume_regeneration_budget(db: Session, monkeypatch) -> None:
+    character = add_character(db, tag="no_stage_data", review_status="pending")
+    image = character.images[0]
+    image.quality_status = "pass"
+    image.identity_status = "warning"
+    image.identity_reasons = '["character_tag_low_confidence"]'
+    image.quality_checker_version = QUALITY_CHECKER_VERSION
+    image.identity_checker_version = IDENTITY_CHECKER_VERSION
+    db.commit()
+
+    service = PendingReviewInspectionService(db)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("regeneration must not run when no collected stage data exists")
+
+    monkeypatch.setattr(service, "_regenerate_capped", fail_if_called)
+
+    summary = PendingInspectionSummary(requested_limit=1)
+    _final, context, auto_zero = service._repair_with_stages(
+        character,
+        image,
+        auto_regenerate=True,
+        max_regenerations=2,
+        cleanup_rejected=False,
+        summary=summary,
+    )
+
+    assert context.regeneration_requested == 0
+    assert summary.regeneration_requested == 0
+    assert auto_zero is True
+    assert context.final_action == "0성"
+    assert STAGE_IDENTITY_MULTICOLOR in context.unavailable_stages
+    assert STAGE_IDENTITY_EYE in context.unavailable_stages
+
+
 def test_identity_persistent_failure_auto_zeros_without_semantic(db: Session, monkeypatch) -> None:
     character = add_character(db, tag="identity_zero", review_status="pending")
     character.gender = "1boy"
+    character.primary_hair_color = "blue_hair"
+    character.base_prompt = "head, blue hair"
     image = character.images[0]
     image.quality_status = "pass"
     image.identity_status = "warning"
