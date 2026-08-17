@@ -463,36 +463,41 @@ class V2GenerationPipeline:
         existing_keys = {_tag_key(tag) for tag in existing_tags}
 
         if stage == STAGE_IDENTITY_HAIR:
+            # Always reinforce the character's collected primary hair. Relevance rows
+            # only fill the gap when primary_hair_color is missing — never override it
+            # with a second-choice / conflicting colour.
             hair_rows = self._relevance_rows(character.id, "hair_color")
-            expected = hair_rows[0].tag if hair_rows else character.primary_hair_color
+            expected = character.primary_hair_color or (hair_rows[0].tag if hair_rows else None)
             if not expected:
                 return None
             expected_key = _tag_key(expected)
-            primary_key = _tag_key(character.primary_hair_color or "")
-            if expected_key in existing_keys and expected_key == primary_key:
+            if expected_key in existing_keys:
                 # Collected hair is already in the prompt; the generator simply produced
-                # the wrong colour. Keep the expected hair and regenerate once instead of
-                # substituting a second-choice alternate colour.
+                # the wrong colour. Keep the expected hair and regenerate once.
                 return PromptVariant(
                     base_prompt=base_prompt,
-                    primary_hair_color=character.primary_hair_color,
+                    primary_hair_color=expected,
                     multicolor_tags=(),
                     revision_level=1,
                     revision_reason=f"reinforce_hair:{expected}",
                 )
+            # Strip other plain hair-colour tags so the collected primary wins.
+            other_hairs = tuple(
+                row.tag
+                for row in hair_rows
+                if _tag_key(row.tag) != expected_key
+            )
             new_prompt = _replace_prompt_tags(
                 base_prompt,
-                remove=(character.primary_hair_color or "",),
+                remove=other_hairs,
                 add=(expected,),
             )
-            if new_prompt == base_prompt and expected_key == primary_key:
-                return None
             return PromptVariant(
                 base_prompt=new_prompt,
                 primary_hair_color=expected,
                 multicolor_tags=(),
                 revision_level=1,
-                revision_reason=f"expected_hair:{character.primary_hair_color}->{expected}",
+                revision_reason=f"expected_hair:{expected}",
             )
 
         if stage == STAGE_IDENTITY_MULTICOLOR:

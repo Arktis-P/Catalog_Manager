@@ -133,8 +133,10 @@ def test_hair_stage_reinforces_expected_hair_when_present(db: Session) -> None:
 
 
 def test_hair_stage_replaces_wrong_prompt_hair_with_collected(db: Session) -> None:
-    character = make_character(db, base_prompt="head, green hair, dress", hair="green_hair")
+    # Prompt drifted to a wrong colour while primary remains the collected truth.
+    character = make_character(db, base_prompt="head, green hair, dress", hair="blue_hair")
     add_relevance(db, character.id, category="hair_color", tag="blue_hair", score=0.95)
+    add_relevance(db, character.id, category="hair_color", tag="green_hair", score=0.2)
 
     variant = V2GenerationPipeline(db).build_stage_variant(
         character, stage=STAGE_IDENTITY_HAIR, identity=warning_identity(["hair_color_mismatch"])
@@ -144,6 +146,21 @@ def test_hair_stage_replaces_wrong_prompt_hair_with_collected(db: Session) -> No
     assert "blue hair" in variant.base_prompt
     assert "green hair" not in variant.base_prompt
 
+
+def test_hair_stage_never_overrides_primary_with_relevance_top(db: Session) -> None:
+    character = make_character(db, base_prompt="head, blonde hair, dress", hair="blonde_hair")
+    # Relevance top conflicts with primary — must still reinforce blonde.
+    add_relevance(db, character.id, category="hair_color", tag="brown_hair", score=0.99)
+    add_relevance(db, character.id, category="hair_color", tag="blonde_hair", score=0.5)
+
+    variant = V2GenerationPipeline(db).build_stage_variant(
+        character, stage=STAGE_IDENTITY_HAIR, identity=warning_identity(["hair_color_mismatch"])
+    )
+    assert variant is not None
+    assert variant.primary_hair_color == "blonde_hair"
+    assert "blonde hair" in variant.base_prompt
+    assert "brown hair" not in variant.base_prompt
+    assert variant.revision_reason == "reinforce_hair:blonde_hair"
 
 def test_hair_stage_unavailable_without_data(db: Session) -> None:
     character = make_character(db, base_prompt="head, dress", hair="")
